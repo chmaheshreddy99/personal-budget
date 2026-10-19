@@ -8,6 +8,7 @@ import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.service.ClaimService;
 import com.aditya.personalbudget.service.EmiService;
+import com.aditya.personalbudget.storage.TsvDataStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -31,8 +32,10 @@ public class InterestPostingJob implements ApplicationRunner {
     private final OrganizationRepository tenants;
     private final ClaimService claims;
     private final EmiService emis;
+    private final TsvDataStore store;
 
-    public InterestPostingJob(OrganizationRepository tenants, ClaimService claims, EmiService emis) {
+    public InterestPostingJob(OrganizationRepository tenants, ClaimService claims, EmiService emis, TsvDataStore store) {
+        this.store = store;
         this.tenants = tenants;
         this.claims = claims;
         this.emis = emis;
@@ -57,7 +60,11 @@ public class InterestPostingJob implements ApplicationRunner {
 
     @Scheduled(cron = "0 15 0 * * *")
     public void nightly() {
-        postAll();
+        try {
+            postAll();
+        } finally {
+            store.endRequest();   // the scheduler thread keeps nothing it read until the next night
+        }
     }
 
     void postAll() {

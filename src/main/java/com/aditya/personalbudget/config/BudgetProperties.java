@@ -8,7 +8,33 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Typed view of the {@code budget.*} settings in application.yml.
  */
 @ConfigurationProperties(prefix = "budget")
-public record BudgetProperties(String dataDir, Security security, Seed seed, Interest interest, Attachments attachments) {
+public record BudgetProperties(String dataDir, Security security, Seed seed, Interest interest, Attachments attachments,
+                               Storage storage) {
+
+    /** Where the tables live: tab-separated files in the data folder (default) or a Google spreadsheet. */
+    public record Storage(StorageType type, GoogleSheets googleSheets) {
+        public Storage {
+            type = type == null ? StorageType.FILES : type;
+            googleSheets = googleSheets == null ? new GoogleSheets(null, null, null, false) : googleSheets;
+        }
+    }
+
+    public enum StorageType { FILES, GOOGLE_SHEETS }
+
+    /**
+     * A Google spreadsheet, opened with a service account's JSON key. A relative {@code credentialsFile} is looked up
+     * next to the jar first, then in the working directory.
+     */
+    public record GoogleSheets(String spreadsheetId, String credentialsFile, Integer timeoutSeconds, boolean importLocalData) {
+        public GoogleSheets {
+            credentialsFile = credentialsFile == null || credentialsFile.isBlank() ? "config/google-credentials.json" : credentialsFile;
+            timeoutSeconds = timeoutSeconds == null ? 30 : timeoutSeconds;
+        }
+    }
+
+    public Storage storage() {
+        return storage == null ? new Storage(null, null) : storage;
+    }
 
     /** Interest on money lent and owed. */
     public record Interest(DayCount dayCount) {

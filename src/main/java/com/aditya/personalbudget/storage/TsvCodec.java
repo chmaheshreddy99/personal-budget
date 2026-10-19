@@ -59,7 +59,7 @@ final class TsvCodec {
         throw new IllegalArgumentException("Unsupported column type " + type.getName());
     }
 
-    private static String escape(String s) {
+    static String escape(String s) {
         StringBuilder out = new StringBuilder(s.length());
         for (char ch : s.toCharArray()) {
             switch (ch) {
@@ -73,7 +73,7 @@ final class TsvCodec {
         return out.toString();
     }
 
-    private static String unescape(String s) {
+    static String unescape(String s) {
         StringBuilder out = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {
             char ch = s.charAt(i);

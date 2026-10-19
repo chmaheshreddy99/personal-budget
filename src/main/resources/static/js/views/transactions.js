@@ -187,6 +187,6 @@ export function entryCell(e) {
     const shown = shortNarration(e.narration, e.chitTrail, e.party);
     const party = partyAdds(e.party, shown, e.chitTrail) ? e.party : '';
     return `<div class="entry-cell">${kindChip(e.voucherType, 'sm', e.voucherLabel)}
-        <span class="entry-text">${projectTag(e.construction)}<b class="ellipsis" title="${esc(e.narration)}">${esc(shown)}</b>${party ? `<span class="entry-party ellipsis">${esc(party)}</span>` : ''}</span>
+        <span class="entry-text">${projectTag(e.construction)}<b class="ellipsis" title="${esc(e.narration)}">${esc(shown)}</b>${e.notes ? `<span class="note-mark" title="${esc(e.notes)}">${icon('file-text')}</span>` : ''}${party ? `<span class="entry-party ellipsis">${esc(party)}</span>` : ''}</span>
         ${evidenceBadge(e.attachmentCount)}${e.reversedBy ? `<span class="mini-flag" title="Reversed">${icon('undo')}</span>` : ''}</div>`;
 }

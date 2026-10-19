@@ -47,7 +47,11 @@ public final class JournalDtos {
                             /* a hosted chit's money: where it stands (collection moved or awaiting, the move's type and payout) */
                             com.aditya.personalbudget.service.ChitTrailService.Trail chitTrail,
                             /* a construction project's entry: which project, and what it was */
-                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction) {
+                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction,
+                            /* the optional note recorded with the entry */
+                            String notes,
+                            /* INCOME or TRANSFER: a quick entry that is edited with the quick form; null otherwise */
+                            String quickEdit) {
     }
 
     /** An expense posted from the Expenses screen. {@code notes} is kept as the memo of the expense line. */
@@ -96,6 +100,8 @@ public final class JournalDtos {
      * A quick income / expense / transfer. Posted as: debit {@code toAccountId}, credit {@code fromAccountId}.
      * An expense needs only the paying account ({@code fromAccountId}) and the category: it is booked to the
      * Expenses account. An income needs only the receiving account ({@code toAccountId}) and the category.
+     * {@code notes} is an optional note kept with the entry; {@code version} guards an edit against a change made
+     * meanwhile.
      */
     public record QuickTransactionRequest(
             @NotNull QuickKind kind,
@@ -106,6 +112,8 @@ public final class JournalDtos {
             Long categoryId,
             @Size(max = 255) String narration,
             @Size(max = 60) String reference,
-            @Size(max = 100) String party) {
+            @Size(max = 100) String party,
+            @Size(max = 1000) String notes,
+            Long version) {
     }
 }

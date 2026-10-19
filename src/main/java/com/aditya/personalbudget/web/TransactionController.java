@@ -60,6 +60,13 @@ public class TransactionController {
         return transactions.postQuick(request);
     }
 
+    /** Edits an income or a transfer posted with the quick form. */
+    @PutMapping("/quick/{id}")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public EntryView updateQuick(@PathVariable Long id, @Valid @RequestBody QuickTransactionRequest request) {
+        return transactions.updateQuick(id, request);
+    }
+
     @PostMapping("/journal")
     @RequiresPermission(Permission.MANAGE_JOURNALS)
     public EntryView createJournal(@Valid @RequestBody ManualJournalRequest request) {

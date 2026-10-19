@@ -178,6 +178,7 @@ public class ActivityRecorder implements HandlerInterceptor, ResponseBodyAdvice<
         if (path.startsWith("/budgets")) return of(verb, "Budgets", post ? "Set a budget" : "Removed a budget", details);
         if (path.startsWith("/recurring")) return of(verb, "Budgets", post ? "Changed a recurring item" : put ? "Edited a recurring item" : "Deleted a recurring item", details);
 
+        if (path.matches("/transactions/quick/\\d+")) return of(verb, "Journal", "Edited an income or transfer", details);
         if (path.startsWith("/transactions/quick")) return of("POSTED", "Journal", "Posted a transaction", details);
         if (path.startsWith("/transactions/journal")) return of("ADDED", "Journal", "Added a journal voucher", details);
         if (path.matches("/transactions/\\d+/reverse")) return of("REVERSED", "Journal", "Reversed an entry", details);

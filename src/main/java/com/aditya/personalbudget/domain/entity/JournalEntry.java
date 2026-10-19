@@ -61,6 +61,10 @@ public class JournalEntry implements TenantOwned {
     @Column(length = 100)
     private String party;
 
+    /** Optional free-text note (an income, a transfer, a card bill payment ...), shown with the entry. */
+    @Column(length = 1000)
+    private String notes;
+
     /** Total of the debit side (= total of the credit side). */
     @Positive
     @Column(nullable = false)

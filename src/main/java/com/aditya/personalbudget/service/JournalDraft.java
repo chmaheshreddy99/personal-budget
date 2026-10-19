@@ -53,6 +53,7 @@ public final class JournalDraft {
     private boolean lastSkipped;
     private String reference;
     private String party;
+    private String notes;
     private String sourceType;
     private Long sourceId;
 
@@ -128,6 +129,11 @@ public final class JournalDraft {
         return this;
     }
 
+    public JournalDraft notes(String notes) {
+        this.notes = notes;
+        return this;
+    }
+
     public JournalDraft source(String sourceType, Long sourceId) {
         this.sourceType = sourceType;
         this.sourceId = sourceId;
@@ -156,6 +162,10 @@ public final class JournalDraft {
 
     public String party() {
         return party;
+    }
+
+    public String notes() {
+        return notes;
     }
 
     public String sourceType() {

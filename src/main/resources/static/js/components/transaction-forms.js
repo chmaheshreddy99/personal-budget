@@ -1,6 +1,7 @@
 /**
  * Dialogs for posting money movements, shared by every page:
- *  - openQuickEntry(): expense / income / transfer (plus lend, borrow, card bill shortcuts)
+ *  - openQuickEntry(): expense / income / transfer (plus lend, borrow, card bill shortcuts); also edits an income
+ *    or a transfer posted with it (entry = the posted entry)
  *  - openJournalEditor(): multi-line double-entry journal (create or edit)
  *  - openEntryDetail(): read-only view of a posted entry with edit / delete
  */
@@ -45,20 +46,39 @@ const SHORTCUTS = [
     { label: 'Bill to pay later', kind: 'EXPENSE', from: 'PAYABLE', hint: 'Expense on credit (Payables)' },
 ];
 
-export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } = {}) {
+/**
+ * The form values of a posted quick income / transfer. A description that is just what the server would make up
+ * (the category, or "Bank to Card") is left empty, so it follows a changed category or account.
+ */
+function quickValues(e) {
+    const dr = e.lines.find(l => Number(l.debit) > 0), cr = e.lines.find(l => Number(l.credit) > 0);
+    const income = e.quickEdit === 'INCOME';
+    const madeUp = income ? cr?.accountName : `${cr?.ledgerAccountName} to ${dr?.ledgerAccountName}`;
+    return {
+        entryDate: e.entryDate, amount: Number(e.amount), party: e.party, reference: e.reference, notes: e.notes,
+        narration: e.narration === madeUp ? '' : e.narration,
+        toAccountId: dr?.accountId, fromAccountId: income ? null : cr?.accountId, categoryId: income ? cr?.categoryId : null,
+    };
+}
+
+/** Where a note is asked for: an income, and a transfer (a card bill, a repayment, a deposit ...). */
+const takesNote = k => k === 'INCOME' || k === 'TRANSFER';
+
+export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {}, entry = null } = {}) {
     const saveKey = newRequestKey();   // one key per dialog: a retry or a second click saves once
     const accounts = await loadAccounts();
     const categories = { EXPENSE: await categoriesOf('EXPENSE'), INCOME: await categoriesOf('INCOME') };
-    let current = kind;
+    let current = entry ? entry.quickEdit : kind;
+    const initial = entry ? quickValues(entry) : preset;
 
     const formHtml = (k, values = {}) => {
         const cfg = KINDS[k];
         return `
-        <div class="row wrap" style="margin-bottom:12px">
+        ${entry ? '' : `<div class="row wrap" style="margin-bottom:12px">
             <div class="tabs" data-kind-tabs>${Object.entries(KINDS).map(([key, c]) =>
                 `<button type="button" class="tab ${key === k ? 'active' : ''}" data-kind="${key}">${icon(c.iconName)}${c.label}</button>`).join('')}
             </div>
-        </div>
+        </div>`}
         <form class="form-grid two" data-quick-form data-suggest-kinds="${k}">
             ${field({ label: 'Date', name: 'entryDate', type: 'date', value: values.entryDate || isoDate(), required: true })}
             ${field({ label: 'Amount', name: 'amount', type: 'number', value: values.amount || '', required: true, attrs: 'min="0.01"' })}
@@ -74,31 +94,38 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
                       placeholder: k === 'EXPENSE' ? 'e.g. Weekly groceries' : '' })}
             ${field({ label: 'Payee / payer', name: 'party', value: values.party || '' })}
             ${field({ label: 'Reference', name: 'reference', value: values.reference || '', placeholder: 'Bill / UPI ref' })}
-            <div class="span-2">${evidenceFieldHtml({ hint: k === 'TRANSFER' ? 'Transfer screenshot or slip' : 'Receipt, bill or screenshot' })}</div>
-            <div class="span-2">
+            ${takesNote(k) ? field({ label: 'Note (optional)', name: 'notes', type: 'textarea', value: values.notes || '', span: 'span-2 qe-note',
+                      attrs: 'maxlength="1000" rows="2"',
+                      placeholder: k === 'INCOME' ? 'e.g. October salary incl. 4,000 arrears' : 'e.g. Paid the full September statement' }) : ''}
+            <div class="span-2">${entry
+                ? `<div data-ev-entry="${entry.id}" data-ev-count="${entry.attachmentCount || 0}"></div>`
+                : evidenceFieldHtml({ hint: k === 'TRANSFER' ? 'Transfer screenshot or slip' : 'Receipt, bill or screenshot' })}</div>
+            ${entry ? '' : `<div class="span-2">
                 <div class="section-title">Shortcuts</div>
                 <div class="row wrap">${SHORTCUTS.map((s, i) =>
                     `<button type="button" class="btn sm" data-shortcut="${i}" title="${esc(s.hint)}">${esc(s.label)}</button>`).join('')}</div>
-            </div>
+            </div>`}
         </form>`;
     };
 
     const modal = openModal({
-        title: 'New transaction', iconName: 'plus', size: 'lg',
-        body: `<div data-quick-root>${formHtml(current, preset)}</div>`,
+        title: entry ? `Edit ${entry.entryNo} · ${KINDS[current].label}` : 'New transaction', iconName: entry ? 'edit' : 'plus', size: 'lg',
+        body: `<div data-quick-root>${formHtml(current, initial)}</div>`,
         actions: [
-            { label: 'Journal entry…', iconName: 'journal', left: true, onClick: () => { openJournalEditor({ onSaved }); } },
+            ...(entry ? [] : [{ label: 'Journal entry…', iconName: 'journal', left: true, onClick: () => { openJournalEditor({ onSaved }); } }]),
             { label: 'Cancel' },
             {
-                label: 'Save', kind: 'primary', iconName: 'check',
+                label: entry ? 'Save changes' : 'Save', kind: 'primary', iconName: 'check',
                 onClick: async (m) => {
                     const form = m.el.querySelector('[data-quick-form]');
                     if (!form.reportValidity()) return true;
-                    const data = readForm(form);
-                    const saved = await api.post('/transactions/quick', { ...data, kind: current }, { key: saveKey });
+                    const data = { ...readForm(form), kind: current };
+                    const saved = entry
+                        ? await api.put(`/transactions/quick/${entry.id}`, { ...data, version: entry.version ?? null }, { key: saveKey })
+                        : await api.post('/transactions/quick', data, { key: saveKey });
                     await evidence?.uploadTo(saved.id);
                     invalidateAccounts();
-                    toast(`${KINDS[current].label} of ${money(saved.amount)} posted as ${saved.entryNo}`);
+                    toast(entry ? `${saved.entryNo} updated` : `${KINDS[current].label} of ${money(saved.amount)} posted as ${saved.entryNo}`);
                     onSaved?.(saved);
                 },
             },
@@ -121,7 +148,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
         root.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
             const values = readForm(root.querySelector('form'));
             rerender(b.dataset.kind, { entryDate: values.entryDate, amount: values.amount, narration: values.narration,
-                fromAccountId: values.fromAccountId, toAccountId: values.toAccountId });
+                fromAccountId: values.fromAccountId, toAccountId: values.toAccountId, notes: values.notes });
         }));
         root.querySelectorAll('[data-shortcut]').forEach(b => b.addEventListener('click', () => {
             const s = SHORTCUTS[Number(b.dataset.shortcut)];
@@ -136,7 +163,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
                 entryDate: values.entryDate, amount: values.amount, narration: s.label,
                 fromAccountId: s.from ? pick(s.from) : defaultBank(),
                 toAccountId: s.to ? pick(s.to) : (s.kind === 'TRANSFER' ? defaultBank() : null),
-                categoryId: values.categoryId,
+                categoryId: values.categoryId, notes: values.notes,
             });
         }));
         if (rerendered) {
@@ -290,6 +317,8 @@ export async function openEntryDetail(entryId, { onChanged } = {}) {
             },
         });
         actions.push({ label: 'Edit', iconName: 'edit', onClick: () => { openJournalEditor({ entry, onSaved: onChanged }); } });
+    } else if (entry.quickEdit && can('POST_TRANSACTIONS')) {
+        actions.push({ label: 'Edit', iconName: 'edit', onClick: () => { openQuickEntry({ entry, onSaved: onChanged }); } });
     }
     actions.push({ label: 'Close', kind: 'primary' });
 
@@ -303,6 +332,7 @@ export async function openEntryDetail(entryId, { onChanged } = {}) {
                 <div class="stat"><div class="label">Reference</div><div class="value">${esc(entry.reference || '—')}</div></div>
             </div>
             <p style="margin:0 0 10px"><b>${esc(entry.narration)}</b></p>
+            ${entry.notes ? `<div class="ed-note" style="margin:0 0 10px">${icon('file-text')}<div class="min-0"><small>Note</small><p>${esc(entry.notes)}</p></div></div>` : ''}
             ${linesTable}
             <p class="hint" style="margin-top:10px">Posted by ${esc(entry.createdBy)} on ${date(entry.createdAt)}</p>`,
     });

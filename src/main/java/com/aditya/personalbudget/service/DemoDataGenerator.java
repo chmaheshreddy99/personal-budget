@@ -265,7 +265,7 @@ public class DemoDataGenerator {
         if (date.isAfter(today)) {
             return;
         }
-        transactions.postQuick(new QuickTransactionRequest(kind, date, bd(amount), from, to, category, narration, null, null));
+        transactions.postQuick(new QuickTransactionRequest(kind, date, bd(amount), from, to, category, narration, null, null, null, null));
     }
 
     /** Loan EMI split into principal (reduces the loan) and interest (an expense). */

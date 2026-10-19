@@ -123,6 +123,19 @@ public class LedgerService {
                 || (SOURCE_QUICK.equals(entry.getSourceType()) && entry.getVoucherType() == VoucherType.EXPENSE);
     }
 
+    /**
+     * An income or a transfer (a card bill, a deposit ...) posted with the quick form: it is edited with that form,
+     * as long as it is still the simple two-line entry it was posted as and has not been reversed.
+     */
+    public static boolean isQuickIncomeOrTransfer(JournalEntry entry) {
+        return SOURCE_QUICK.equals(entry.getSourceType())
+                && (entry.getVoucherType() == VoucherType.INCOME || entry.getVoucherType() == VoucherType.TRANSFER);
+    }
+
+    private static boolean isQuickEditable(JournalEntry e, int lineCount, Map<Long, JournalEntry> reversals) {
+        return isQuickIncomeOrTransfer(e) && lineCount == 2 && !reversals.containsKey(e.getId());
+    }
+
     // ================================================================== posting
 
     @Transactional
@@ -270,7 +283,8 @@ public class LedgerService {
                     voucherLabel(e), e.getNarration(), e.getReference(), e.getParty(), e.getAmount(),
                     e.getSourceType(), e.getSourceId(), isManual(e), e.getCreatedBy(), e.getCreatedAt(), lineViews,
                     lock.reason(), lock.manageAt(), lock.reversible(), lock.reversedBy(), lock.reversalOf(),
-                    claimIdOf(e), e.getVersion(), evidence.getOrDefault(e.getId(), 0), chitTrails.get(e.getId()), projects.get(e.getId()));
+                    claimIdOf(e), e.getVersion(), evidence.getOrDefault(e.getId(), 0), chitTrails.get(e.getId()), projects.get(e.getId()),
+                    e.getNotes(), isQuickEditable(e, lineViews.size(), reversals) ? e.getVoucherType().name() : null);
         }).toList();
     }
 
@@ -289,6 +303,10 @@ public class LedgerService {
         }
         if (isExpense(e)) {
             return new Lock("Posted from Expenses. Edit or delete it there.", "expenses", false, reversedBy, null);
+        }
+        if (isQuickIncomeOrTransfer(e) && reversedBy == null) {
+            return new Lock((e.getVoucherType() == VoucherType.INCOME ? "Income" : "A transfer")
+                    + " posted with the quick form. Edit it from the entry, or reverse it.", null, true, null, null);
         }
         if (source.startsWith("EMI_")) {
             return new Lock("Bought on EMI. Pay, undo or pay it off in Expenses, EMIs.", "expenses/emi", false, reversedBy, null);
@@ -459,6 +477,7 @@ public class LedgerService {
         entry.setNarration(narration == null || narration.isBlank() ? draft.voucherType().getLabel() : narration);
         entry.setReference(draft.reference());
         entry.setParty(draft.party());
+        entry.setNotes(draft.notes() == null || draft.notes().isBlank() ? null : draft.notes().strip());
         entry.setAmount(total);
         entry.setSourceType(draft.sourceType());
         entry.setSourceId(draft.sourceId());

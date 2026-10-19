@@ -87,6 +87,30 @@ public class TransactionService {
 
     @Transactional
     public EntryView postQuick(QuickTransactionRequest request) {
+        return get(ledger.post(quickDraft(request)).getId());
+    }
+
+    /**
+     * Edits an income or a transfer (a card bill, a deposit ...) posted with the quick form, keeping its number:
+     * date, amount, accounts, category, description, party, reference and note can all change, its kind cannot.
+     * A reversed one is left as it is (the reversal mirrors it).
+     */
+    @Transactional
+    public EntryView updateQuick(Long id, QuickTransactionRequest request) {
+        EntryView current = get(id);
+        if (current.quickEdit() == null) {
+            String reason = current.lockReason() != null ? current.lockReason() : "Edit it in the journal.";
+            throw new BusinessException(current.entryNo() + " cannot be edited with the quick form. " + reason);
+        }
+        require(current.quickEdit().equals(request.kind().name()),
+                current.entryNo() + " is " + (current.voucherType() == VoucherType.INCOME ? "an income" : "a transfer")
+                        + " and stays one: reverse it and post it again to change what it is");
+        JournalDraft draft = quickDraft(request);
+        return get(ledger.repost(id, draft, request.version()).getId());
+    }
+
+    /** Debit "to", credit "from"; an expense lands on Expenses and an income comes from Income. */
+    private JournalDraft quickDraft(QuickTransactionRequest request) {
         // an expense lands on Expenses and an income comes from Income: the category says what it was
         Long fromId = request.kind() == QuickKind.INCOME ? ledger.systemAccount(DefaultChartOfAccounts.INCOME).getId() : request.fromAccountId();
         Long toId = request.kind() == QuickKind.EXPENSE ? ledger.systemAccount(DefaultChartOfAccounts.EXPENSES).getId() : request.toAccountId();
@@ -126,13 +150,14 @@ public class TransactionService {
                 case TRANSFER -> from.getName() + " to " + to.getName();
             };
         }
-        JournalDraft draft = JournalDraft.of(request.entryDate(), voucherType, narration)
+        require(!from.getId().equals(to.getId()), "Pick two different accounts");
+        return JournalDraft.of(request.entryDate(), voucherType, narration)
                 .debit(to.getId(), request.amount()).category(request.kind() == QuickKind.EXPENSE ? category.getId() : null)
                 .credit(from.getId(), request.amount()).category(request.kind() == QuickKind.INCOME ? category.getId() : null)
                 .reference(request.reference())
                 .party(request.party())
+                .notes(request.notes())
                 .source(request.kind() == QuickKind.EXPENSE ? LedgerService.SOURCE_EXPENSE : LedgerService.SOURCE_QUICK, null);
-        return get(ledger.post(draft).getId());
     }
 
     // ================================================================== manual journals
@@ -205,11 +230,11 @@ public class TransactionService {
         }
     }
 
-    /** Free text: entry number (EX-000123), internal id (123 or #123), narration, reference or party. */
+    /** Free text: entry number (EX-000123), internal id (123 or #123), narration, reference, party or note. */
     private static boolean matches(JournalEntry e, String text) {
         String id = text.startsWith("#") ? text.substring(1) : text;
         if (id.equals(String.valueOf(e.getId()))) return true;
-        return Stream.of(e.getEntryNo(), e.getNarration(), e.getReference(), e.getParty())
+        return Stream.of(e.getEntryNo(), e.getNarration(), e.getReference(), e.getParty(), e.getNotes())
                 .anyMatch(v -> v != null && v.toLowerCase(Locale.ROOT).contains(text));
     }
 }

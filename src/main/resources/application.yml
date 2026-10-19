@@ -26,8 +26,22 @@ server:
     enabled: true
 
 budget:
-  # Folder (relative to the working directory) holding one .tbl file per table
+  # Folder (relative to the working directory) holding one .tbl file per table; with Google Sheets storage it still
+  # holds evidence attachments, settings and the lock file
   data-dir: data
+  # Where the tables are stored. Override these in config/application.yml next to the jar (see config/application.yml.sample)
+  storage:
+    # files = tab-separated files in data-dir; google-sheets = one tab per table in a Google spreadsheet
+    type: files
+    google-sheets:
+      # the id in the spreadsheet's address: docs.google.com/spreadsheets/d/<spreadsheet-id>/edit
+      spreadsheet-id:
+      # the service account's JSON key; a relative path is looked up next to the jar first, then in the working directory.
+      # Share the spreadsheet with the service account's e-mail address (client_email in the key) as an Editor.
+      credentials-file: config/google-credentials.json
+      timeout-seconds: 30
+      # on the first start against an empty spreadsheet, copy the tables in data-dir into it
+      import-local-data: false
   security:
     # Roles are always enforced: see RolePolicy for who may do what. A viewer can only read.
     session-hours: 12

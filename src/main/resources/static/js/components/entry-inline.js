@@ -3,11 +3,14 @@
  * instead of in a popup. A compact strip: debit and credit postings as pills, then one line of
  * facts (entry, date, party, who posted it) with the actions that apply.
  *
- * Only manual journal vouchers can be edited or deleted here. Entries posted automatically by a
- * feature (an expense, a transfer, a chit payment, money lent ...) simply offer no edit buttons;
+ * Only manual journal vouchers can be edited or deleted here, plus incomes and transfers posted with the quick form
+ * (they open that form again). Other entries posted automatically by a feature (an expense, a chit payment, money
+ * lent ...) simply offer no edit buttons;
  * they link to the screen that manages them, and offer "Reverse" where a correcting entry is the fix.
  * An entry of money lent or borrowed (the loan, a repayment, a month of interest) shows only what it is within
  * that item and a link to the item in Expenses, where it is managed.
+ *
+ * A note recorded with the entry is shown as its own callout under the postings, line breaks kept.
  */
 import { api } from '../core/api.js';
 import { can } from '../core/store.js';
@@ -15,7 +18,7 @@ import { esc, toast, confirmDialog, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
 import { chitTrailChips, chitTrailHtml } from '../core/chit-trail.js';
-import { openJournalEditor } from './transaction-forms.js';
+import { openJournalEditor, openQuickEntry } from './transaction-forms.js';
 import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim-panel.js';
 
 const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
@@ -54,6 +57,7 @@ export async function toggleEntryRow(row, entry, { onChanged } = {}) {
         const action = btn.dataset.entryAction;
         try {
             if (action === 'edit') openJournalEditor({ entry: data, onSaved: onChanged });
+            if (action === 'quick-edit') openQuickEntry({ entry: data, onSaved: onChanged });
             if (action === 'copy') openJournalEditor({ entry: data, copy: true, onSaved: onChanged });
             if (action === 'close') toggleEntryRow(row, data);
             if (action === 'more') {
@@ -118,6 +122,12 @@ function claimEntryHtml(e, claim) {
     </div>`;
 }
 
+/** The entry's note: a labelled callout that keeps the writer's line breaks. */
+export function entryNoteHtml(notes) {
+    if (!notes) return '';
+    return `<div class="ed-note">${icon('file-text')}<div class="min-0"><small>Note</small><p>${esc(notes)}</p></div></div>`;
+}
+
 /**
  * Each account the entry touches, with its balance just before and just after this entry (the stored snapshots,
  * in ledger order): one slim line per account, the amounts being in the pills above.
@@ -151,6 +161,7 @@ function detailHtml(e) {
             <span class="ed-arrow" title="Debit ← Credit">${icon('chevron-left')}</span>
             <div class="ed-side">${credits}</div>
         </div>
+        ${entryNoteHtml(e.notes)}
         ${balancesHtml(e.lines)}
         ${chitTrailHtml(e.chitTrail)}
         <div class="ed-bar">
@@ -165,6 +176,7 @@ function detailHtml(e) {
             ${memos.length ? fact('info', memos.join(' · '), 'memo') : ''}
             <span class="spacer"></span>
             ${manageJournals && e.editable ? `<button class="btn sm" data-entry-action="edit">${icon('edit')}Edit</button>` : ''}
+            ${e.quickEdit && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="quick-edit" title="Change the date, amount, accounts, details or note">${icon('edit')}Edit</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon" data-entry-action="copy" title="Duplicate">${icon('copy')}</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
             ${e.manageAt && !e.claimId && !location.hash.startsWith(`#/${manageTarget(e)}`) ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}

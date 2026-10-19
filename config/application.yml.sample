@@ -1,0 +1,28 @@
+# Settings outside the jar. Copy this file to application.yml in the "config" folder next to the jar
+# (build/libs/config/ after a build; ./config/ of the working directory works too) and change what you need:
+# anything set here overrides the built-in application.yml.
+#
+# Storing the data in Google Sheets
+#   1. Google Cloud console (console.cloud.google.com): create (or pick) a project, then
+#      APIs & Services > Library > "Google Sheets API" > Enable.
+#   2. IAM & Admin > Service accounts > Create service account (no roles needed),
+#      then on it: Keys > Add key > Create new key > JSON. Save the file as config/google-credentials.json
+#      next to the jar. Keep it private: it is the password to the spreadsheet.
+#   3. Create an empty Google spreadsheet, click Share and add the service account's e-mail address
+#      (client_email in the JSON key, like budget@my-project.iam.gserviceaccount.com) as an Editor.
+#   4. Put the spreadsheet's id below: it is the part of its address between /d/ and /edit.
+#   5. Start the app. It adds one tab per table (and a _sequences tab for ids) by itself.
+#      To bring your existing data along, set import-local-data: true for the first start: the .tbl files in
+#      data-dir are copied into the (still empty) spreadsheet; the files themselves are left as they are.
+#
+# Evidence attachments, the app settings file and the lock file stay in data-dir in either case.
+# Run one app per spreadsheet, and edit the spreadsheet by hand only while the app is stopped.
+
+budget:
+  storage:
+    type: google-sheets            # files (default) | google-sheets
+    google-sheets:
+      spreadsheet-id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEf
+      credentials-file: config/google-credentials.json
+      timeout-seconds: 30
+      import-local-data: false

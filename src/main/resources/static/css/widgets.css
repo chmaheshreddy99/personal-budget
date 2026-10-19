@@ -151,6 +151,19 @@ tr.detail-row > td { padding: 0 !important; background: rgba(227, 245, 253, 0.55
 .ed-fact.warn { color: #8a5b00; }
 .ed-fact.memo { white-space: normal; max-width: 420px; }
 .ed-bar .btn.sm { height: 22px; }
+/* the note recorded with an entry: its own callout, line breaks kept */
+.ed-note { display: flex; align-items: flex-start; gap: 8px; max-width: 760px; margin: 2px 0; padding: 6px 10px;
+    border-left: 3px solid var(--brand-gold); border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+    background: linear-gradient(90deg, rgba(201, 154, 59, 0.12), rgba(201, 154, 59, 0.04)); }
+.ed-note > div { flex: 1; min-width: 0; }
+.ed-note > svg { flex: none; width: 13px; height: 13px; margin-top: 2px; color: var(--brand-gold); }
+.ed-note small { display: block; font-size: var(--font-size-xs); font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase; color: #8a6a24; }
+.ed-note p { margin: 1px 0 0; color: var(--text-primary); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+/* a list row whose entry carries a note; the note is the tooltip */
+.note-mark { display: inline-flex; vertical-align: middle; margin-left: 5px; color: var(--brand-gold); cursor: help; }
+.note-mark svg { width: 11px; height: 11px; }
+.qe-note textarea { min-height: 44px; resize: vertical; }
 table.grid.mini { background: rgba(255, 255, 255, 0.75); border-radius: 8px; overflow: hidden; border: 1px solid var(--hairline); }
 table.grid.mini th { position: static; background: rgba(233, 244, 251, 0.9); }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: var(--font-size-sm); }

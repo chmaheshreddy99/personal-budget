@@ -156,7 +156,7 @@ export async function render(container, _params, isCurrent) {
             body: `<div class="scroll" id="in-list">${table([
                 { label: 'Date', render: r => `<b>${shortDate(r.date)}</b> <span class="muted small">${new Date(r.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span>`, cls: 'nowrap' },
                 { label: 'Source', render: r => { const ci = categoryIcon(r.source); return `<span class="cell-flex"><span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><span class="ellipsis">${esc(r.source)}</span></span>`; } },
-                { label: 'Description', render: r => `<span class="strong">${esc(r.entry.narration)}</span>${r.entry.party ? ` <span class="small muted">· ${esc(r.entry.party)}</span>` : ''}` },
+                { label: 'Description', render: r => `<span class="strong">${esc(r.entry.narration)}</span>${r.entry.notes ? `<span class="note-mark" title="${esc(r.entry.notes)}">${icon('file-text')}</span>` : ''}${r.entry.party ? ` <span class="small muted">· ${esc(r.entry.party)}</span>` : ''}` },
                 { label: 'Into', render: r => `<span class="small secondary">${esc(r.into)}</span>` },
                 { label: 'Amount', align: 'r', render: r => `<b class="${r.amount >= 0 ? 'pos' : 'neg'}">${money(r.amount)}</b>` },
                 { label: '', align: 'r', render: () => `<span class="expand-caret">${icon('chevron-down')}</span>` },
@@ -211,9 +211,9 @@ export async function render(container, _params, isCurrent) {
         subtitle: `${date(isoDate(fromD))} – ${date(to)}`, filename: `income-${isoDate(fromD)}-to-${to}`,
         summary: [['Received', total], ['Receipts', period.length, 'number'], ['Per month', Math.round(total / months)], ['Passive share', total ? (passive / total) * 100 : 0, 'percent']],
         sheets: [
-            { name: 'Received', columns: [{ label: 'Date', type: 'date' }, { label: 'Source' }, { label: 'Description' }, { label: 'From' }, { label: 'Into' }, { label: 'Amount', type: 'money' }],
-              rows: list.map(r => [r.date, r.source, r.entry.narration, r.entry.party || '', r.into, r.amount]),
-              totals: ['Total', '', '', '', '', sum(list)] },
+            { name: 'Received', columns: [{ label: 'Date', type: 'date' }, { label: 'Source' }, { label: 'Description' }, { label: 'From' }, { label: 'Into' }, { label: 'Amount', type: 'money' }, { label: 'Note' }],
+              rows: list.map(r => [r.date, r.source, r.entry.narration, r.entry.party || '', r.into, r.amount, r.entry.notes || '']),
+              totals: ['Total', '', '', '', '', sum(list), ''] },
             { name: 'By source', columns: [{ label: 'Source' }, { label: 'Receipts', type: 'number' }, { label: 'Received', type: 'money' }, { label: 'Share', type: 'percent' }],
               rows: sources.filter(s => s.amount).map(s => [s.account.name, s.count, s.amount, total ? (s.amount / total) * 100 : 0]),
               totals: ['Total', period.length, total, 100] },

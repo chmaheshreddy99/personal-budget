@@ -4,7 +4,8 @@ A multi-tenant, double-entry personal finance application: accounts, expenses an
 journals, budgets, balance sheet, reports and forecast.
 
 - **Backend:** Java 21, Spring Boot 4.1, Gradle (Groovy DSL)
-- **Storage:** one tab-separated `.tbl` file per table in `./data`, no database
+- **Storage:** one tab-separated `.tbl` file per table in `./data`, no database; or, as an option, one tab per
+  table in a Google spreadsheet (see [Storing the data in Google Sheets](#storing-the-data-in-google-sheets))
 - **UI:** plain HTML, CSS and JavaScript modules with no frameworks or CDNs. Icons and charts are hand-written SVG.
 
 ## Run
@@ -73,7 +74,15 @@ That covers expenses, transfers, income, chit payments, opening balances, money 
 The expanded row simply offers no edit buttons and links to the screen that manages it.
 - **Expenses** are edited or deleted in Expenses.
 - **Lent and paid-for items** are managed in their lifecycle panel.
-- **Transfers, income and recurring postings** are corrected with **Reverse**, which posts a mirror-image entry linked to the original.
+- **Income and transfers** (a card bill, a repayment, a deposit) posted with the quick form have an **Edit** button
+  on the expanded row: the same form opens with the entry's values, and the date, amount, accounts, category, details
+  and note can change (the entry keeps its number; a change made meanwhile by someone else is refused). They can
+  still be reversed instead; a reversed one is no longer edited.
+- **Recurring postings** are corrected with **Reverse**, which posts a mirror-image entry linked to the original.
+
+**Notes.** An income and a transfer (including **Pay card bill**) take an optional **Note** (up to 1,000 characters,
+line breaks kept). The expanded row shows it as its own callout under the postings, list rows with a note carry a
+small note mark (the note is its tooltip), the Income export has a Note column, and search finds entries by their note.
 
 **Autocomplete everywhere.** Text boxes suggest values from your own history: descriptions, payees, references, institutions, names and notes.
 Picking a past description also fills in the accounts and usual amount from that entry.
@@ -152,6 +161,41 @@ Nothing is cached between requests: the files are the only copy of the data.
 - **Live updates.** After every commit the server announces the changed tables on `/api/events`
   (server-sent events). Every open browser redraws its current page with fresh numbers, so a change made in
   one login shows in the others within a second or two. While a dialog is open, the redraw waits until it closes.
+
+### Storing the data in Google Sheets
+
+The same tables can live in a Google spreadsheet instead of `.tbl` files. Repositories, services and the rules
+above do not change: only the layer that reads and writes whole tables does (`TableStorage`: `LocalFileStorage`
+or `GoogleSheetsStorage`).
+
+- Each table is one tab (header row, frozen, then one row per entity, exactly like a `.tbl` file); the id sequences
+  are the `_sequences` tab. Missing tabs are added on start, and other tabs in the spreadsheet are left alone.
+- Cells are written as plain text (`RAW`): nothing is turned into a number, date or formula, and a line break in a
+  note is a real line break in the cell.
+- **Nothing is kept in memory.** The data is read when it is needed: the first read of a request fetches every
+  table tab in one API call, that copy serves only that request, and it is dropped when the request ends. A save
+  reads the spreadsheet afresh and writes its changes back in one call (two when a tab must grow first) before it
+  ends. So every page shows what the spreadsheet holds at that moment, edits made by hand included.
+- Each request to the app costs one read call, and each save one more read plus one write. Google allows a service
+  account 60 read and 60 write calls a minute by default; busy calls are retried with growing pauses, so a burst of
+  clicks slows down rather than fails. If that limit is reached often, raise it in the Google Cloud console (APIs &
+  Services, Google Sheets API, Quotas).
+- One running app per spreadsheet, and edit it by hand only while the app is stopped: a hand edit made just before
+  the app writes the same tab can be overwritten.
+- Evidence files, `app-settings.properties` and the lock file stay in `data-dir`.
+
+Setup:
+
+1. In the Google Cloud console, enable the **Google Sheets API** for a project, create a **service account** (no
+   roles needed) and add a **JSON key** to it.
+2. Save the key as `config/google-credentials.json` next to the jar. Keep it private.
+3. Create an empty spreadsheet and **share** it, as an Editor, with the service account's e-mail address
+   (`client_email` in the key).
+4. Copy `config/application.yml.sample` (the build puts it in `build/libs/config/`) to `config/application.yml` next
+   to the jar, set `budget.storage.type: google-sheets` and the spreadsheet id (the part of its address between
+   `/d/` and `/edit`).
+5. To bring your existing data along, set `import-local-data: true` for the first start: the `.tbl` files of
+   `data-dir` are copied into the still empty spreadsheet (the files are left as they are).
 
 ### Accounting model
 
@@ -242,9 +286,18 @@ the account is locked for 10 minutes.
 
 ## Configuration (`application.yml`)
 
+The built-in settings can be overridden without touching the jar: put an `application.yml` (or `.properties`) in a
+`config` folder **next to the jar** (`config/application.yml.sample` shows how). Spring Boot's own `./config/` of the
+working directory works too, and so do `--key=value` command-line arguments, which win over both.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `budget.data-dir` | `data` | Folder holding the `.tbl` files |
+| `budget.data-dir` | `data` | Folder holding the `.tbl` files (and, with either storage, evidence files and settings) |
+| `budget.storage.type` | `files` | `files`: `.tbl` files in `data-dir`; `google-sheets`: tabs of a Google spreadsheet |
+| `budget.storage.google-sheets.spreadsheet-id` | not set | The id in the spreadsheet's address: `docs.google.com/spreadsheets/d/<id>/edit` |
+| `budget.storage.google-sheets.credentials-file` | `config/google-credentials.json` | The service account's JSON key; a relative path is looked up next to the jar first, then in the working directory |
+| `budget.storage.google-sheets.timeout-seconds` | `30` | Connect and read timeout of each API call |
+| `budget.storage.google-sheets.import-local-data` | `false` | On a start against an empty spreadsheet, copy the `.tbl` files of `data-dir` into it |
 | `budget.security.session-hours` | `12` | How long a session stays valid |
 | `budget.security.default-user-role` | `ADMIN` | Role for users created without one |
 | `budget.interest.day-count` | `MONTHLY` | Interest per month, 30-day months (`MONTHLY`) or actual days / 365 (`ACTUAL`) |
