@@ -7,7 +7,8 @@
 import { api } from '../core/api.js';
 import { state, can } from '../core/store.js';
 import { panel, kpi, esc, statusBadge, emptyState, openModal } from '../core/ui.js';
-import { kindChip, movementHtml } from '../core/entry-kind.js';
+import { kindChip, movementHtml, projectTag } from '../core/entry-kind.js';
+import { shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, shortDate, daysFromToday, isoDate } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers } from '../core/charts.js';
@@ -18,7 +19,12 @@ import { openCustomizer } from '../components/dashboard-customizer.js';
 import { DASHBOARD_WIDGETS, dashboardLayout } from '../core/prefs.js';
 
 export async function render(container, _params, isCurrent) {
-    const [d, chits] = await Promise.all([api.get('/dashboard'), api.get('/chits').catch(() => [])]);
+    const shownIds = (() => { const l = dashboardLayout(); return l.order.filter(id => !l.hidden.includes(id)); })();
+    // the EMI book and the category history only when their panels are shown (each section may not be shared)
+    const [d, chits, hosted, emiBook, analysis] = await Promise.all([api.get('/dashboard'), api.get('/chits').catch(() => []),
+        api.get('/hosted-chits/summary').catch(() => null),
+        shownIds.includes('emis') ? api.get('/expenses/emis').catch(() => null) : null,
+        shownIds.includes('cattrend') ? api.get('/reports/expense-analysis').catch(() => null) : null]);
     if (!isCurrent()) return;
     const reload = () => render(container, [], isCurrent);
     const k = d.kpis;
@@ -26,6 +32,14 @@ export async function render(container, _params, isCurrent) {
 
     const change = Number(k.netWorthChange);
     const expenseChange = Number(k.expenseChangePercent);
+    // a second fact for each KPI: averages over the completed months of the trend
+    const done = d.monthlyTrend.slice(0, -1).map(p => ({ income: Number(p.income), expense: Number(p.expense) })).filter(p => p.income || p.expense);
+    const mean = list => (list.length ? list.reduce((t, v) => t + v, 0) / list.length : 0);
+    const avgSpend = mean(done.slice(-3).map(p => p.expense));
+    const avgEarn = mean(done.slice(-3).map(p => p.income));
+    const keptYear = mean(done.slice(-12).filter(p => p.income > 0).map(p => ((p.income - p.expense) / p.income) * 100));
+    const cover = avgSpend ? Number(k.liquidBalance) / avgSpend : null;
+    const dayOfMonth = new Date().getDate();
     const totalExpense = d.expenseBreakdown.reduce((s, p) => s + Number(p.value), 0);
     const widgets = layout.order.filter(id => !layout.hidden.includes(id));
     const label = Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, w.label]));
@@ -54,6 +68,15 @@ export async function render(container, _params, isCurrent) {
             actions: `<a class="btn sm ghost icon" href="#/accounts" title="Accounts">${icon('chevron-right')}</a>`, body: accountsHtml(d.accounts) }),
         alloc: () => panel({ title: label.alloc, iconName: 'layers', cls: 'p-alloc', body: allocationHtml(d.assetAllocation, d.liabilityBreakdown) }),
         cashflow: () => panel({ title: label.cashflow, iconName: 'droplet', cls: 'p-cashflow', body: cashflowHtml(k) }),
+        savings: () => panel({ title: label.savings, iconName: 'piggy', sub: 'kept each month', cls: 'p-dsave', bodyClass: 'chart',
+            body: savingsHtml(d.monthlyTrend) }),
+        chitflow: () => panel({ title: label.chitflow, iconName: 'chit', sub: 'next 12 months', cls: 'p-dchitflow', bodyClass: 'chart',
+            actions: `<a class="btn sm ghost icon" href="#/chits" title="Chits">${icon('chevron-right')}</a>`, body: chitFlowHtml(chits) }),
+        emis: () => panel({ title: label.emis, iconName: 'calendar', sub: 'what is still owed', cls: 'p-demis', bodyClass: 'chart',
+            actions: `<a class="btn sm ghost icon" href="#/reports/emi" title="EMI analysis">${icon('chevron-right')}</a>`, body: emisHtml(emiBook, d) }),
+        cattrend: () => panel({ title: label.cattrend, iconName: 'trending', sub: 'top categories, month by month', cls: 'p-dcattrend', bodyClass: 'chart',
+            actions: `<a class="btn sm ghost icon" href="#/reports" title="Reports">${icon('chevron-right')}</a>`, body: catTrendHtml(analysis) }),
+        debt: () => panel({ title: label.debt, iconName: 'scale', sub: 'what you owe', cls: 'p-ddebt', body: debtHtml(d) }),
     };
 
     container.innerHTML = `
@@ -76,15 +99,18 @@ export async function render(container, _params, isCurrent) {
 
         ${layout.bands.kpis ? `<div class="kpis kpi-row">
             ${kpi({ label: 'Net worth', value: money(k.netWorth), iconName: 'scale', tone: 'deep',
-                    sub: `<span class="${change >= 0 ? 'pos' : 'neg'}">${change >= 0 ? '▲' : '▼'} ${moneyShort(Math.abs(change))}</span> this month` })}
+                    sub: `<span class="${change >= 0 ? 'pos' : 'neg'}">${change >= 0 ? '▲' : '▼'} ${moneyShort(Math.abs(change))}</span> this month · own ${moneyShort(k.totalAssets)} · owe ${moneyShort(k.totalLiabilities)}` })}
             ${kpi({ label: 'Cash & bank', value: money(k.liquidBalance), iconName: 'bank',
-                    sub: `Receivables ${moneyShort(k.receivables)} · Payables ${moneyShort(k.payables)}` })}
-            ${kpi({ label: 'Income this month', value: money(k.monthIncome), iconName: 'arrow-in', tone: 'aqua', sub: `Savings ${money(k.monthSavings)}` })}
+                    sub: `${cover !== null ? `<span class="${cover < 3 ? 'neg' : 'pos'}">${cover.toFixed(1)} months</span> of spending · ` : ''}to get ${moneyShort(k.receivables)} · to pay ${moneyShort(k.payables)}` })}
+            ${kpi({ label: 'Income this month', value: money(k.monthIncome), iconName: 'arrow-in', tone: 'aqua',
+                    sub: `Saved ${money(k.monthSavings)}${avgEarn ? ` · usual ${moneyShort(avgEarn)}/mo` : ''}` })}
             ${kpi({ label: 'Spent this month', value: money(k.monthExpense), iconName: 'arrow-out', tone: 'coral',
-                    sub: `<span class="${expenseChange <= 0 ? 'pos' : 'neg'}">${expenseChange > 0 ? '▲' : '▼'} ${percent(Math.abs(expenseChange))}</span> vs last month` })}
-            ${kpi({ label: 'Savings rate', value: percent(k.savingsRate), iconName: 'piggy', tone: 'violet', sub: 'Share of income kept' })}
+                    sub: `<span class="${expenseChange <= 0 ? 'pos' : 'neg'}">${expenseChange > 0 ? '▲' : '▼'} ${percent(Math.abs(expenseChange))}</span> vs last month · ${moneyShort(Number(k.monthExpense) / dayOfMonth)}/day${avgSpend ? ` · usual ${moneyShort(avgSpend)}` : ''}` })}
+            ${kpi({ label: 'Savings rate', value: percent(k.savingsRate), iconName: 'piggy', tone: 'violet',
+                    sub: `Share of income kept${done.length ? ` · 12-mo avg <b>${percent(keptYear, 0)}</b>` : ''}` })}
             ${kpi({ label: 'Chits', value: money(k.chitInvested), iconName: 'chit', tone: 'gold', sub: `${k.activeChits} running · accrued ${moneyShort(k.chitAccruedInterest)}` })}
         </div>` : ''}
+        ${hosted?.running ? hostedDuesHtml(hosted) : ''}
         ${layout.bands.insights ? '<div class="insight-ribbon" id="insight-ribbon"></div>' : ''}
         <div class="dash-grid">${widgets.map(id => `<div class="dash-cell" style="grid-column: span ${layout.spans[id]}">${bodies[id]()}</div>`).join('')
             || emptyState('Every panel is switched off. Use Customize to add some.', 'dashboard')}</div>
@@ -117,6 +143,8 @@ export async function render(container, _params, isCurrent) {
                 <span class="ellipsis">${esc(it.label)}</span><b>${moneyShort(it.value)}</b></div>`).join('');
     }
 
+    drawExtraCharts(container, { d, chits, emiBook, analysis });
+
     container.querySelector('.p-recent')?.addEventListener('click', e => {
         const row = e.target.closest('[data-entry]');
         if (row) openEntryDetail(row.dataset.entry, { onChanged: reload });
@@ -137,6 +165,159 @@ export async function render(container, _params, isCurrent) {
 }
 
 // ===================================================================== panel bodies
+
+const ymOf = date => String(date).slice(0, 7);
+/** The next n months as "YYYY-MM", this month first. */
+function monthsAhead(n) {
+    const now = new Date();
+    return Array.from({ length: n }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+}
+const facts = list => `<div class="dx-facts">${list.filter(Boolean).map(([l, v, cls = '']) => `<span><small>${l}</small><b class="${cls}">${v}</b></span>`).join('')}</div>`;
+
+/** What was kept each month (income − spending), the average and the best month. */
+function savingsHtml(trend) {
+    const pts = trend.filter(p => Number(p.income) || Number(p.expense)).slice(-12);
+    if (pts.length < 2) return emptyState('A couple of months of income and spending show here', 'piggy');
+    const kept = pts.slice(0, -1).map(p => Number(p.income) - Number(p.expense));
+    const rates = pts.slice(0, -1).filter(p => Number(p.income) > 0).map(p => ((Number(p.income) - Number(p.expense)) / Number(p.income)) * 100);
+    const avgKept = kept.length ? kept.reduce((s, v) => s + v, 0) / kept.length : 0;
+    const bestI = kept.indexOf(Math.max(...kept));
+    return `${facts([
+        ['Average', `${avgKept >= 0 ? '' : '−'}${moneyShort(Math.abs(avgKept))}/mo`, avgKept >= 0 ? 'pos' : 'neg'],
+        ['Rate', rates.length ? percent(rates.reduce((s, v) => s + v, 0) / rates.length, 0) : '—'],
+        bestI >= 0 ? ['Best', `${monthLabel(pts[bestI].month)} ${moneyShort(kept[bestI])}`, 'pos'] : null,
+        ['12 months', moneyShort(kept.reduce((s, v) => s + v, 0)), kept.reduce((s, v) => s + v, 0) >= 0 ? 'pos' : 'neg'],
+    ])}<div class="chart-wrap"><div class="chart" id="dx-savings"></div></div>`;
+}
+
+/** Chit installments going out and payouts coming in over the next twelve months. */
+function chitFlowSeries(chits) {
+    const months = monthsAhead(12);
+    const out = months.map(() => 0), inflow = months.map(() => 0);
+    chits.filter(c => (c.status === 'ACTIVE' || c.status === 'PRIZED')).forEach(c => {
+        if (c.nextDueDate && Number(c.installmentsPending) > 0) {
+            const start = months.indexOf(ymOf(c.nextDueDate));
+            for (let i = Math.max(0, start), n = 0; start >= 0 && i < months.length && n < c.installmentsPending; i++, n++) out[i] += Number(c.monthlyInstallment || 0);
+        }
+        if (c.payoutAmount === null && c.maturityDate) {
+            const at = months.indexOf(ymOf(c.maturityDate));
+            if (at >= 0) inflow[at] += Number(c.maturityAmount || 0);
+        }
+    });
+    return { months, out, inflow };
+}
+
+function chitFlowHtml(chits) {
+    const running = chits.filter(c => c.status === 'ACTIVE' || c.status === 'PRIZED');
+    if (!running.length) return emptyState('No running chits', 'chit');
+    const { out, inflow } = chitFlowSeries(chits);
+    const totalOut = out.reduce((s, v) => s + v, 0), totalIn = inflow.reduce((s, v) => s + v, 0);
+    const peak = Math.max(...out);
+    return `${facts([
+        ['Paying in', moneyShort(totalOut), 'neg'], ['Payouts', moneyShort(totalIn), 'pos'],
+        ['Net', `${totalIn - totalOut >= 0 ? '+' : '−'}${moneyShort(Math.abs(totalIn - totalOut))}`, totalIn - totalOut >= 0 ? 'pos' : 'neg'],
+        ['Peak month', moneyShort(peak)],
+    ])}${legend([{ label: 'Installments' }, { label: 'Payouts' }])}<div class="chart-wrap"><div class="chart" id="dx-chitflow"></div></div>`;
+}
+
+/** EMI outgo by month for the year ahead, and each plan with what is left. */
+function emiSeries(plans) {
+    const months = monthsAhead(12);
+    const due = months.map(() => 0);
+    plans.forEach(p => (p.installments || []).filter(i => i.status !== 'PAID').forEach(i => {
+        const at = months.indexOf(ymOf(i.dueDate));
+        if (at >= 0) due[at] += Number(i.emi || 0);
+    }));
+    return { months, due };
+}
+
+function emisHtml(book, d) {
+    const plans = (book?.plans || []).filter(p => p.status !== 'CLOSED' && !p.archived);
+    if (!plans.length) return loansHtml(d, book);
+    const s = book.summary;
+    return `${facts([
+        ['Owed', moneyShort(s.outstanding), 'neg'], ['This month', moneyShort(s.thisMonth)],
+        ['Interest left', moneyShort(s.interestLeft)], ['Running', String(s.active)],
+    ])}<div class="chart-wrap short"><div class="chart" id="dx-emis"></div></div>
+    <div class="dx-plans">${plans.slice(0, 4).map(p => `<div class="dx-plan" title="${esc(p.narration)} · ${p.left} of ${p.months} EMIs left · ${money(p.emiAmount)} a month">
+        <span class="ellipsis">${esc(p.narration)}</span><i class="cr-bar"><em style="width:${p.progressPercent}%"></em></i><b>${moneyShort(p.outstanding)}</b></div>`).join('')}</div>`;
+}
+
+/** No EMI running: the loans on the books instead (home, vehicle, personal ...), biggest first, against the total. */
+function loansHtml(d, book) {
+    const loans = (d.liabilityBreakdown || []).map(x => ({ label: x.label, value: Number(x.value) }))
+        .filter(x => x.value > 0 && !/card|payable/i.test(x.label)).sort((a, b) => b.value - a.value);
+    if (!loans.length) return emptyState(book ? 'No EMIs or loans running' : 'EMIs show here when Expenses is shared with you', 'calendar');
+    const total = loans.reduce((s, x) => s + x.value, 0);
+    return `${facts([['Loans owed', moneyShort(total), 'neg'], ['Loans', String(loans.length)], ['EMIs', 'none running']])}
+    <div class="dx-plans dx-loans">${loans.map(l => `<div class="dx-plan" title="${esc(l.label)}: ${money(l.value)} · ${percent((l.value / total) * 100, 0)} of the loans">
+        <span class="ellipsis">${esc(l.label)}</span><i class="progress over"><span style="width:${(l.value / total) * 100}%"></span></i><b>${moneyShort(l.value)}</b></div>`).join('')}</div>
+    <p class="dx-note">${icon('info')} Buy something on EMI in Expenses to see its schedule here.</p>`;
+}
+
+/** The five biggest categories over the months analysed, one line each. */
+function catTrendHtml(a) {
+    if (!a || !a.categories?.length || (a.months || []).length < 2) return emptyState('A few months of spending show the trend here', 'trending');
+    const top = a.categories.slice(0, 5);
+    const first = top.map(c => Number(c.byMonth[0] || 0)), last = top.map(c => Number(c.byMonth.at(-2) ?? c.byMonth.at(-1) ?? 0));
+    const riser = top.map((c, i) => ({ c, d: last[i] - first[i] })).sort((x, y) => y.d - x.d)[0];
+    return `${facts([
+        ['Monthly average', moneyShort(a.monthlyAverage)], ['Top', esc(top[0].name)],
+        riser && riser.d > 0 ? ['Rising most', `${esc(riser.c.name)} +${moneyShort(riser.d)}`, 'neg'] : null,
+    ])}${legend(top.map(c => ({ label: c.name })), 'line')}<div class="chart-wrap"><div class="chart" id="dx-cattrend"></div></div>`;
+}
+
+/** Liabilities by kind, card usage against limits, and how the debt compares to what is owned. */
+function debtHtml(d) {
+    const items = (d.liabilityBreakdown || []).map(x => ({ label: x.label, value: Number(x.value) })).filter(x => x.value > 0);
+    const total = items.reduce((s, x) => s + x.value, 0);
+    const cards = d.accounts.filter(a => a.accountType === 'CREDIT_CARD' && a.utilizationPercent !== null);
+    if (!total && !cards.length) return emptyState('Nothing owed: no loans, cards or dues', 'scale');
+    const assets = Number(d.kpis.totalAssets) || 1;
+    return `<div class="dx-debt">
+        <div class="donut-wrap"><div class="chart" id="dx-debt"></div>
+            <div class="donut-legend">${items.map((it, i) => `<div class="legend-row"><i class="legend-swatch" style="background:${seriesColor(i)}"></i>
+                <span class="ellipsis">${esc(it.label)}</span><b>${moneyShort(it.value)}</b></div>`).join('')}
+                <div class="dx-ratio"><small>Debt to assets</small><i class="progress ${total / assets > 0.4 ? 'over' : 'good'}"><span style="width:${Math.min(100, (total / assets) * 100)}%"></span></i>
+                    <b>${percent((total / assets) * 100, 0)}</b></div></div></div>
+        ${cards.length ? `<div class="dx-cards"><div class="section-title">${icon('card')} Card usage</div>${cards.map(c => {
+            const u = Number(c.utilizationPercent);
+            return `<div class="dx-plan"><span class="ellipsis">${esc(c.name)}</span>
+                <i class="progress ${u > 70 ? 'over' : u > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, u)}%"></span></i><b>${percent(u, 0)}</b></div>`;
+        }).join('')}</div>` : ''}
+    </div>`;
+}
+
+/** The charts of the panels above, once their boxes are on the page. */
+function drawExtraCharts(container, { d, chits, emiBook, analysis }) {
+    const el = id => container.querySelector(id);
+    if (el('#dx-savings')) {
+        const pts = d.monthlyTrend.filter(p => Number(p.income) || Number(p.expense)).slice(-12);
+        barChart(el('#dx-savings'), { labels: pts.map(p => p.month), labelFormat: monthLabel, format: moneyShort,
+            series: [{ name: 'Kept', values: pts.map(p => Number(p.income) - Number(p.expense)), color: 'var(--series-3)' }] });
+    }
+    if (el('#dx-chitflow')) {
+        const { months, out, inflow } = chitFlowSeries(chits);
+        barChart(el('#dx-chitflow'), { labels: months, labelFormat: monthLabel, format: moneyShort,
+            series: [{ name: 'Installments', values: out }, { name: 'Payouts', values: inflow }] });
+    }
+    if (el('#dx-emis')) {
+        const { months, due } = emiSeries((emiBook?.plans || []).filter(p => p.status !== 'CLOSED' && !p.archived));
+        barChart(el('#dx-emis'), { labels: months, labelFormat: monthLabel, format: moneyShort, series: [{ name: 'EMIs due', values: due, color: 'var(--series-5)' }] });
+    }
+    if (el('#dx-cattrend')) {
+        lineChart(el('#dx-cattrend'), { labels: analysis.months, labelFormat: monthLabel, format: moneyShort, includeZero: true,
+            series: analysis.categories.slice(0, 5).map(c => ({ name: c.name, values: c.byMonth.map(Number) })) });
+    }
+    if (el('#dx-debt')) {
+        const items = (d.liabilityBreakdown || []).map(x => ({ label: x.label, value: Number(x.value) })).filter(x => x.value > 0);
+        const total = items.reduce((s, x) => s + x.value, 0);
+        donutChart(el('#dx-debt'), { items, format: v => money(v), centerValue: moneyShort(total), centerLabel: 'owed' });
+    }
+}
 
 /** Running chits: how far along, what they are worth now and at maturity. */
 function chitsHtml(chits) {
@@ -235,7 +416,7 @@ function recentHtml(entries) {
         const sign = e.voucherType === 'EXPENSE' ? 'neg' : e.voucherType === 'INCOME' ? 'pos' : '';
         return `<div class="list-item clickable" data-entry="${e.id}">
             ${kindChip(e.voucherType, 'sm', e.voucherLabel)}
-            <div class="grow min-0"><div class="title ellipsis">${esc(e.narration)}${e.party && !e.narration.toLowerCase().includes(e.party.toLowerCase()) ? ` <span class="ls-person">· ${esc(e.party)}</span>` : ''}</div><div class="meta ellipsis">${shortDate(e.entryDate)} · ${movementHtml(e.lines)}</div></div>
+            <div class="grow min-0"><div class="title ellipsis" title="${esc(e.narration)}">${projectTag(e.construction)}${esc(shortNarration(e.narration, e.chitTrail, e.party))}${partyAdds(e.party, shortNarration(e.narration, e.chitTrail, e.party), e.chitTrail) ? ` <span class="ls-person">· ${esc(e.party)}</span>` : ''}</div><div class="meta ellipsis">${shortDate(e.entryDate)} · ${movementHtml(e.lines, chitCodeOf(e.chitTrail))}</div></div>
             <b class="mono ${sign}">${money(e.amount)}</b>
         </div>`;
     }).join('')}</div>`;
@@ -345,6 +526,59 @@ function analyse(d) {
     if (avgIncome && day > 20 && Number(k.monthIncome) < avgIncome * 0.7)
         add('warn', 'arrow-in', 'Income', moneyShort(k.monthIncome), `Income this month is ${percent((1 - Number(k.monthIncome) / avgIncome) * 100, 0)} below your 3-month average.`, '#/reports');
 
+    // ---- more insights, from the same figures
+    const payables = Number(k.payables);
+    if (payables > 0) add(payables > liquid ? 'bad' : 'info', 'card', 'You owe', moneyShort(payables),
+        `${money(payables)} is still to pay to others${payables > liquid ? ', more than the cash at hand' : ''}.`, '#/expenses/collect');
+    // what can be spent a day for the rest of the month and stay at the usual level
+    const daysLeft = daysInMonth - day + 1;
+    if (avgExpense && day >= 3) {
+        const room = avgExpense - monthExpense;
+        add(room < 0 ? 'warn' : 'info', 'wallet', 'Daily allowance', room > 0 ? `${moneyShort(room / daysLeft)}/day` : 'Over',
+            room > 0 ? `Spend up to ${moneyShort(room / daysLeft)} a day for the next ${daysLeft} days to stay at your usual ${moneyShort(avgExpense)} a month.`
+                     : `This month's spending is already ${moneyShort(-room)} above your usual ${moneyShort(avgExpense)}.`, '#/expenses');
+    }
+    // the biggest single expense this month, among the recent entries
+    const thisMonth = isoDate().slice(0, 7);
+    const bigOne = (d.recent || []).filter(e => e.voucherType === 'EXPENSE' && String(e.entryDate).startsWith(thisMonth))
+        .reduce((m, e) => (!m || Number(e.amount) > Number(m.amount) ? e : m), null);
+    if (bigOne && monthExpense && Number(bigOne.amount) >= monthExpense * 0.2) add('info', 'receipt', 'Biggest expense', moneyShort(bigOne.amount),
+        `${esc(bigOne.narration)} on ${shortDate(bigOne.entryDate)} is ${percent((Number(bigOne.amount) / monthExpense) * 100, 0)} of this month's spending.`, '#/expenses');
+    // the year so far and the best month
+    const year = String(now.getFullYear());
+    const ytd = trend.filter(p => p.month.startsWith(year));
+    const ytdSaved = ytd.reduce((s, p) => s + p.income - p.expense, 0);
+    if (ytd.length >= 2 && ytd.some(p => p.income)) add(ytdSaved >= 0 ? 'good' : 'warn', 'flag', `${year} so far`, `${ytdSaved >= 0 ? '+' : '−'}${moneyShort(Math.abs(ytdSaved))}`,
+        `${ytdSaved >= 0 ? 'Saved' : 'Spent beyond income by'} ${moneyShort(Math.abs(ytdSaved))} across ${ytd.length} month${ytd.length === 1 ? '' : 's'} this year.`, '#/reports');
+    const best = past.filter(p => p.income > 0).reduce((m, p) => (!m || p.income - p.expense > m.income - m.expense ? p : m), null);
+    if (best && past.length >= 3 && best.income - best.expense > 0) add('good', 'crown', 'Best month', monthLabel(best.month),
+        `${monthLabel(best.month)} kept the most: ${moneyShort(best.income - best.expense)} (${percent(((best.income - best.expense) / best.income) * 100, 0)} of income).`, '#/reports');
+    // cash sitting idle beyond a comfortable safety net
+    if (runway !== null && runway > 9 && avgExpense) add('info', 'coins', 'Idle cash', moneyShort(liquid - avgExpense * 6),
+        `About ${moneyShort(liquid - avgExpense * 6)} sits above a 6-month safety net; an FD or a fund could earn on it.`, '#/accounts');
+    // most of the assets in one place
+    const alloc = (d.assetAllocation || []).map(x => ({ label: x.label, value: Number(x.value) })).filter(x => x.value > 0);
+    const allocTotal = alloc.reduce((s, x) => s + x.value, 0);
+    const biggest = alloc.reduce((m, x) => (!m || x.value > m.value ? x : m), null);
+    if (biggest && allocTotal && alloc.length > 1 && biggest.value / allocTotal > 0.6) add('info', 'pie', 'Concentration', percent((biggest.value / allocTotal) * 100, 0),
+        `${esc(biggest.label)} holds ${percent((biggest.value / allocTotal) * 100, 0)} of your assets; spreading them lowers the risk.`, '#/balance-sheet');
+    // how steady spending is month to month
+    const lastSix = past.slice(-6).map(p => p.expense).filter(v => v > 0);
+    if (lastSix.length >= 4) {
+        const mean = avg(lastSix);
+        const spread = Math.sqrt(avg(lastSix.map(v => (v - mean) ** 2))) / mean;
+        add(spread > 0.35 ? 'warn' : 'good', 'activity', 'Spending swings', `±${percent(spread * 100, 0)}`,
+            spread > 0.35 ? `Monthly spending swings about ${percent(spread * 100, 0)} around ${moneyShort(mean)}; a budget for the big months smooths it.`
+                          : `Monthly spending stays steady around ${moneyShort(mean)} (±${percent(spread * 100, 0)}).`, '#/reports');
+    }
+    // what falls due in the next seven days
+    const week = d.upcoming.filter(u => !u.overdue && u.kind !== 'INCOME' && daysFromToday(u.date) >= 0 && daysFromToday(u.date) <= 7);
+    if (week.length) add('info', 'calendar', 'This week', moneyShort(week.reduce((s, u) => s + Number(u.amount), 0)),
+        `${week.length} payment${week.length === 1 ? '' : 's'} due in the next 7 days: ${week.slice(0, 3).map(u => esc(u.title)).join(', ')}${week.length > 3 ? '…' : ''}.`, '#/planning');
+    // no income recorded yet, well into the month
+    if (avgIncome && day >= 10 && !Number(k.monthIncome)) add('warn', 'arrow-in', 'No income yet', '—',
+        `Nothing is recorded as income this month (usually ${moneyShort(avgIncome)}). Record your salary to keep the figures right.`, '#/income');
+
     const rank = { bad: 0, warn: 1, good: 2, info: 3 };
     list.sort((a, b) => rank[a.tone] - rank[b.tone]);
     return { score, grade, parts, insights: list };
@@ -378,4 +612,14 @@ function drawRibbon(el, { score, grade, parts, insights }) {
             <div class="hc-breakdown">${parts.map(p => `<div><span>${esc(p.label)}</span><b>${Math.round(p.score)} / ${p.max}</b><small>${esc(p.note)}</small></div>`).join('')}</div>`,
         actions: [{ label: 'Close' }],
     }));
+}
+
+/** Chits the user hosts: dues still to collect from members (opens Host a Chit). */
+function hostedDuesHtml(h) {
+    const due = Number(h.pendingDues);
+    return `<a class="hc-dash" href="#/host-chits" title="Chits you run as the organiser">${icon('hand-coins')}
+        <b>Pending chit dues</b><span class="hc-dash-amt ${due ? '' : 'clear'}">${due ? money(due) : 'none'}</span>
+        <small>${h.pendingCount} installment${h.pendingCount === 1 ? '' : 's'} to collect · ${h.running} hosted chit${h.running === 1 ? '' : 's'}
+            · collected this month ${moneyShort(h.collectedThisMonth)} of ${moneyShort(h.expectedThisMonth)}${h.nextDueDate ? ` · next due ${shortDate(h.nextDueDate)}` : ''}</small>
+        ${icon('chevron-right', 'chev')}</a>`;
 }

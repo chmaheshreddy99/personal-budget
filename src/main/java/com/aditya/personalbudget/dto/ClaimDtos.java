@@ -125,7 +125,9 @@ public final class ClaimDtos {
             InterestCollection interestCollection, String interestCollectionLabel, BigDecimal interestDueNow,
             LocalDate nextInterestDate, BigDecimal nextInterestAmount,
             /* statement links that still work */
-            int activeShares) {
+            int activeShares,
+            /* the loan agreement, if one is made: DRAFT, ACCEPTED or SIGNED, and its number */
+            String agreementStatus, String agreementNo) {
     }
 
     public record PostingView(Long id, int periodNo, LocalDate from, LocalDate to, BigDecimal amount,

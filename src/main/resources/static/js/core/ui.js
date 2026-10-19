@@ -12,6 +12,16 @@ export function esc(value) {
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+/**
+ * A narrative as HTML: its "[...]" segments become tags, and "[Own a/c ...]" ones (money that came through your own
+ * bank or cash account) stand out, so they are easy to tell from the chit's own accounts.
+ */
+export function narrativeHtml(text) {
+    return esc(text).replace(/\[([^\]]+)\]/g, (m, inner) => inner.startsWith('Own a/c ')
+        ? `<span class="nv-seg own" title="Came through your own account">⌂ ${inner.slice(8)}</span>`
+        : `<span class="nv-seg">${inner}</span>`).replace(/ \| /g, '<span class="nv-sep"></span>');
+}
+
 /** A glass panel with a titled header and a scrolling body. */
 export function panel({ id = '', title, iconName, sub = '', actions = '', body = '', bodyClass = '', foot = '', cls = '' }) {
     return `
@@ -150,11 +160,13 @@ export function readForm(form) {
  * <option>s for account pickers, grouped by class.
  * filter: (account) => boolean
  */
-export function accountOptions(accounts, filter = () => true, selected = null, placeholder = 'Select account') {
+export function accountOptions(accounts, filter = () => true, selected = null, placeholder = 'Select account', { chitBook = false, projectBook = false } = {}) {
     const groups = { ASSET: 'Assets', LIABILITY: 'Liabilities', INCOME: 'Income', EXPENSE: 'Expenses', EQUITY: 'Equity' };
     let html = `<option value="">${esc(placeholder)}</option>`;
+    // the hosted-chit book (Host a Chit, Chit accounts) is the members' money: off personal pickers unless asked for
+    const shown = a => (chitBook || !a.chitBook) && (projectBook || !a.projectBook) || String(a.id) === String(selected);
     for (const [cls, label] of Object.entries(groups)) {
-        const list = accounts.filter(a => a.accountClass === cls && a.active && filter(a));
+        const list = accounts.filter(a => a.accountClass === cls && a.active && filter(a) && shown(a));
         if (!list.length) continue;
         html += `<optgroup label="${label}">` + list.map(a =>
             `<option value="${a.id}" ${String(a.id) === String(selected) ? 'selected' : ''} data-type="${a.accountType}"
@@ -202,13 +214,13 @@ export function toast(message, kind = 'success') {
  * actions: [{ label, kind: 'primary'|'danger'|'', iconName, left, onClick: async (modal) => keepOpen? }]
  * Returns { el, close, setError }.
  */
-export function openModal({ title, iconName = 'droplet', body, size = '', actions = [], onOpen }) {
+export function openModal({ title, sub = '', iconName = 'droplet', body, size = '', actions = [], onOpen }) {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
         <div class="modal ${size}" role="dialog" aria-modal="true">
             <header class="modal-head">
-                <h3>${icon(iconName)}${esc(title)}</h3>
+                <h3><span class="modal-icon">${icon(iconName)}</span><span class="modal-title"><b data-modal-title>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></h3>
                 <button class="btn ghost icon sm" data-close title="Close">${icon('x')}</button>
             </header>
             <div class="modal-body">${body}<p class="form-error" data-error></p></div>

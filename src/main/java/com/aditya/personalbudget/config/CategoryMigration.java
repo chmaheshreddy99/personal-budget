@@ -8,7 +8,7 @@ import com.aditya.personalbudget.domain.entity.Claim;
 import com.aditya.personalbudget.domain.entity.ClaimRepayment;
 import com.aditya.personalbudget.domain.entity.JournalLine;
 import com.aditya.personalbudget.domain.entity.RecurringTransaction;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.AccountType;
 import com.aditya.personalbudget.domain.type.CategoryKind;
@@ -66,7 +66,7 @@ public class CategoryMigration implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        List<Tenant> pending = store.findAll(Tenant.class, t -> true).stream()
+        List<Organization> pending = store.findAll(Organization.class, t -> true).stream()
                 .filter(t -> store.count(Category.class, c -> c.getTenantId().equals(t.getId())) == 0)
                 .toList();
         if (pending.isEmpty()) {
@@ -74,7 +74,7 @@ public class CategoryMigration implements ApplicationRunner {
         }
         Map<Long, Long> legacyBudgetAccounts = legacyBudgetAccounts();
         Path backup = backup();
-        for (Tenant tenant : pending) {
+        for (Organization tenant : pending) {
             migrate(tenant.getId(), legacyBudgetAccounts);
         }
         log.info("Moved {} tenant(s) to categories and the Chit Funds sub-ledger; previous data saved in {}",
@@ -198,7 +198,7 @@ public class CategoryMigration implements ApplicationRunner {
             }
         }
         provisioning.seedCategories(tenantId, true);
-        log.info("Tenant {}: {} accounts became categories, {} chit accounts merged into Chit Funds, {} journal lines retagged",
+        log.info("Organization {}: {} accounts became categories, {} chit accounts merged into Chit Funds, {} journal lines retagged",
                 tenantId, categoryOf.size(), chitAccounts.size(), lines.size());
     }
 

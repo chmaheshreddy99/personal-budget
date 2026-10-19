@@ -8,3 +8,10 @@ data/
 logs/
 run/
 app.conf
+
+# Java build output from VS Code / Eclipse
+bin/
+.classpath
+.project
+.settings/
+.factorypath

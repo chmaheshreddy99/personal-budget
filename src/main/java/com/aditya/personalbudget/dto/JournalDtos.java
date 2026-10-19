@@ -30,7 +30,11 @@ public final class JournalDtos {
      */
     public record LineView(Long id, Integer lineNo, Long accountId, String accountCode, String accountName,
                            AccountClass accountClass, BigDecimal debit, BigDecimal credit, String memo,
-                           Long categoryId, Long chitId, String ledgerAccountName) {
+                           Long categoryId, Long chitId, String ledgerAccountName,
+                           /* the hosted chit whose money the line moves (Host a Chit) */
+                           Long hostedChitId,
+                           /* the account's balance just before and just after this line (natural sign, ledger order) */
+                           BigDecimal balanceBefore, BigDecimal balanceAfter) {
     }
 
     /** A full journal entry with its lines. */
@@ -39,7 +43,11 @@ public final class JournalDtos {
                             String sourceType, Long sourceId, boolean editable, String createdBy,
                             LocalDateTime createdAt, List<LineView> lines,
                             String lockReason, String manageAt, boolean reversible, String reversedBy,
-                            String reversalOf, Long claimId, Long version, int attachmentCount) {
+                            String reversalOf, Long claimId, Long version, int attachmentCount,
+                            /* a hosted chit's money: where it stands (collection moved or awaiting, the move's type and payout) */
+                            com.aditya.personalbudget.service.ChitTrailService.Trail chitTrail,
+                            /* a construction project's entry: which project, and what it was */
+                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction) {
     }
 
     /** An expense posted from the Expenses screen. {@code notes} is kept as the memo of the expense line. */
@@ -71,7 +79,7 @@ public final class JournalDtos {
             Long chitId,
             @PositiveOrZero BigDecimal debit,
             @PositiveOrZero BigDecimal credit,
-            @Size(max = 255) String memo) {
+            @Size(max = 2000) String memo) {
     }
 
     /** What a quick transaction represents. Money always flows {@code from} one account {@code to} another. */

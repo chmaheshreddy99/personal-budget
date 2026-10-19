@@ -33,6 +33,11 @@ export const DASHBOARD_WIDGETS = [
     { id: 'accounts', label: 'Cash & cards', span: 3, on: false },
     { id: 'alloc', label: 'Where your money is', span: 3, on: false },
     { id: 'cashflow', label: 'This month cash flow', span: 3, on: false },
+    { id: 'savings', label: 'Savings by month', span: 4, on: true },
+    { id: 'chitflow', label: 'Chit cash flow ahead', span: 4, on: true },
+    { id: 'emis', label: 'EMIs & loans', span: 4, on: true },
+    { id: 'cattrend', label: 'Spending trends', span: 6, on: true },
+    { id: 'debt', label: 'Debt picture', span: 6, on: true },
 ];
 export const DASHBOARD_BANDS = [
     { id: 'kpis', label: 'Key figures (top row)', on: true },

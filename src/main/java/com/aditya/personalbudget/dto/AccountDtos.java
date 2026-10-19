@@ -18,6 +18,12 @@ public final class AccountDtos {
     }
 
     /** Create / update an account. Leave {@code code} empty to have one assigned. */
+    /** Just the bank details of a bank or wallet account (what chit members pay into). */
+    public record BankDetailsRequest(@Size(max = 100) String institution, @Size(max = 40) String accountNumber,
+                                     @Size(max = 100) String holderName, @Size(max = 11) String ifsc,
+                                     @Size(max = 60) String upiId, Long version) {
+    }
+
     public record AccountRequest(
             @Size(max = 20) String code,
             @NotBlank @Size(max = 100) String name,
@@ -33,7 +39,18 @@ public final class AccountDtos {
             @Size(max = 255) String description,
             Boolean active,
             /* the version the form was loaded with; a stale edit is refused */
-            Long version) {
+            Long version,
+            /* bank and wallet accounts: the account holder's name, IFSC and UPI ID (for chit members paying in) */
+            @Size(max = 100) String holderName,
+            @Size(max = 11) String ifsc,
+            @Size(max = 60) String upiId) {
+
+        public AccountRequest(String code, String name, AccountType accountType, String institution, String accountNumber,
+                              BigDecimal openingBalance, LocalDate openingDate, BigDecimal interestRate, BigDecimal creditLimit,
+                              LocalDate maturityDate, BigDecimal quantity, String description, Boolean active, Long version) {
+            this(code, name, accountType, institution, accountNumber, openingBalance, openingDate, interestRate, creditLimit,
+                    maturityDate, quantity, description, active, version, null, null, null);
+        }
     }
 
     /** An account with its live balance. */
@@ -68,6 +85,19 @@ public final class AccountDtos {
             long transactionCount,
             /* Month-end balances of the last five months plus today's balance (oldest first). */
             List<BigDecimal> trend,
-            Long version) {
+            Long version,
+            /* part of the hosted-chit book (Host a Chit, Chit accounts), not a personal account */
+            boolean chitBook,
+            Long hostedChitId,
+            String chitRole,
+            String holderName,
+            String ifsc,
+            String upiId,
+            /* part of the construction book (the Construction section), not a personal account */
+            boolean projectBook,
+            Long projectId,
+            String projectRole,
+            /* what is owed on an EMI (Expenses › EMIs): listed only when asked for */
+            boolean emiAccount) {
     }
 }

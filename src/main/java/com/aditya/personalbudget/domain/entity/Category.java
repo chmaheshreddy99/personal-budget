@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
  * Table file: {@code data/categories.tbl}
  */
 @Entity
-@Table(name = "categories", uniqueConstraints = @UniqueConstraint(columnNames = {"tenantId", "kind", "name"}))
+@Table(name = "categories", uniqueConstraints = @UniqueConstraint(columnNames = {"organizationId", "kind", "name"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -35,8 +35,8 @@ public class Category implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     @Enumerated(EnumType.STRING)

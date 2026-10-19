@@ -64,12 +64,14 @@ tr.is-reversed td { opacity: 0.8; }
 .journal-page .c-date { width: 104px; }
 .journal-page td.c-move { width: 34%; }
 .journal-page td.c-move, .journal-page td.c-entry { overflow: hidden; }
-.journal-page th:nth-child(4), .journal-page td:nth-child(4) { width: 120px; }
+.journal-page .c-amt { width: 120px; }
+.journal-page .c-ctst { width: 112px; padding-left: 4px; padding-right: 4px; }
 .journal-page .c-caret { width: 28px; }
 .p-ledger table.grid { table-layout: fixed; width: 100%; }
 .p-ledger .c-date { width: 100px; }
 .p-ledger td.c-entry { overflow: hidden; }
 .p-ledger th:nth-child(n+3), .p-ledger td:nth-child(n+3) { width: 118px; }
+.p-ledger th.c-ctst, .p-ledger td.c-ctst { width: 112px; padding-left: 4px; padding-right: 4px; }
 .p-ledger th:last-child, .p-ledger td:last-child { width: 28px; }
 .ledger-search { width: 190px; }
 .ledger-search input { width: 100%; }
@@ -1605,3 +1607,272 @@ tr.detail-row td { white-space: normal; }
 .accounts-page .ov-card small { font-size: 9px; line-height: 1.15; }
 .accounts-page .ov-meter { height: 2px; margin-top: 2px; }
 @media (max-width: 1500px) { .accounts-page .ov-card b { font-size: 12px; } .accounts-page .onc-head b { font-size: 14px; } }
+
+/* ===================================================================== list panes without a header (accounts, chits) */
+.panel.headless .list-tools { padding: 8px 8px 7px; gap: 6px; border-bottom: 1px solid var(--hairline); }
+.list-tools .lt-top { display: flex; align-items: center; gap: 5px; }
+.list-tools .lt-top .search-box { flex: 1; min-width: 0; height: 30px; padding: 0 6px 0 10px; background: #fff; }
+.list-tools .lt-top .search-box input { min-width: 0; font-size: 12.5px; }
+.lt-count {
+    flex-shrink: 0; padding: 1px 7px; border-radius: 999px; background: rgba(10, 79, 128, 0.07);
+    font-size: 10px; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.lt-count:empty { display: none; }
+.btn.icon.lt-add, .btn.icon.lt-micro { width: 26px; height: 26px; min-width: 26px; padding: 0; border-radius: 8px; flex-shrink: 0; justify-content: center; }
+.btn.icon.lt-add svg { width: 14px; height: 14px; }
+.btn.icon.lt-micro svg { width: 13px; height: 13px; }
+.btn.icon.lt-add { box-shadow: 0 2px 6px rgba(11, 79, 128, 0.25); }
+
+/* the class filter: slim chips, the group switch a micro icon toggle */
+.panel.headless .class-filter { gap: 3px; align-items: center; }
+.panel.headless .cf-chip { height: 19px; padding: 0 6px; border-radius: 999px; font-size: 10px; gap: 3px; }
+.panel.headless .cf-chip svg { width: 10px; height: 10px; }
+.panel.headless .cf-chip i { font-size: 8.5px; }
+.micro-toggle {
+    margin-left: auto; width: 21px; height: 19px; display: inline-grid; place-items: center; flex-shrink: 0;
+    border: 1px solid var(--hairline-strong); border-radius: 6px; background: #fff; color: var(--text-muted); cursor: pointer;
+}
+.micro-toggle input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.micro-toggle svg { width: 11px; height: 11px; }
+.micro-toggle:hover { color: var(--ocean-700); border-color: var(--ocean-300); }
+.micro-toggle:has(input:checked) { background: var(--grad-navy); color: #fff; border-color: transparent; }
+.micro-toggle:has(input:focus-visible) { box-shadow: var(--brand-ring); }
+
+/* ===================================================================== bank / institution logos */
+.bank-logo {
+    width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; overflow: hidden;
+    border-radius: 9px; background: #fff; border: 1px solid var(--hairline); box-shadow: 0 1px 2px rgba(16, 52, 84, 0.08);
+}
+.bank-logo img { width: 78%; height: 78%; object-fit: contain; display: block; }
+.bank-logo.drawn { border: 0; background: transparent; box-shadow: none; }
+.bank-logo.drawn svg { width: 100%; height: 100%; display: block; }
+.acct-banner .bank-logo.hero { width: 38px; height: 38px; border-radius: 10px; border: 0; box-shadow: 0 0 0 2px rgba(240, 212, 154, 0.55); }
+.acct-banner .bank-logo.hero.drawn { background: #fff; }
+
+/* ===================================================================== account details: the banner's middle, within its height (admins) */
+.acct-banner.has-info { grid-template-columns: auto minmax(150px, 1fr) auto auto auto; }
+.ab-info {
+    display: flex; align-items: center; gap: 10px; min-width: 0; align-self: center;
+    padding: 1px 0 1px 16px; border-left: 1px solid rgba(240, 212, 154, 0.28);
+}
+/* two rows: label value  label value */
+.ab-info dl { display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(0, max-content); align-items: baseline; gap: 2px 8px; margin: 0; min-width: 0; }
+.ai-row { display: contents; }
+.ai-row dt { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8eaac2; white-space: nowrap; }
+.ai-row:nth-child(even) dt { padding-left: 10px; }
+.ai-row dd { margin: 0; min-width: 0; }
+.ai-value {
+    display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 0; border: 0; background: none;
+    font: inherit; font-size: 12px; font-weight: 600; color: #fff; cursor: copy; line-height: 1.4;
+}
+.ai-value span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+.ai-value.mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; letter-spacing: 0.03em; }
+.ai-value svg { width: 10px; height: 10px; flex-shrink: 0; color: #f0d49a; opacity: 0; transition: opacity 0.12s; }
+.ai-value:hover span { text-decoration: underline; text-decoration-color: rgba(240, 212, 154, 0.6); text-underline-offset: 3px; }
+.ai-value:hover svg, .ai-value:focus-visible svg { opacity: 1; }
+/* share, copy and reveal: in a row, shown only while the details are hovered (or focused); the space stays put */
+.ai-tools { display: flex; align-items: center; gap: 2px; padding-left: 8px; border-left: 1px solid rgba(255, 255, 255, 0.1);
+    opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; }
+.ab-info:hover .ai-tools, .ab-info:focus-within .ai-tools { opacity: 1; visibility: visible; }
+@media (hover: none) { .ai-tools { opacity: 1; visibility: visible; } }   /* touch screens cannot hover */
+.ai-tool {
+    width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: #b8cfe2; cursor: pointer; text-decoration: none;
+}
+.ai-tool svg { width: 15px; height: 15px; }
+.ai-tool .wa-mark { width: 16px !important; height: 16px !important; }
+.ai-tool:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.ai-tool.active { color: #f0d49a; }
+.ai-value:focus-visible, .ai-tool:focus-visible { outline: 1px solid #f0d49a; outline-offset: 2px; border-radius: 3px; }
+@media (max-width: 1100px) {
+    .acct-banner.has-info { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+    .acct-banner.has-info .ab-info { grid-column: 1 / -1; grid-row: 2; padding: 6px 0 0; border-left: 0; border-top: 1px solid rgba(240, 212, 154, 0.22); }
+}
+@media (max-width: 640px) {
+    .acct-banner.has-info .ab-info { grid-row: auto; }
+    .ab-info dl { grid-template-columns: auto minmax(0, 1fr); }
+    .ai-row:nth-child(even) dt { padding-left: 0; }
+}
+
+.p-chit-list.headless .panel-body { display: flex; flex-direction: column; }
+.p-chit-list.headless .chit-rows { flex: 1; height: auto; outline: none; }
+.account-list { outline: none; }
+
+/* ===================================================================== journal: balances before / after the entry */
+.ed-balances { display: inline-grid; grid-template-columns: auto auto auto auto auto; align-items: baseline; column-gap: 6px; row-gap: 0;
+    width: max-content; align-self: flex-start; justify-self: start;
+    margin: 4px 0 0; padding: 3px 8px; border-radius: 7px; background: rgba(10, 79, 128, 0.035); border: 1px solid var(--hairline);
+    font-size: 11px; line-height: 1.55; max-width: 100%; }
+.edb-head { grid-column: 1 / -1; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.edb-row { display: contents; }
+.edb-name { max-width: 200px; color: var(--text-secondary); padding-right: 6px; }
+.edb-before, .edb-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.edb-before { color: var(--text-muted); }
+.edb-row i { font-style: normal; color: var(--text-muted); font-size: 10px; }
+.edb-row b { font-weight: 650; color: var(--text-primary); }
+.edb-row em { font-style: normal; font-size: 8px; }
+.edb-row em.up { color: var(--positive, #0b7a3b); }
+.edb-row em.down { color: var(--negative, #b02a2a); }
+
+/* ===================================================================== data integrity (admins) */
+.integrity-page { display: flex; flex-direction: column; gap: 10px; }
+.ig-summary {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px;
+    background: var(--card-bg, #fff); border: 1px solid var(--hairline); border-left: 4px solid var(--ocean-600);
+}
+.ig-summary.has-issues { border-left-color: #d08a00; }
+.ig-summary.clean { border-left-color: var(--positive, #0b7a3b); }
+.ig-mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--grad-brand-soft); color: var(--ocean-700); flex-shrink: 0; }
+.ig-summary.has-issues .ig-mark { background: #fff4dc; color: #a46a00; }
+.ig-summary.clean .ig-mark { background: #e8f6ee; color: var(--positive, #0b7a3b); }
+.ig-mark svg { width: 17px; height: 17px; }
+.ig-summary > .min-0 { display: flex; flex-direction: column; flex: 1; min-width: 220px; }
+.ig-summary > .min-0 b { font-size: 14px; }
+.ig-summary > .min-0 small { color: var(--text-muted); font-size: 11.5px; }
+.ig-counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ig-counts span { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: 11px; color: var(--text-secondary); background: rgba(10, 79, 128, 0.05); }
+.ig-counts span b { font-variant-numeric: tabular-nums; }
+.ig-counts span svg { width: 11px; height: 11px; }
+.ig-counts span.warn { background: #fff4dc; color: #8a5b00; }
+.ig-counts span.bad { background: #fdeaea; color: #a32626; }
+.ig-counts span.ok { color: var(--text-muted); }
+.ig-about { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--hairline); }
+.ig-table td { vertical-align: middle; }
+.ig-table td.ellipsis { max-width: 280px; }
+.ig-table .ig-reason { color: #8a5b00; font-size: 12px; }
+.ig-table tr.clickable { cursor: pointer; }
+.ig-empty { padding: 30px 0; }
+
+/* ===================================================================== access grids: every menu item */
+.access-chip { flex-wrap: wrap; row-gap: 0; }
+.access-chip small { flex-basis: 100%; padding-left: 35px; font-size: 9.5px; color: var(--text-muted); line-height: 1.2; }
+.access-chip.unavailable { opacity: 0.5; cursor: not-allowed; background: transparent; border-style: dashed; }
+.access-head .link-btn + .link-btn { margin-left: 6px; }
+.access-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.access-role { display: grid; grid-template-columns: auto 1fr; column-gap: 7px; align-items: center; padding: 6px 9px; border-radius: 9px;
+    border: 1px solid var(--hairline); background: rgba(10, 79, 128, 0.03); font-size: 12px; }
+.access-role svg { width: 13px; height: 13px; color: var(--ocean-600); grid-row: span 2; }
+.access-role small { font-size: 10px; color: var(--text-muted); line-height: 1.25; }
+.access-foot { margin: 2px 0 0; }
+
+/* ===================================================================== chit portfolio: still to pay beside paid in */
+.cp-head .cp-still { display: block; margin-top: 1px; font-size: 11px; font-weight: 600; color: #a46a00; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-head .cp-still.done { color: var(--positive, #0b7a3b); }
+.cp-progress .cp-split { background: repeating-linear-gradient(90deg, rgba(208, 138, 0, 0.18) 0 6px, rgba(208, 138, 0, 0.1) 6px 9px); }
+.cp-progress span b:not(.up) { color: var(--ocean-900); }
+
+/* dashboard KPIs carry a second fact: up to two lines */
+.kpi-sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.kpi-sub b { color: var(--text-secondary); font-weight: 650; }
+
+/* ===================================================================== chits: a top band as slim as the accounts one */
+.chits-page .cp-card { gap: 4px; padding: 7px 12px 8px; align-content: start; }
+.chits-page .cp-head { gap: 8px; }
+.chits-page .cp-head b { font-size: 17px; line-height: 1.1; }
+.chits-page .cp-head small .cp-count { letter-spacing: 0.02em; color: var(--ocean-700); }
+.chits-page .cp-head .cp-still { margin-top: 0; font-size: 10.5px; }
+.chits-page .cp-rate { padding: 2px 7px; font-size: 11.5px; }
+.chits-page .cp-progress { gap: 3px; }
+.chits-page .cp-progress .onc-bar { height: 5px; }
+.chits-page .cp-progress span { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 10.5px; line-height: 1.35; }
+.chits-page .cp-progress .cs-mini-switch { margin-left: auto; font-size: 10px; }
+.chits-page .cs-cards .ov-card { padding: 7px 10px; gap: 8px; align-items: center; }
+.chits-page .cs-cards .ov-card .ov-ico { width: 26px; height: 26px; }
+.chits-page .cs-cards .ov-card b { font-size: 15px; }
+
+/* the chit detail: slimmer banner, key tiles and stat line */
+.chits-page .chit-banner { padding-top: 8px; padding-bottom: 8px; }
+.chits-page .cb-progress { margin-top: 4px; }
+.chits-page .chit-key { gap: 6px; padding: 6px 8px 2px; }
+.chits-page .ck-tile { padding: 6px 9px; gap: 7px; align-items: center; }
+.chits-page .ck-tile .ck-icon { width: 24px; height: 24px; border-radius: 8px; }
+.chits-page .ck-tile .ck-icon svg { width: 12px; height: 12px; }
+.chits-page .ck-tile b { font-size: 15px; line-height: 1.2; }
+.chits-page .ck-bar { margin: 2px 0 1px; height: 3px; }
+.chits-page .chit-statline { margin: 2px 8px 6px; padding: 3px 10px; gap: 2px 14px; font-size: 10.5px; }
+
+/* ===================================================================== dashboard: more panels, so it scrolls once they no longer fit */
+.page.dashboard { overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
+.dashboard .dash-grid { flex: none; grid-auto-rows: 290px; }
+.dashboard .panel-body.chart:has(.dx-facts) { display: flex; flex-direction: column; gap: 6px; }
+.dashboard .panel-body.chart:has(.dx-facts) .chart-wrap { flex: 1; min-height: 120px; }
+.dashboard .chart-wrap.short { flex: 0 0 110px !important; min-height: 110px; }
+.dx-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 2px; }
+.dx-facts span { display: grid; line-height: 1.2; }
+.dx-facts small { font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+.dx-facts b { font-size: 13px; font-weight: 750; color: var(--ocean-900); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dx-facts b.pos { color: var(--positive); } .dx-facts b.neg { color: var(--negative); }
+.dx-plans, .dx-cards { display: grid; gap: 4px; }
+.dx-plan { display: grid; grid-template-columns: minmax(0, 1fr) 90px 62px; align-items: center; gap: 8px; font-size: 11.5px; }
+.dx-plan b { text-align: right; font-variant-numeric: tabular-nums; }
+.dx-plan .cr-bar, .dx-plan .progress { margin: 0; }
+.dx-debt { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 14px; height: 100%; align-items: center; }
+.dx-debt .donut-wrap { grid-template-columns: 140px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); align-items: center; height: 100%; }
+.dx-debt .donut-wrap .chart { height: 140px; }
+.dx-ratio { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; }
+.dx-ratio small { color: var(--text-muted); }
+.dx-ratio .progress { margin: 0; }
+@media (max-width: 1100px) { .dx-debt { grid-template-columns: minmax(0, 1fr); } }
+.dx-debt .donut-legend { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.dashboard .panel-body.chart .empty svg { width: 34px; height: 34px; }
+.dx-loans { gap: 7px; margin-top: 4px; }
+.dx-note { margin: auto 0 0; font-size: 10.5px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; }
+.dx-note svg { width: 11px; height: 11px; }
+
+/* ===================================================================== reports › EMI analysis */
+.emi-report { display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; overflow: auto; padding-bottom: 6px; }
+.emi-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.emi-cards .ov-card b { font-size: 16px; }
+.emi-charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 10px; flex: 0 0 270px; }
+.emi-charts .panel { min-height: 0; }
+.emi-report > .panel { flex: none; }
+.emi-controls { display: inline-flex; align-items: center; gap: 12px; }
+.emi-controls input[type=number] { height: 26px; }
+.emi-how { margin: 0; display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+.emi-how svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 2px; }
+@media (max-width: 1200px) { .emi-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } .emi-charts { grid-template-columns: minmax(0, 1fr); flex-basis: auto; } .emi-charts .panel { height: 260px; } }
+
+/* chits top band, slimmer still: paid in and still to pay on one line, every card in three short lines */
+.chits-page .cp-card { gap: 3px; padding: 5px 10px 6px; }
+.chits-page .cp-mark { width: 24px; height: 24px; border-radius: 8px; }
+.chits-page .cp-mark svg { width: 13px; height: 13px; }
+.chits-page .cp-head small { font-size: 9px; line-height: 1.2; }
+.chits-page .cp-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.chits-page .cp-line b { font-size: 15px; line-height: 1.15; }
+.chits-page .cp-line .cp-still { flex: 1; min-width: 0; font-size: 10px; }
+.chits-page .cp-rate { padding: 1px 6px; font-size: 11px; line-height: 1.15; }
+.chits-page .cp-rate small { font-size: 8.5px; }
+.chits-page .cp-progress { gap: 2px; }
+.chits-page .cp-progress .onc-bar { height: 4px; }
+.chits-page .cp-progress span { font-size: 10px; line-height: 1.25; }
+.chits-page .cs-cards { gap: 6px; }
+.chits-page .cs-cards .ov-card { padding: 5px 9px; gap: 7px; border-radius: 12px; }
+.chits-page .cs-cards .ov-card .ov-ico { width: 22px; height: 22px; border-radius: 7px; }
+.chits-page .cs-cards .ov-card .ov-ico svg { width: 12px; height: 12px; }
+.chits-page .cs-cards .ov-card .min-0 { gap: 0; }
+.chits-page .cs-cards .ov-card .ov-label { font-size: 9px; line-height: 1.2; }
+.chits-page .cs-cards .ov-card b { font-size: 14px; line-height: 1.2; }
+.chits-page .cs-cards .ov-card small { font-size: 10px; line-height: 1.25; }
+.chits-page .cs-cards .ov-card .ov-meter { margin-top: 2px; height: 3px; }
+
+/* chit detail, slimmer still: progress bar and its legend side by side, tiles with value and note on one line */
+.chits-page .chit-banner { padding: 6px 12px; gap: 10px; }
+.chits-page .chit-banner .hero-icon { width: 30px; height: 30px; }
+.chits-page .chit-banner .ab-name { font-size: 14px; line-height: 1.25; }
+.chits-page .chit-banner .ab-meta { line-height: 1.3; }
+.chits-page .chit-banner .ab-bal b { font-size: 18px; line-height: 1.15; }
+.chits-page .chit-banner .ab-bal small, .chits-page .chit-banner .ab-change { line-height: 1.2; }
+.chits-page .cb-progress { flex-direction: row; align-items: center; gap: 8px; margin-top: 3px; max-width: none; }
+.chits-page .cb-track { flex: 0 0 200px; height: 6px; }
+.chits-page .cb-track .cb-now { top: -2px; height: 10px; }
+.chits-page .cb-legend { flex: 1; min-width: 0; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; }
+.chits-page .chit-key { gap: 5px; padding: 5px 8px 1px; }
+.chits-page .ck-tile { padding: 4px 8px; gap: 7px; border-radius: 9px; }
+.chits-page .ck-tile .ck-icon { width: 22px; height: 22px; border-radius: 7px; }
+.chits-page .ck-tile small { font-size: 9px; line-height: 1.2; }
+.chits-page .ck-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.chits-page .ck-line b { font-size: 14px; line-height: 1.2; flex-shrink: 0; }
+.chits-page .ck-line .ck-note { flex: 1; min-width: 0; font-size: 10px; }
+.chits-page .ck-bar { margin: 2px 0 0; height: 3px; }
+.chits-page .chit-statline { margin: 4px 8px 5px; padding: 2px 10px; font-size: 10px; line-height: 1.5; }
+.chits-page .chit-statline svg { width: 11px; height: 11px; }

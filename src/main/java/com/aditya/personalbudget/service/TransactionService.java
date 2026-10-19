@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -36,9 +37,11 @@ public class TransactionService {
     private final AccountRepository accounts;
     private final JournalEntryRepository entries;
     private final CategoryRepository categories;
+    private final ConstructionTagService projectTags;
 
     public TransactionService(LedgerService ledger, AccountRepository accounts, JournalEntryRepository entries,
-                              CategoryRepository categories) {
+                              CategoryRepository categories, ConstructionTagService projectTags) {
+        this.projectTags = projectTags;
         this.ledger = ledger;
         this.accounts = accounts;
         this.entries = entries;
@@ -50,7 +53,8 @@ public class TransactionService {
     /**
      * Searches the journal register.
      *
-     * @param search free text matched against entry number or id, narration, reference and party
+     * @param search free text matched against entry number or id, narration, reference and party; "construction" (or
+     *               is:construction) finds every construction entry, and a project's name or code its entries
      */
     public List<EntryView> search(LocalDate from, LocalDate to, VoucherType voucherType, Long accountId,
                                   String search, int limit) {
@@ -59,13 +63,20 @@ public class TransactionService {
         Set<Long> touching = accountId != null ? ledger.entryIdsTouchingAccount(accountId) : null;
         String text = search == null ? "" : search.trim().toLowerCase(Locale.ROOT);
 
-        Stream<JournalEntry> stream = ledger.entriesBetween(start, end).stream()
+        List<JournalEntry> inRange = ledger.entriesBetween(start, end).stream()
                 .filter(e -> voucherType == null || e.getVoucherType() == voucherType)
-                .filter(e -> touching == null || touching.contains(e.getId()))
-                .filter(e -> text.isEmpty() || matches(e, text))
+                .filter(e -> touching == null || touching.contains(e.getId())).toList();
+        Map<Long, ConstructionTagService.ProjectTag> tags = text.isEmpty() ? Map.of() : projectTags.forEntries(inRange);
+        boolean onlyConstruction = text.equals("construction") || text.equals("is:construction");
+        Stream<JournalEntry> stream = inRange.stream()
+                .filter(e -> text.isEmpty() || (onlyConstruction ? tags.containsKey(e.getId()) : matches(e, text) || projectMatches(tags.get(e.getId()), text)))
                 .sorted(JournalEntryRepository.NEWEST_FIRST)
                 .limit(limit > 0 ? limit : 500);
         return ledger.toViews(stream.toList());
+    }
+
+    private static boolean projectMatches(ConstructionTagService.ProjectTag t, String text) {
+        return t != null && (t.project().toLowerCase(Locale.ROOT).contains(text) || (!t.code().isEmpty() && t.code().equalsIgnoreCase(text)));
     }
 
     public EntryView get(Long id) {

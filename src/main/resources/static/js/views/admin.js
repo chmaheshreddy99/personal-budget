@@ -1,16 +1,18 @@
 /**
- * Administration: users of this tenant, tenants of the platform, the role/permission matrix
- * and the signed-in user's profile (#/admin/users | tenants | roles | profile).
+ * Administration: users of this organization, the organizations of the platform (tenants on the server), the
+ * role/permission matrix and the signed-in user's profile (#/admin/users | tenants | roles | profile).
+ * The access grids list every menu item: the sections that are shared (an organization has some or all of them,
+ * a user gets some or all of their organization's), then the items that go by role.
  */
 import { api } from '../core/api.js';
-import { state, can, FEATURES } from '../core/store.js';
+import { state, can, FEATURES, ROLE_SECTIONS } from '../core/store.js';
 import { panel, table, esc, field, readForm, openModal, toast, confirmDialog, stat } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { date } from '../core/format.js';
 
 const TABS = [
     { key: 'users', label: 'Users', iconName: 'users', permission: 'MANAGE_USERS' },
-    { key: 'tenants', label: 'Tenants', iconName: 'building', permission: 'MANAGE_TENANTS' },
+    { key: 'tenants', label: 'Organizations', iconName: 'building', permission: 'MANAGE_TENANTS' },
     { key: 'roles', label: 'Roles & permissions', iconName: 'shield' },
     { key: 'profile', label: 'My profile', iconName: 'user' },
 ];
@@ -35,6 +37,20 @@ export async function render(container, params, isCurrent) {
     const reload = () => render(container, [active.key], isCurrent);
     const draw = { users: drawUsers, tenants: drawTenants, roles: drawRoles, profile: drawProfile }[active.key];
     await draw(body, actions, reload);
+}
+
+// ===================================================================== access grids
+
+/** One menu item as a tick box. `off`: not available (not in the organization); `note`: what else it needs. */
+function accessChip(group, f, on, { disabled = false, off = false, note = '' } = {}) {
+    return `<label class="access-chip ${on ? 'on' : ''} ${off ? 'unavailable' : ''}" ${note ? `title="${esc(note)}"` : ''}>
+        <input type="checkbox" data-${group}="${f.key}" ${on ? 'checked' : ''} ${disabled || off ? 'disabled' : ''}>${icon(f.iconName)}${esc(f.label)}${note ? `<small>${esc(note)}</small>` : ''}</label>`;
+}
+
+/** The menu items that go by role: shown so every menu item is accounted for, never ticked. */
+function roleSectionsHtml() {
+    return `<div class="access-head"><b>${icon('shield')} By role</b><span class="small muted">not shared one by one</span></div>
+        <div class="access-roles">${ROLE_SECTIONS.map(r => `<span class="access-role">${icon(r.iconName)}<b>${esc(r.label)}</b><small>${esc(r.who)}</small></span>`).join('')}</div>`;
 }
 
 // ===================================================================== users
@@ -80,11 +96,15 @@ async function drawUsers(body, actions, reload) {
     });
 }
 
-function openUserForm(user, reload) {
+async function openUserForm(user, reload) {
     const roles = state.options.roles.filter(r => r.value !== 'SUPER_ADMIN' || state.user.role === 'SUPER_ADMIN');
-    const u = user || { role: 'MEMBER', active: true, features: FEATURES.map(f => f.key), mobileAccess: true, mobileFeatures: FEATURES.filter(f => f.mobile).map(f => f.key) };
+    // what the organization has is what can be shared; the rest is listed, greyed out
+    const available = new Set(await api.get('/admin/organization/sections'));
+    const u = user || { role: 'MEMBER', active: true, features: FEATURES.filter(f => available.has(f.key)).map(f => f.key), mobileAccess: true,
+        mobileFeatures: FEATURES.filter(f => f.mobile).map(f => f.key) };
     const self = user && user.id === state.user.userId;
-    const box = (group, f, on, disabled = false) => `<label class="access-chip ${on ? 'on' : ''}"><input type="checkbox" data-${group}="${f.key}" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${icon(f.iconName)}${esc(f.label)}</label>`;
+    const note = f => !available.has(f.key) ? 'not in this organization' : f.needs === 'APPROVE_ENTRIES' ? 'also needs a role that approves' : '';
+    const box = (group, f, on, disabled = false) => accessChip(group, f, on && available.has(f.key), { disabled, off: !available.has(f.key), note: note(f) });
     openModal({
         title: user ? `Edit ${user.username}` : 'New user', iconName: 'user',
         body: `<form class="form-grid two">
@@ -96,16 +116,18 @@ function openUserForm(user, reload) {
             ${field({ label: 'Role', name: 'role', type: 'select', value: u.role, options: roles })}
             ${field({ label: 'Active', name: 'active', type: 'checkbox', value: u.active })}
             ${field({ label: 'Expenses need approval', name: 'approval', type: 'select', value: u.approval || 'TENANT',
-                      options: [{ value: 'TENANT', label: 'As the household is set' }, { value: 'REQUIRED', label: 'Always (maker-checker)' }, { value: 'EXEMPT', label: 'Never' }],
+                      options: [{ value: 'TENANT', label: 'As the organization is set' }, { value: 'REQUIRED', label: 'Always (maker-checker)' }, { value: 'EXEMPT', label: 'Never' }],
                       hint: 'Managers and admins approve, so they never wait' })}
             <p class="hint span-2">The role decides what this user can do; a Viewer can look at everything but change nothing.</p>
             <div class="span-2 access-box">
-                <div class="access-head"><b>${icon('eye')} Sections shared</b><span class="small muted">${self ? 'your own access cannot be limited' : 'what this user sees on the full site'}</span>
-                    ${self ? '' : '<span class="spacer"></span><button type="button" class="link-btn" data-access-all>All</button>'}</div>
+                <div class="access-head"><b>${icon('eye')} Menu items shared</b><span class="small muted">${self ? 'your own access cannot be limited' : 'what this user sees on the full site'}</span>
+                    ${self ? '' : '<span class="spacer"></span><button type="button" class="link-btn" data-access-all>All</button><button type="button" class="link-btn" data-access-none>None</button>'}</div>
                 <div class="access-grid">${FEATURES.map(f => box('feature', f, u.features.includes(f.key), self)).join('')}</div>
+                ${roleSectionsHtml()}
                 <div class="access-head"><label class="switch"><input type="checkbox" name="mobileAccessToggle" ${u.mobileAccess ? 'checked' : ''} ${self ? 'disabled' : ''}><span></span>${icon('phone')} Mobile version</label>
                     <span class="small muted">a lighter app for phones, at the address set in Settings</span></div>
                 <div class="access-grid mobile ${u.mobileAccess ? '' : 'off'}">${FEATURES.filter(f => f.mobile).map(f => box('mobile', f, u.mobileFeatures.includes(f.key))).join('')}</div>
+                <p class="small muted access-foot">${FEATURES.filter(f => !f.mobile).map(f => esc(f.label)).join(', ')} are on the full site only.</p>
             </div>
         </form>`,
         onOpen: m => {
@@ -115,13 +137,14 @@ function openUserForm(user, reload) {
                 // a section that is not shared cannot be on the phone either
                 form.querySelectorAll('[data-mobile]').forEach(i => {
                     const shared = form.querySelector(`[data-feature="${i.dataset.mobile}"]`).checked;
-                    i.disabled = !shared;
+                    i.disabled = !shared || !available.has(i.dataset.mobile);
                     i.closest('.access-chip').classList.toggle('disabled', !shared);
                 });
                 form.querySelector('.access-grid.mobile').classList.toggle('off', !form.mobileAccessToggle.checked);
             };
             form.addEventListener('change', sync);
-            form.querySelector('[data-access-all]')?.addEventListener('click', () => { form.querySelectorAll('[data-feature]').forEach(i => { i.checked = true; }); sync(); });
+            form.querySelector('[data-access-all]')?.addEventListener('click', () => { form.querySelectorAll('[data-feature]:not(:disabled)').forEach(i => { i.checked = true; }); sync(); });
+            form.querySelector('[data-access-none]')?.addEventListener('click', () => { form.querySelectorAll('[data-feature]:not(:disabled)').forEach(i => { i.checked = false; }); sync(); });
             sync();
         },
         actions: [{ label: 'Cancel' }, {
@@ -132,8 +155,8 @@ function openUserForm(user, reload) {
                 const data = readForm(form);
                 const picked = group => [...form.querySelectorAll(`[data-${group}]`)].filter(i => i.checked).map(i => i.dataset[group]);
                 const features = picked('feature');
-                if (!features.length) throw new Error('Share at least one section');
-                data.features = features.length === FEATURES.length ? null : features;
+                if (!features.length) throw new Error('Share at least one menu item');
+                data.features = features.length >= available.size ? null : features;   // everything the organization has
                 data.mobileAccess = form.mobileAccessToggle.checked;
                 const mobile = picked('mobile').filter(k => features.includes(k));
                 data.mobileFeatures = mobile.length === FEATURES.filter(f => f.mobile).length ? null : mobile;
@@ -147,17 +170,19 @@ function openUserForm(user, reload) {
     });
 }
 
-// ===================================================================== tenants
+// ===================================================================== organizations (tenants on the server)
 
 async function drawTenants(body, actions, reload) {
     const tenants = await api.get('/admin/tenants');
-    actions.innerHTML = `<button class="btn primary" id="new-tenant">${icon('plus')}Tenant</button>`;
+    actions.innerHTML = `<button class="btn primary" id="new-tenant">${icon('plus')}Organization</button>`;
     actions.querySelector('#new-tenant').addEventListener('click', () => openTenantForm(null, reload));
 
     body.innerHTML = panel({
-        title: 'Tenants', iconName: 'building', bodyClass: 'flush', sub: 'Each tenant has its own isolated books',
+        title: 'Organizations', iconName: 'building', bodyClass: 'flush', sub: 'Each organization has its own isolated books, users and menu',
         body: `<div class="scroll" style="height:100%">${table([
-            { label: 'Tenant', render: t => `<b>${esc(t.name)}</b><div class="small muted mono">${esc(t.code)}</div>` },
+            { label: 'Organization', render: t => `<b>${esc(t.name)}</b><div class="small muted mono">${esc(t.code)}</div>` },
+            { label: 'Menu', render: t => `<span class="access-cell" title="${esc(FEATURES.filter(f => t.features.includes(f.key)).map(f => f.label).join(', '))}">
+                ${t.limited ? `<span class="badge">${icon('eye')}${t.features.length} of ${FEATURES.length}</span>` : `<span class="badge gray">${icon('eye')}Everything</span>`}</span>` },
             { label: 'Currency', render: t => esc(t.currency) },
             { label: 'Users', align: 'r', render: t => t.userCount },
             { label: 'Accounts', align: 'r', render: t => t.accountCount },
@@ -173,28 +198,48 @@ async function drawTenants(body, actions, reload) {
 }
 
 function openTenantForm(tenant, reload) {
-    const t = tenant || { currency: 'INR', active: true };
+    const t = tenant || { currency: 'INR', active: true, features: FEATURES.map(f => f.key) };
     openModal({
-        title: tenant ? `Edit ${tenant.name}` : 'New tenant', iconName: 'building',
+        title: tenant ? `Edit ${tenant.name}` : 'New organization', iconName: 'building',
         body: `<form class="form-grid two">
-            ${field({ label: 'Name', name: 'name', value: t.name, required: true, span: 'span-2' })}
-            ${field({ label: 'Code', name: 'code', value: t.code, required: true, attrs: tenant ? 'readonly' : 'pattern="[a-z0-9][a-z0-9-]{1,29}"' })}
+            ${field({ label: 'Organization name', name: 'name', value: t.name, required: true, span: 'span-2' })}
+            ${field({ label: 'Organization code', name: 'code', value: t.code, required: true, hint: tenant ? 'Used at sign-in; it cannot change' : '2-30 lowercase letters, digits or hyphens; used at sign-in',
+                      attrs: tenant ? 'readonly' : 'pattern="[a-z0-9][a-z0-9-]{1,29}"' })}
             ${field({ label: 'Currency', name: 'currency', value: t.currency, attrs: 'maxlength="3"' })}
             ${tenant ? field({ label: 'Active', name: 'active', type: 'checkbox', value: t.active }) : `
-                <div class="section-title span-2">First admin of the tenant</div>
+                <div class="section-title span-2">First admin of the organization</div>
                 ${field({ label: 'Admin username', name: 'adminUsername', required: true })}
                 ${field({ label: 'Admin full name', name: 'adminFullName' })}
                 ${field({ label: 'Admin password', name: 'adminPassword', type: 'password', required: true, span: 'span-2' })}`}
+            <div class="span-2 access-box">
+                <div class="access-head"><b>${icon('eye')} Menu items of the organization</b><span class="small muted">its users get at most these</span>
+                    <span class="spacer"></span><button type="button" class="link-btn" data-access-all>All</button><button type="button" class="link-btn" data-access-none>None</button></div>
+                <div class="access-grid">${FEATURES.map(f => accessChip('feature', f, t.features.includes(f.key),
+                    { note: f.needs === 'APPROVE_ENTRIES' ? 'also needs a role that approves' : '' })).join('')}</div>
+                ${roleSectionsHtml()}
+            </div>
         </form>`,
+        onOpen: m => {
+            const form = m.el.querySelector('form');
+            const sync = () => form.querySelectorAll('.access-chip').forEach(c => c.classList.toggle('on', c.querySelector('input').checked));
+            const setAll = on => { form.querySelectorAll('[data-feature]').forEach(i => { i.checked = on; }); sync(); };
+            form.addEventListener('change', sync);
+            form.querySelector('[data-access-all]').addEventListener('click', () => setAll(true));
+            form.querySelector('[data-access-none]').addEventListener('click', () => setAll(false));
+        },
         actions: [{ label: 'Cancel' }, {
-            label: 'Save tenant', kind: 'primary', iconName: 'check',
+            label: 'Save organization', kind: 'primary', iconName: 'check',
             onClick: async m => {
                 const form = m.el.querySelector('form');
                 if (!form.reportValidity()) return true;
                 const data = readForm(form);
+                Object.keys(data).filter(k => k.startsWith('feature')).forEach(k => delete data[k]);
+                const features = [...form.querySelectorAll('[data-feature]')].filter(i => i.checked).map(i => i.dataset.feature);
+                if (!features.length) throw new Error('Give the organization at least one menu item');
+                data.features = features.length === FEATURES.length ? FEATURES.map(f => f.key) : features;
                 if (tenant) await api.put(`/admin/tenants/${tenant.id}`, data);
                 else await api.post('/admin/tenants', data);
-                toast('Tenant saved');
+                toast('Organization saved');
                 reload();
             },
         }],
@@ -235,7 +280,7 @@ async function drawProfile(body, actions) {
                     <div><h3>${esc(me.fullName)}</h3><div class="muted">${esc(me.username)}${me.email ? ' · ' + esc(me.email) : ''}</div></div></div>
                    <div class="stat-strip" style="grid-template-columns:1fr 1fr">
                     ${stat('Role', esc(me.roleLabel))}
-                    ${stat('Household', esc(me.tenantName), esc(me.tenantCode))}
+                    ${stat('Organization', esc(me.tenantName), esc(me.tenantCode))}
                     ${stat('Currency', esc(me.currency))}
                     ${stat('Permissions', String(me.permissions.length), 'enforced by the server')}
                    </div>`,

@@ -27,7 +27,7 @@ import java.time.LocalDate;
  * Table file: {@code data/recurring_transactions.tbl}
  */
 @Entity
-@Table(name = "recurring_transactions", uniqueConstraints = @UniqueConstraint(columnNames = {"tenantId", "name"}))
+@Table(name = "recurring_transactions", uniqueConstraints = @UniqueConstraint(columnNames = {"organizationId", "name"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -37,8 +37,8 @@ public class RecurringTransaction implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     @Column(nullable = false, length = 100)

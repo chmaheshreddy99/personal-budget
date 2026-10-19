@@ -24,6 +24,8 @@ import com.aditya.personalbudget.repository.ChitInstallmentRepository;
 import com.aditya.personalbudget.repository.ChitRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +55,8 @@ import java.util.List;
  */
 @Service
 public class ChitService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChitService.class);
 
     private final ChitRepository chits;
     private final ChitInstallmentRepository installments;
@@ -155,7 +159,9 @@ public class ChitService {
         chit = chits.save(chit);
 
         if (scheduleChanged) {
-            installments.deleteAll(installments.findByChitIdOrderByInstallmentNo(chitId));
+            List<ChitInstallment> old = installments.findByChitIdOrderByInstallmentNo(chitId);
+            old.forEach(i -> ledger.deleteForSource(LedgerService.SOURCE_CHIT_INSTALLMENT, i.getId()));
+            installments.deleteAll(old);
             generateSchedule(chit);
         }
         return detail(chitId);
@@ -168,6 +174,8 @@ public class ChitService {
         if (chit.getPayoutAmount() != null || schedule.stream().anyMatch(i -> i.getStatus() == InstallmentStatus.PAID)) {
             throw new BusinessException("This chit has payments. Undo the payout and installments before deleting it");
         }
+        schedule.forEach(i -> ledger.deleteForSource(LedgerService.SOURCE_CHIT_INSTALLMENT, i.getId()));
+        ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chitId);
         installments.deleteAll(schedule);
         chits.deleteById(chitId);
     }
@@ -195,6 +203,14 @@ public class ChitService {
         Account income = accountService.systemAccount(DefaultChartOfAccounts.INCOME);
         Long chitGains = categories.system(DefaultChartOfAccounts.CHIT_GAINS).getId();
         LocalDate paidOn = request.paidDate() != null ? request.paidDate() : installment.getDueDate();
+        // an unpaid installment has nothing in the books: an entry left by an earlier payment would count it twice
+        List<JournalEntry> stale = entries.findBySource(chit.getTenantId(), LedgerService.SOURCE_CHIT_INSTALLMENT, installment.getId());
+        if (!stale.isEmpty()) {
+            log.warn("Chit {} installment {}: refused to pay, {} is still in the books", chit.getId(), installment.getInstallmentNo(),
+                    stale.getFirst().getEntryNo());
+            throw new BusinessException("Installment " + installment.getInstallmentNo() + " still has journal entry "
+                    + stale.getFirst().getEntryNo() + " from an earlier payment. An admin can review it in Data integrity");
+        }
 
         // booked on the installment date, whenever the money actually moved
         JournalEntry entry = ledger.post(JournalDraft.of(installment.getDueDate(), VoucherType.CHIT_INSTALLMENT,
@@ -233,9 +249,8 @@ public class ChitService {
         installment.setJournalEntryId(null);
         installment.setStatus(InstallmentStatus.PENDING);
         installments.save(installment); // release the foreign key before deleting the journal
-        if (entryId != null) {
-            ledger.delete(entryId);
-        }
+        // the linked entry and any other posted for this installment: none may stay in the books
+        ledger.deleteForSource(LedgerService.SOURCE_CHIT_INSTALLMENT, installment.getId(), entryId);
         refreshStatus(chit);
         return detail(chitId);
     }
@@ -291,8 +306,7 @@ public class ChitService {
         if (chit.getPayoutAmount() == null) {
             throw new BusinessException("No payout recorded for this chit");
         }
-        entries.findBySource(chit.getTenantId(), LedgerService.SOURCE_CHIT_PAYOUT, chit.getId())
-                .forEach(e -> ledger.delete(e.getId()));
+        ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());
         chit.setPayoutAmount(null);
         chit.setPayoutDate(null);
         chits.save(chit);

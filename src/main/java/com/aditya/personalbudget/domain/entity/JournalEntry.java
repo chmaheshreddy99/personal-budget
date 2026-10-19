@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
  * Table file: {@code data/journal_entries.tbl}
  */
 @Entity
-@Table(name = "journal_entries", uniqueConstraints = @UniqueConstraint(columnNames = {"tenantId", "entryNo"}))
+@Table(name = "journal_entries", uniqueConstraints = @UniqueConstraint(columnNames = {"organizationId", "entryNo"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -35,8 +35,8 @@ public class JournalEntry implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     /** Human readable number, e.g. EX-000042. */

@@ -24,13 +24,15 @@ import java.time.LocalDateTime;
 
 /**
  * A ledger account in the chart of accounts: bank, card, loan, gold, an expense category, an income source ...
- * The balance is never stored; it is always derived from journal lines.
+ * {@link #balance} is kept by the ledger itself (see {@code AccountLedgerSync}): every debit and credit posted,
+ * changed or deleted updates it when the transaction commits. Every insert and update of an account is also
+ * written to {@link AccountLog}.
  * Table file: {@code data/accounts.tbl}
  */
 @Entity
 @Table(name = "accounts", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"tenantId", "code"}),
-        @UniqueConstraint(columnNames = {"tenantId", "name"})
+        @UniqueConstraint(columnNames = {"organizationId", "code"}),
+        @UniqueConstraint(columnNames = {"organizationId", "name"})
 })
 @Getter
 @Setter
@@ -41,8 +43,8 @@ public class Account implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     /** Chart-of-accounts code, e.g. 1100 for a bank account, 5000 for groceries. */
@@ -68,7 +70,10 @@ public class Account implements TenantOwned {
     @Column(length = 40)
     private String accountNumber;
 
-    /** Balance on the opening date, in the account's natural sign (posted as an opening journal). */
+    /**
+     * Balance on the opening date, in the account's natural sign (posted as an opening journal). Set when the
+     * account is created and never changed after that: a correction is a journal entry.
+     */
     @PositiveOrZero
     private BigDecimal openingBalance;
 
@@ -93,6 +98,64 @@ public class Account implements TenantOwned {
     @Column(length = 255)
     private String description;
 
+    /** Bank and wallet accounts: the name the account is held in (shown to chit members paying into it). */
+    @Column(length = 100)
+    private String holderName;
+
+    /** Bank accounts: the branch's IFSC, e.g. ICIC0000598. */
+    @Column(length = 11)
+    private String ifsc;
+
+    /** Bank and wallet accounts: the UPI ID money can be sent to, e.g. name@okicici. */
+    @Column(length = 60)
+    private String upiId;
+
+    /**
+     * Part of the hosted-chit book (Host a Chit, Chit accounts): the money of the chits the user runs as organiser.
+     * These accounts are kept off the personal Accounts page, pickers and liquid-money figures.
+     */
+    private Boolean chitBook;
+
+    /** The hosted chit this account belongs to; empty for a common chit account (shared by every hosted chit). */
+    @References(HostedChit.class)
+    private Long hostedChitId;
+
+    /** Chit-book accounts: COLLECTION, COMMISSION, LATE_FEE, COMMON or FUNDS (see {@link #ROLE_COLLECTION} ...). */
+    @Column(length = 12)
+    private String chitRole;
+
+    public static final String ROLE_COLLECTION = "COLLECTION";
+    public static final String ROLE_COMMISSION = "COMMISSION";
+    public static final String ROLE_LATE_FEE = "LATE_FEE";
+    public static final String ROLE_COMMON = "COMMON";
+    /** The Hosted Chit Funds liability: the members' money held until it is paid out. */
+    public static final String ROLE_FUNDS = "FUNDS";
+    /** Clearing account: installments members paid straight to the month's winner, cleared by the payout. */
+    public static final String ROLE_DIRECT = "DIRECT";
+
+    /**
+     * Part of the construction book (the Construction section): the business's money, kept off the personal Accounts
+     * page, pickers and liquid-money figures like the hosted-chit book.
+     */
+    private Boolean projectBook;
+
+    /** The construction project this account belongs to; empty for a common business account. */
+    @References(ConstructionProject.class)
+    private Long projectId;
+
+    /** Construction-book accounts: BANK, COST, LAND, ADVANCES, INTEREST, PROFIT, LOAN, CAPITAL or COMMON. */
+    @Column(length = 12)
+    private String projectRole;
+
+    /** What is still owed on something bought on a loan / finance EMI: kept off the Accounts list unless asked for. */
+    private Boolean emiAccount;
+
+    /**
+     * The current balance in the account's natural sign (a positive asset is money you own, a positive liability
+     * money you owe): the sum of all its journal lines, kept up to date by the ledger on every debit and credit.
+     * Saves of the account itself never change it.
+     */
+    private BigDecimal balance;
     /** System accounts are created automatically and cannot be deleted. */
     @Column(nullable = false)
     private Boolean systemAccount;
@@ -106,4 +169,21 @@ public class Account implements TenantOwned {
     /** Optimistic locking: a save based on an older version is rejected. */
     @jakarta.persistence.Version
     private Long version;
+
+    public boolean isChitBook() {
+        return Boolean.TRUE.equals(chitBook);
+    }
+
+    public boolean isEmiAccount() {
+        return Boolean.TRUE.equals(emiAccount);
+    }
+
+    public boolean isProjectBook() {
+        return Boolean.TRUE.equals(projectBook);
+    }
+
+    /** Money the user can spend: cash, bank or wallet, and not the chit book's (members' money). */
+    public boolean isLiquid() {
+        return accountType.isLiquid() && !isChitBook() && !isProjectBook();
+    }
 }

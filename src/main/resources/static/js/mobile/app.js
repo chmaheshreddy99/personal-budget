@@ -267,7 +267,7 @@ async function expenses(params) {
 let lastExpenses = [];
 
 async function accounts(params) {
-    const list = (await api.get('/accounts')).filter(a => a.active && (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY'));
+    const list = (await api.get('/accounts')).filter(a => a.active && !a.chitBook && !a.projectBook && (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY'));
     if (params[0]) return statement(list.find(a => a.id === Number(params[0])));
     const assets = list.filter(a => a.accountClass === 'ASSET'), debts = list.filter(a => a.accountClass === 'LIABILITY');
     const sum = l => l.reduce((s, a) => s + Number(a.balance), 0);

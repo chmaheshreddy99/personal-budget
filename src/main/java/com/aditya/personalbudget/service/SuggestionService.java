@@ -76,7 +76,8 @@ public class SuggestionService {
         Long tenantId = UserContext.tenantId();
         List<JournalEntry> journal = entries.findByTenantId(tenantId);
         List<JournalLine> journalLines = lines.findByTenantId(tenantId);
-        List<Account> accountList = accounts.findByTenantId(tenantId);
+        // the hosted-chit book (members' money) is not suggested in personal forms
+        List<Account> accountList = accounts.findByTenantId(tenantId).stream().filter(a -> !a.isChitBook() && !a.isProjectBook()).toList();
         List<Chit> chitList = chits.findByTenantId(tenantId);
 
         Map<String, List<Suggestion>> result = new LinkedHashMap<>();

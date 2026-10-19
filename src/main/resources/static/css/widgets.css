@@ -1278,9 +1278,19 @@ table.grid tr.best-row td:first-child { box-shadow: inset 3px 0 0 var(--brand-go
 .chit-banner::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, rgba(201, 154, 59, 0.9), rgba(240, 212, 154, 0.6) 40%, transparent); }
 .chit-banner .hero-icon { color: #f0d49a; }
 .chit-banner .badge { transform: scale(0.92); }
-.cb-progress { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
-.cb-progress .split-bar { flex: 1; max-width: 260px; height: 6px; margin: 0; display: flex; }
-.cb-progress small { font-size: 10.5px; color: #a9c6de; white-space: nowrap; }
+/* the chit's progress in its banner: paid (and overdue) against the whole contribution, a tick for today */
+.cb-progress { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; max-width: 420px; }
+.cb-track { position: relative; display: flex; height: 8px; border-radius: 999px; overflow: visible;
+    background: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cb-track .cb-paid { height: 100%; border-radius: 999px 0 0 999px; background: linear-gradient(90deg, #2fd0bf, #7de3b0); }
+.cb-track .cb-paid[style="width:100%"] { border-radius: 999px; }
+.cb-track .cb-overdue { height: 100%; background: repeating-linear-gradient(45deg, #ff8a8a 0 4px, #e25555 4px 8px); }
+.cb-track .cb-now { position: absolute; top: -3px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: #f0d49a;
+    box-shadow: 0 0 0 1px rgba(8, 26, 46, 0.6); }
+.cb-legend { display: flex; flex-wrap: wrap; gap: 0 5px; font-size: 10.5px; color: #a9c6de; line-height: 1.35; }
+.cb-legend b { color: #fff; font-weight: 750; }
+.cb-legend .cb-late { color: #ffa3a3; font-weight: 650; }
+.cb-legend .cb-ahead { color: #7de3b0; }
 .chit-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 260px; }
 .metric.gold { border-color: rgba(201, 154, 59, 0.45); background: linear-gradient(180deg, #fffdf6, #fff6dc); }
 .book-note { display: flex; gap: 6px; align-items: flex-start; padding: 6px 9px; border-radius: 8px; background: var(--grad-brand-soft); font-size: var(--font-size-sm); color: var(--text-secondary); }
@@ -1782,3 +1792,174 @@ tr.sched-current td:first-child { box-shadow: inset 3px 0 0 #f2c94c; }
 .xp-subs-bar.has-rejected { background: #fff1f1; border-color: #f1b8b8; }
 .xp-subs-bar svg { width: 14px; height: 14px; }
 @media (max-width: 760px) { .ap-mode { grid-template-columns: minmax(0, 1fr); } .claim-quick { margin-left: 0; } }
+
+/* narratives: "[...]" segments as tags; money that came through your own bank or cash account stands out */
+.nv-seg { display: inline-block; margin: 0 3px 1px 0; padding: 0 6px; border-radius: 5px; font-size: 0.92em; font-weight: 600; line-height: 1.55;
+    background: #eef4f9; color: var(--ocean-800, #0b4f78); border: 1px solid #d6e4ef; white-space: nowrap; }
+.nv-seg.own { background: #fff3dc; color: #8a5300; border-color: #f0cf8e; }
+.nv-sep { display: inline-block; width: 1px; height: 0.95em; margin: 0 6px; vertical-align: -1px; background: var(--hairline-strong, #c9d6e2); }
+.ed-fact.memo { line-height: 1.6; }
+
+/* UPI app marks */
+.upi-logo { display: inline-flex; align-items: center; flex-shrink: 0; line-height: 0; }
+.upi-logo svg { height: 22px; width: auto; display: block; }
+.upi-logos { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.upi-logos .upi-logo svg { height: 18px; }
+.upi-brands { display: flex; justify-content: center; margin: 2px 0 6px; }
+.tag.gold { background: #fbf0d6; color: #7a5600; }
+.tag.good { background: #e3f6ec; color: #126b3d; }
+.tag.gold svg, .tag.good svg { width: 11px; height: 11px; vertical-align: -1px; }
+/* the loan agreement dialog (components/loan-agreement.js) */
+.la-form .section-title { margin: 4px 0 -2px; }
+.la-req { display: flex; flex-direction: column; gap: 4px; }
+.la-panel { display: flex; flex-direction: column; gap: 10px; }
+.la-linkcard { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+.la-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.la-steps li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.45; }
+.la-steps li svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; color: var(--ocean-600); }
+.la-make { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+
+/* where a hosted chit's money stands, against entries and payments (js/core/chit-trail.js): a compact pill sized to
+   its words (never cut short), left-aligned in its column so a list of them still lines up; the tinted dot on the left
+   is the kind of chit entry, the colour is where the money stands */
+.ct-st { display: inline-flex; align-items: center; gap: 4px; box-sizing: border-box; height: 19px; padding: 0 7px 0 2px; max-width: none;
+    border-radius: 999px; font-size: 10.5px; font-weight: 650; line-height: 1; letter-spacing: 0.01em; white-space: nowrap; vertical-align: middle;
+    border: 1px solid transparent; background: var(--ct-bg, #f0f3f6); color: var(--ct-fg, #51657a); border-color: var(--ct-line, #d6dee6); }
+.ct-st.none { display: inline-block; width: 0; padding: 0; border: 0; background: none; }
+.ct-st .ct-kind { display: grid; place-items: center; width: 15px; height: 15px; flex: 0 0 15px; border-radius: 50%; font-style: normal; background: var(--ct-fg, #51657a); color: #fff; }
+.ct-st .ct-kind svg { width: 9px; height: 9px; }
+.ct-st .ct-st-label { white-space: nowrap; }
+.ct-st .ct-paid { display: grid; place-items: center; margin-left: 1px; font-style: normal; color: #b07d00; }
+.ct-st .ct-paid svg { width: 11px; height: 11px; }
+/* one colour per state */
+.ct-st.warn   { --ct-bg: #fff4dc; --ct-fg: #9a5b00; --ct-line: #f1d08c; }   /* to move: waiting on you */
+.ct-st.blue   { --ct-bg: #e9f1fe; --ct-fg: #2457b3; --ct-line: #c3d6f6; }   /* moved into collections */
+.ct-st.teal   { --ct-bg: #e4f6f3; --ct-fg: #0b7064; --ct-line: #b6e2da; }   /* paid straight into collections */
+.ct-st.indigo { --ct-bg: #eeedfc; --ct-fg: #4a3fb0; --ct-line: #d0cbf3; }   /* the gather transfer */
+.ct-st.violet { --ct-bg: #f6ebfb; --ct-fg: #7b2f9a; --ct-line: #e3c7ef; }   /* paid to the winner directly */
+.ct-st.gold   { --ct-bg: #fff6d6; --ct-fg: #8a6100; --ct-line: #ecd27a; }   /* the payout itself */
+.ct-st.good   { --ct-bg: #e5f6ec; --ct-fg: #13703f; --ct-line: #a9dcbd; }   /* commission done */
+.ct-st.muted  { --ct-bg: #f0f3f6; --ct-fg: #51657a; --ct-line: #d6dee6; }   /* a plain transfer */
+/* paid out: the same status and words, turned green, with a crown */
+.ct-st.paid { --ct-bg: #dff4e7; --ct-fg: #0f6b3a; --ct-line: #86cfa3; }
+td.c-ctst, th.c-ctst { width: 112px; white-space: nowrap; }
+.ct-badge { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.ct-badge svg { width: 12px; height: 12px; }
+.ct-badge.good { background: #e6f6ec; color: #11633a; }
+.ct-badge.warn { background: #fff6e5; color: #8a5a00; }
+.ct-badge.muted { background: #f1f4f7; color: #52657a; }
+@media (max-width: 700px) {
+    /* phones: the kind and a short label still fit */
+    .ct-st { font-size: 10px; height: 18px; padding-right: 6px; }
+    td.c-ctst, th.c-ctst { width: 100px; }
+}
+.ct-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; padding: 6px 10px; border-radius: 10px; background: #f7f9fc; border: 1px solid var(--hairline); font-size: 12px; }
+.ct-chit { display: inline-flex; align-items: center; gap: 5px; color: var(--ocean-800, #0a4a73); }
+.ct-chit span { color: var(--text-secondary); }
+.ct-chit svg { width: 13px; height: 13px; }
+.ct-facts { color: var(--text-secondary); }
+
+/* ---------------------------------------------------------------- bought on EMI: the dialog's fourth mode, the preview and a plan opened in place */
+.expense-form .xp-modes { grid-template-columns: repeat(4, 1fr); }
+.expense-form .emi-only, .expense-form .emi-loan-only { display: none; }
+.expense-form.mode-EMI .xp-claim-info { display: none; }
+.expense-form.mode-EMI.emi-loan .emi-loan-only { display: flex; }
+/* on EMI the dialog widens to three columns: the purchase · its category and card · the terms with the whole schedule */
+.modal.expense-modal.emi-wide { width: min(1340px, 97vw); }
+.expense-form.mode-EMI .xp-grid { grid-template-columns: minmax(0, 0.82fr) minmax(0, 0.95fr) minmax(0, 1.3fr); }
+.expense-form.mode-EMI .xp-emi-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.expense-form.mode-EMI .cat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.expense-form.mode-EMI .pay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.expense-form.mode-EMI .xp-notes textarea { min-height: 38px; }
+.xp-emi { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 12px; background: var(--grad-brand-soft); border: 1px solid rgba(11, 124, 189, 0.18); }
+.xp-emi .form-grid { gap: 6px 8px; }
+.xp-emi .emi-auto { align-self: end; padding-bottom: 6px; font-size: var(--font-size-sm); }
+.xp-emi-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.xp-emi-kinds .date-chip { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 30px; }
+.xp-emi-kinds .date-chip svg { width: 13px; height: 13px; }
+.expense-form [data-emi-locked] input:disabled, .expense-form input:disabled { opacity: 0.65; }
+.emi-prev { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.78); border: 1px solid var(--hairline); min-height: 0; }
+.emi-prev.empty { flex-direction: row; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--font-size-sm); padding: 18px 12px; justify-content: center; border-style: dashed; }
+.emi-prev.empty svg { width: 16px; height: 16px; }
+.emi-prev-hero { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-radius: 10px; background: var(--grad-navy); color: #fff; }
+.emi-prev-hero > div { display: flex; flex-direction: column; line-height: 1.1; }
+.emi-prev-hero small { font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.75; }
+.emi-prev-hero b { font-size: 22px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.emi-prev-hero span { font-size: var(--font-size-sm); opacity: 0.85; }
+.emi-prev-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 4px; }
+.emi-prev-figs span { display: flex; flex-direction: column; padding: 3px 8px; border-radius: 8px; background: var(--surface-sunken); }
+.emi-prev-figs small { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; }
+.emi-prev-figs b { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.emi-prev-figs .total { background: #fbf3dd; }
+.emi-prev-how { display: flex; gap: 6px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.35; }
+.emi-prev-how svg { width: 13px; height: 13px; flex: none; margin-top: 1px; color: var(--ocean-600); }
+.emi-table { max-height: 238px; overflow: auto; border: 1px solid var(--hairline); border-radius: 9px; }
+.emi-table table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.emi-table th { position: sticky; top: 0; background: #eef4f9; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 700; text-align: left; padding: 4px 6px; z-index: 1; }
+.emi-table tfoot th { position: sticky; bottom: 0; top: auto; background: #eef4f9; color: var(--ocean-900); font-size: 11px; text-transform: none; letter-spacing: 0; }
+.emi-table td { padding: 3px 6px; border-top: 1px solid var(--hairline); white-space: nowrap; }
+.emi-table .r { text-align: right; }
+.emi-panel { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 6px; }
+.emi-closed-note { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 9px; background: var(--surface-sunken); font-size: var(--font-size-sm); color: var(--text-secondary); }
+.emi-closed-note svg { width: 13px; height: 13px; }
+.emi-closed-note span { flex: 1; }
+.emi-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.emi-sched { max-height: 260px; overflow: auto; border: 1px solid var(--hairline); border-radius: 10px; }
+.emi-sched table { margin: 0; }
+.emi-sched tr.emi-paid td { color: var(--text-secondary); }
+.emi-sched tr.emi-waived td { color: var(--text-muted); text-decoration: line-through; }
+.emi-sched tr.emi-late td { background: #fff5f2; }
+.emi-sched tr.emi-next td { background: #eef7fd; font-weight: 600; }
+.emi-sched .badge svg { width: 10px; height: 10px; margin-right: 2px; vertical-align: -1px; }
+.emi-fc-total { font-size: 18px; font-variant-numeric: tabular-nums; }
+.xp-emis .xd-bar, .emi-side .xd-bar { display: block; height: 4px; border-radius: 99px; background: #e6edf3; overflow: hidden; margin-top: 3px; }
+.xp-emis .xd-bar em, .emi-side .xd-bar em { display: block; height: 100%; background: linear-gradient(90deg, #5fcf8a, #1f9a5a); }
+.xp-emis tr.emi-archived td { opacity: 0.6; }
+.emi-side { display: flex; flex-direction: column; gap: 8px; }
+.emi-side .xs-grid { grid-template-columns: 1fr 1fr; }
+.emi-side-list { display: flex; flex-direction: column; gap: 2px; }
+.emi-side-list .owed-row .grow { display: flex; flex-direction: column; }
+.xp-emis .c-prog { width: 150px; }
+.xp-emis .xd-prog { display: flex; flex-direction: column; gap: 1px; font-size: 11px; color: var(--text-secondary); }
+.xp-open-note .switch { margin-left: auto; }
+.mini-flag.emi { display: inline-flex; align-items: center; width: auto; height: 17px; padding: 0 5px; font-size: 9.5px; font-weight: 700; gap: 3px; line-height: 1; white-space: nowrap; }
+.mini-flag.emi svg { width: 10px; height: 10px; flex: none; }
+/* the EMIs list: the name on top, the lender and shop under it */
+.xd-cell.xd-stack { flex-direction: column; align-items: stretch; gap: 1px; }
+.xd-cell.xd-stack .xd-party { max-width: 100%; margin-left: 0; text-align: left; font-size: 11px; }
+.xd-cell.xd-stack .xd-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1180px) {
+    .expense-form.mode-EMI .xp-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .expense-form.mode-EMI .xp-emi-col { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+    .expense-form .xp-modes { grid-template-columns: repeat(2, 1fr); }
+    .expense-form.mode-EMI .xp-grid { grid-template-columns: minmax(0, 1fr); }
+    .emi-cards { grid-template-columns: minmax(0, 1fr); }
+    .xp-emi .form-grid.three { grid-template-columns: 1fr 1fr; }
+}
+.emi-panel .xd-top { flex-wrap: wrap; row-gap: 6px; }
+.emi-panel .xd-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+.emi-panel .xd-actions .switch { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- money lent: the interest card */
+.expense-form.mode-LENT .xp-interest {
+    flex-direction: column; gap: 8px; padding: 10px 12px 12px; border-radius: 12px;
+    background: var(--grad-brand-soft); border: 1px solid rgba(11, 124, 189, 0.18);
+}
+.xp-interest .xi-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.xp-interest .xi-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+.xp-interest .xi-label svg { width: 13px; height: 13px; color: var(--ocean-500); }
+.xp-interest .xi-seg { background: rgba(255, 255, 255, 0.8); }
+.xp-interest .xi-seg .seg-chip { height: 28px; padding: 0 12px; }
+.modal .xp-interest .check-line { min-height: 38px; background: rgba(255, 255, 255, 0.75); cursor: pointer; }
+.modal .xp-interest .check-line span { flex: 1; min-width: 0; }
+.xp-interest .check-line .post-amount {
+    padding: 2px 8px; border-radius: 999px; background: rgba(11, 124, 189, 0.1); white-space: nowrap;
+}
+.xp-interest.on-payment .xi-auto { display: none; }   /* nothing falls due on a schedule to book */
+@media (max-width: 640px) {
+    .xp-interest .xi-row { flex-direction: column; align-items: stretch; gap: 5px; }
+    .xp-interest .xi-seg { display: flex; }
+    .xp-interest .xi-seg .seg-chip { flex: 1; justify-content: center; }
+}

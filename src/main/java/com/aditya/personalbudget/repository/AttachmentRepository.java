@@ -30,6 +30,13 @@ public class AttachmentRepository extends TenantScopedRepository<Attachment> {
                 .toList();
     }
 
+    /** ID proof and photos of an agreement: kind "CHIT_AGREEMENT" or "LOAN_AGREEMENT". */
+    public List<Attachment> findByOwnerKind(String kind, Long id) {
+        return findWhere(a -> kind.equals(a.getOwnerKind()) && id.equals(a.getOwnerId())).stream()
+                .sorted(Comparator.comparing(Attachment::getId))
+                .toList();
+    }
+
     /** Evidence sent with an entry that waits for approval. */
     public List<Attachment> findByPendingEntryId(Long pendingEntryId) {
         return findWhere(a -> pendingEntryId.equals(a.getPendingEntryId())).stream()

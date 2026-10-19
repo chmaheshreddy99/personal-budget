@@ -1,6 +1,7 @@
 package com.aditya.personalbudget.security;
 
 import com.aditya.personalbudget.domain.entity.AppUser;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.Feature;
 
 import java.util.EnumSet;
@@ -35,9 +36,19 @@ public final class FeaturePolicy {
     private FeaturePolicy() {
     }
 
-    /** The features granted to a user for a desktop or a mobile session. */
-    public static Set<Feature> granted(AppUser user, boolean mobile) {
-        Set<Feature> desktop = Feature.parse(user.getFeatures(), Feature.all());
+    /** The sections the organization has (all of them unless limited). */
+    public static Set<Feature> ofTenant(Organization tenant) {
+        return tenant == null ? Feature.all() : Feature.parse(tenant.getFeatures(), Feature.all());
+    }
+
+    /**
+     * The features granted to a user for a desktop or a mobile session: those shared with the user that the
+     * organization has. {@code tenant} may be null (no organization limit).
+     */
+    public static Set<Feature> granted(AppUser user, Organization tenant, boolean mobile) {
+        Set<Feature> desktop = EnumSet.noneOf(Feature.class);
+        desktop.addAll(Feature.parse(user.getFeatures(), Feature.all()));
+        desktop.retainAll(ofTenant(tenant));
         if (!mobile) {
             return desktop;
         }
@@ -73,7 +84,8 @@ public final class FeaturePolicy {
                     && (path.equals("/expenses") || path.equals("/attachments")   // evidence: only on what it recorded
                         || path.matches("/approvals/\\d+/(resubmit|withdraw)")));   // correct / take back what it recorded
         }
-        if (path.startsWith("/admin") || path.startsWith("/activity") || path.equals("/approvals") || path.startsWith("/approvals/count")) return false;
+        if (path.startsWith("/admin") || path.startsWith("/activity") || path.startsWith("/integrity")
+                || path.equals("/approvals") || path.startsWith("/approvals/count")) return false;
         if (!user.mobile()) {
             // a full-app link: the screens of the shared sections need the same reads as for a signed-in user;
             // allows() below still limits each call to its sections
@@ -100,7 +112,14 @@ public final class FeaturePolicy {
         if (path.startsWith("/reports")) return EnumSet.of(REPORTS);
 
         if (path.startsWith("/gifts")) return EnumSet.of(GIFTS);
+        if (path.startsWith("/construction")) {
+            return read ? EnumSet.of(Feature.CONSTRUCTION, BALANCE_SHEET, REPORTS) : EnumSet.of(Feature.CONSTRUCTION);
+        }
         if (path.startsWith("/documents")) return EnumSet.of(DOCUMENTS);
+        if (path.startsWith("/hosted-chits")) {
+            return read ? EnumSet.of(Feature.HOST_CHITS, DASHBOARD, BALANCE_SHEET, REPORTS) : EnumSet.of(Feature.HOST_CHITS);
+        }
+        if (path.startsWith("/activity")) return EnumSet.of(Feature.ACTIVITY);
         if (path.startsWith("/chits")) {
             return read ? EnumSet.of(CHITS, DASHBOARD, INCOME, FORECAST, REPORTS, JOURNAL) : EnumSet.of(CHITS);
         }

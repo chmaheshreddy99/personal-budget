@@ -61,7 +61,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Bean
     public FilterRegistrationBean<ShallowEtagHeaderFilter> staticEtags() {
         FilterRegistrationBean<ShallowEtagHeaderFilter> bean = new FilterRegistrationBean<>(new ShallowEtagHeaderFilter());
-        bean.addUrlPatterns("/index.html", "/mobile.html", "/share.html", "/statement.html", "/css/*", "/js/*", "/img/*");
+        bean.addUrlPatterns("/index.html", "/mobile.html", "/share.html", "/statement.html", "/chit-share.html", "/css/*", "/js/*", "/img/*");
         bean.setName("staticEtags");
         return bean;
     }

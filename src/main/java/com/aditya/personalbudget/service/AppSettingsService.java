@@ -73,6 +73,99 @@ public class AppSettingsService {
         return approvalEnabled();
     }
 
+    /**
+     * The secret that seals receipts (HMAC-SHA256), made on first use. It stays on this installation: anyone holding
+     * a receipt can have it checked here, nobody can forge a seal without it.
+     */
+    public byte[] receiptSigningKey() {
+        return secretKey("receipt.signing-key");
+    }
+
+    /**
+     * The key pair that digitally signs the payment details on chit members' links (ECDSA P-256 with SHA-256), made on
+     * first use. The private key never leaves this installation; the public key goes with each link, so the member's
+     * browser can check the signature itself, and its fingerprint can be compared with the one the organiser gives out.
+     */
+    public synchronized java.security.KeyPair payLinkKeyPair() {
+        Properties p = read();
+        String priv = p.getProperty("paylink.signing-private");
+        String pub = p.getProperty("paylink.signing-public");
+        try {
+            java.security.KeyFactory kf = java.security.KeyFactory.getInstance("EC");
+            if (priv == null || pub == null || priv.isBlank() || pub.isBlank()) {
+                java.security.KeyPairGenerator g = java.security.KeyPairGenerator.getInstance("EC");
+                g.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"), new java.security.SecureRandom());
+                java.security.KeyPair pair = g.generateKeyPair();
+                p.setProperty("paylink.signing-private", java.util.Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()));
+                p.setProperty("paylink.signing-public", java.util.Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
+                write(p);
+                return pair;
+            }
+            return new java.security.KeyPair(
+                    kf.generatePublic(new java.security.spec.X509EncodedKeySpec(java.util.Base64.getDecoder().decode(pub.trim()))),
+                    kf.generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(java.util.Base64.getDecoder().decode(priv.trim()))));
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("Cannot load the payment-link signing key", e);
+        }
+    }
+
+    /** The public key (X.509 SubjectPublicKeyInfo, Base64), as browsers import it. */
+    public String payLinkPublicKey() {
+        return java.util.Base64.getEncoder().encodeToString(payLinkKeyPair().getPublic().getEncoded());
+    }
+
+    /** A short fingerprint of the public key, e.g. "3F9A 0C21 7B44 E1D0 5A6C": SHA-256 of the key, first 10 bytes. */
+    public String payLinkFingerprint() {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(payLinkKeyPair().getPublic().getEncoded());
+            String hex = java.util.HexFormat.of().withUpperCase().formatHex(h, 0, 10);
+            return hex.replaceAll("(.{4})(?!$)", "$1 ");
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Signs the text (UTF-8) with the private key: the signature as r||s (64 bytes, as WebCrypto expects), Base64. */
+    public String signPayLink(String text) {
+        try {
+            java.security.Signature sig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            sig.initSign(payLinkKeyPair().getPrivate());
+            sig.update(text.getBytes(StandardCharsets.UTF_8));
+            return java.util.Base64.getEncoder().encodeToString(sig.sign());
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Whether the signature is this installation's, over exactly this text. */
+    public boolean verifyPayLink(String text, String signature) {
+        if (text == null || signature == null) {
+            return false;
+        }
+        try {
+            java.security.Signature sig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            sig.initVerify(payLinkKeyPair().getPublic());
+            sig.update(text.getBytes(StandardCharsets.UTF_8));
+            return sig.verify(java.util.Base64.getDecoder().decode(signature.trim()));
+        } catch (IllegalArgumentException | java.security.GeneralSecurityException e) {
+            return false;
+        }
+    }
+
+    /** A 256-bit secret of this installation under the given name, made on first use and kept in the settings file. */
+    public synchronized byte[] secretKey(String name) {
+        Properties p = read();
+        String key = p.getProperty(name);
+        if (key == null || key.isBlank()) {
+            byte[] bytes = new byte[32];
+            new java.security.SecureRandom().nextBytes(bytes);
+            key = java.util.HexFormat.of().formatHex(bytes);
+            p.setProperty(name, key);
+            write(p);
+        }
+        return java.util.HexFormat.of().parseHex(key.trim());
+    }
+
     public static boolean valid(String path) {
         return path != null && path.matches("[a-z0-9][a-z0-9-]{0,29}") && !RESERVED.contains(path);
     }

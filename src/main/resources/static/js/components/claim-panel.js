@@ -69,7 +69,8 @@ export function claimPanelHtml(c, { evidence = true, readOnly = false, highlight
             <span class="chip-icon ${meta.tone}">${icon(meta.iconName)}</span>
             <div class="grow">
                 <div class="row"><b>${esc(c.party)}</b>${claimBadge(c)}<span class="tag">${esc(c.kindLabel)}</span>
-                    ${c.activeShares ? `<span class="tag aqua" title="Statement links that still work">${icon('link')}shared</span>` : ''}</div>
+                    ${c.activeShares ? `<span class="tag aqua" title="Statement links that still work">${icon('link')}shared</span>` : ''}
+                    ${c.agreementStatus ? `<span class="tag ${c.agreementStatus === 'DRAFT' ? 'gold' : 'good'}" title="Loan agreement ${esc(c.agreementNo || '')}">${icon('file-text')}${c.agreementStatus === 'DRAFT' ? 'agreement sent' : c.agreementStatus === 'SIGNED' ? 'agreement signed' : 'agreement accepted'}</span>` : ''}</div>
                 <div class="small muted">${esc(c.narration)} · ${esc(c.entryNo || '')} · tracked in ${esc(c.receivableAccount)}${meta.payable ? ' · you owe this' : ''}</div>
             </div>
             <div class="claim-progress">
@@ -79,6 +80,7 @@ export function claimPanelHtml(c, { evidence = true, readOnly = false, highlight
             ${manage ? `<div class="claim-quick">
                 ${open ? `<button class="btn sm primary" data-claim-action="pay" title="Jump to the payment form">${icon(meta.payable ? 'arrow-out' : 'arrow-in')}${meta.payable ? 'Pay' : 'Receive'}</button>` : ''}
                 <button class="btn sm" data-claim-action="share" title="A link ${meta.payable ? 'the lender' : 'the borrower'} can open to see payments, interest and what is pending">${icon('link')}Share</button>
+                ${!meta.payable ? `<button class="btn sm" data-claim-action="agreement" title="A loan agreement: a secure link for ${esc(c.party)} to sign (with Aadhaar and a selfie), and a stamp-paper copy">${icon('file-text')}${c.agreementStatus ? 'Agreement' : 'Agreement…'}</button>` : ''}
                 ${open && !meta.payable ? `<button class="btn sm icon" data-claim-action="remind" title="Copy a polite reminder with the amount due">${icon('copy')}</button>
                     <a class="btn sm icon" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(reminderText(c))}" title="Send the reminder on WhatsApp">${icon('phone')}</a>` : ''}
                 <button class="btn sm icon" data-claim-action="edit" title="Edit">${icon('edit')}</button>
@@ -568,6 +570,10 @@ export async function bindClaimPanel(host, claim, { onChanged, onEdit = c => edi
                 return;
             }
             if (action === 'share') await openShareDialog(claim, onChanged);
+            if (action === 'agreement') {
+                const { openLoanAgreement } = await import('./loan-agreement.js');
+                await openLoanAgreement(claim, onChanged);
+            }
             if (action === 'plan' && btn.dataset.plan !== (claim.interestCollection || 'MONTHLY')) {
                 const saved = await api.put(`/claims/${claim.id}/interest-plan`, { collection: btn.dataset.plan, autoPost: claim.postInterestMonthly });
                 tableState.delete(claim.id);   // the table opens the way that suits the new plan

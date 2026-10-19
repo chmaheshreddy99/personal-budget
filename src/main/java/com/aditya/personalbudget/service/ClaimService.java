@@ -30,6 +30,8 @@ import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.ClaimRepaymentRepository;
 import com.aditya.personalbudget.repository.ClaimRepository;
 import com.aditya.personalbudget.repository.ClaimShareRepository;
+import com.aditya.personalbudget.repository.ClaimAgreementRepository;
+import com.aditya.personalbudget.domain.entity.ClaimAgreement;
 import com.aditya.personalbudget.domain.entity.ClaimShare;
 import com.aditya.personalbudget.domain.type.InterestCollection;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
@@ -94,11 +96,16 @@ public class ClaimService {
     private final DayCount dayCount;
     private final com.aditya.personalbudget.repository.AttachmentRepository attachments;
     private final ClaimShareRepository shares;
+    private final ClaimAgreementRepository agreements;
+    private final AttachmentService files;
 
     public ClaimService(ClaimRepository claims, ClaimRepaymentRepository repayments, AccountRepository accounts,
                         JournalEntryRepository entries, LedgerService ledger, CategoryService categories,
                         ClaimInterestPostingRepository postings, BudgetProperties properties,
-                        com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimShareRepository shares) {
+                        com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimShareRepository shares,
+                        ClaimAgreementRepository agreements, AttachmentService files) {
+        this.agreements = agreements;
+        this.files = files;
         this.shares = shares;
         this.attachments = attachments;
         this.categories = categories;
@@ -236,6 +243,14 @@ public class ClaimService {
             }
         }
         shares.deleteAll(shares.findByClaimId(id));   // its statement links stop working
+        for (ClaimAgreement a : agreements.findByClaimId(id)) {   // a draft agreement goes with it; an accepted one is a record
+            if (!ClaimAgreement.DRAFT.equals(a.getStatus())) {
+                throw new BusinessException("'" + claim.getNarration() + "' has the agreement " + a.getAgreementNo() + " " + a.getStatus().toLowerCase()
+                        + " by " + a.getBorrowerName() + ", kept as a legal record, so it cannot be deleted");
+            }
+            files.deleteAllForAgreement(ClaimAgreementService.FILES, a.getId());
+            agreements.deleteById(a.getId());
+        }
         claims.deleteById(id);
         if (entryId != null) {
             ledger.delete(entryId);
@@ -845,6 +860,7 @@ public class ClaimService {
         Long daysToDue = c.getDueDate() == null || !open ? null : ChronoUnit.DAYS.between(today, c.getDueDate());
 
         Account receivable = ctx.accounts().get(c.getReceivableAccountId());
+        ClaimAgreement agreement = agreements.findByClaimId(c.getId()).stream().max(java.util.Comparator.comparing(ClaimAgreement::getId)).orElse(null);
         return new ClaimView(c.getId(), c.getKind(), c.getKind().getLabel(), c.getParty(), c.getNarration(),
                 c.getAmount(), c.getStartDate(), c.getDueDate(), c.getInterestRate(), type, type.getLabel(),
                 receivable.getId(), receivable.getName(), payerAccount.getId(), payerName, payerAccount.getAccountType().name(),
@@ -869,7 +885,8 @@ public class ClaimService {
                 defaultInterestAccount(c), ctx.accounts().get(defaultInterestAccount(c)).getName(),
                 c.getJournalEntryId() == null ? 0 : ctx.evidence().getOrDefault(c.getJournalEntryId(), 0),
                 plan, plan.getLabel(), dueNow, nextDate, nextAmount,
-                (int) ctx.shares().getOrDefault(c.getId(), List.of()).stream().filter(s -> s.isActive(ctx.now())).count());
+                (int) ctx.shares().getOrDefault(c.getId(), List.of()).stream().filter(s -> s.isActive(ctx.now())).count(),
+                agreement == null ? null : agreement.getStatus(), agreement == null ? null : agreement.getAgreementNo());
     }
 
     /**

@@ -23,6 +23,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
+    // Sending reminders and receipts by e-mail (only when budget.mail is configured)
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+
     // JPA annotations (mapping metadata + constraints) and Spring Data repository contracts.
     // Persistence itself is done by our own tab-separated file store - no database needed.
     implementation 'jakarta.persistence:jakarta.persistence-api'
@@ -33,6 +36,8 @@ dependencies {
 
     // Password hashing only (BCrypt), not the full Spring Security stack
     implementation 'org.springframework.security:spring-security-crypto'
+    // renders an ID card uploaded as a PDF into an image for the agreement
+    implementation 'org.apache.pdfbox:pdfbox:3.0.3'
 
     // Boilerplate reduction for entities (getters/setters)
     compileOnly 'org.projectlombok:lombok'

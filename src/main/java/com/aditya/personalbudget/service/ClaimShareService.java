@@ -2,7 +2,7 @@ package com.aditya.personalbudget.service;
 
 import com.aditya.personalbudget.domain.entity.Claim;
 import com.aditya.personalbudget.domain.entity.ClaimShare;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.Feature;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.dto.ClaimDtos.ClaimView;
@@ -12,7 +12,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.ClaimRepository;
 import com.aditya.personalbudget.repository.ClaimShareRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
 import jakarta.validation.constraints.Max;
@@ -81,12 +81,12 @@ public class ClaimShareService {
 
     private final ClaimShareRepository shares;
     private final ClaimRepository claims;
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final ClaimService claimService;
     private final ActivityService activity;
     private final SecureRandom random = new SecureRandom();
 
-    public ClaimShareService(ClaimShareRepository shares, ClaimRepository claims, TenantRepository tenants,
+    public ClaimShareService(ClaimShareRepository shares, ClaimRepository claims, OrganizationRepository tenants,
                              ClaimService claimService, ActivityService activity) {
         this.shares = shares;
         this.claims = claims;
@@ -146,7 +146,7 @@ public class ClaimShareService {
     @Transactional
     public Statement open(String token) {
         ClaimShare s = active(token);
-        Tenant tenant = tenants.findById(s.getTenantId()).filter(t -> Boolean.TRUE.equals(t.getActive()))
+        Organization tenant = tenants.findById(s.getTenantId()).filter(t -> Boolean.TRUE.equals(t.getActive()))
                 .orElseThrow(() -> new BusinessException("This statement is no longer shared"));
         s.setViews((s.getViews() == null ? 0 : s.getViews()) + 1);
         s.setLastViewedAt(LocalDateTime.now());
@@ -165,7 +165,7 @@ public class ClaimShareService {
         }
     }
 
-    private static Statement statement(ClaimView c, ClaimShare s, Tenant t) {
+    private static Statement statement(ClaimView c, ClaimShare s, Organization t) {
         boolean owedByViewer = !c.kind().isPayable();
         List<Payment> payments = c.repayments().stream()
                 .map((RepaymentView r) -> new Payment(r.paidDate(), r.principal(), r.interest(), r.total(), r.outstandingAfter(),

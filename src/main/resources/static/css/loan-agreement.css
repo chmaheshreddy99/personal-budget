@@ -1,0 +1,18 @@
+/* The borrower's page of a loan agreement (loan-agreement.html) */
+.la-gate { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 28px 20px; }
+.la-gate .la-lock { font-size: 34px; }
+.la-gate h1 { margin: 0; font-size: 20px; }
+.la-gate p { margin: 0; max-width: 420px; color: #4b5560; line-height: 1.5; }
+.la-gate form { display: flex; flex-direction: column; gap: 8px; width: min(340px, 100%); margin-top: 6px; }
+.la-gate input { height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid #c9d6e2; font-size: 18px; text-align: center; letter-spacing: 0.06em; }
+.la-gate input:focus { outline: none; border-color: #0b7cbd; box-shadow: 0 0 0 3px rgba(11, 124, 189, 0.15); }
+.la-gate .cs-error:empty { display: none; }
+.la-step { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0; padding: 12px; border-radius: 14px; border: 1px solid #d6e3ee; background: #f9fcfe; }
+.la-step > div.grow { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.la-step b { font-size: 15px; }
+.la-step small { color: #5f6b77; }
+.la-step-no { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #0b7cbd; color: #fff; font-weight: 700; }
+.la-ok { margin: 0; color: #0a6b2c; font-weight: 650; }
+.cs-agreement .bond-preview { margin: 8px 0; }
+#la-kyc-error:empty, #la-error:empty { display: none; }
+.la-step .cs-sign canvas { max-width: 100%; }

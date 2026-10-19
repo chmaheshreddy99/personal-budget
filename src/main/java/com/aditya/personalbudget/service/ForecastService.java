@@ -105,7 +105,7 @@ public class ForecastService {
         List<ChitInstallment> pending = chits.pendingInstallments();
 
         BigDecimal liquid = books.accounts().values().stream()
-                .filter(a -> a.getAccountType().isLiquid())
+                .filter(Account::isLiquid)
                 .map(a -> balances.getOrDefault(a.getId(), Money.ZERO))
                 .reduce(Money.ZERO, BigDecimal::add);
         BigDecimal netWorth = books.netWorthAsOf(today);
@@ -210,7 +210,7 @@ public class ForecastService {
 
     private static boolean isLiquid(LedgerSnapshot books, Long accountId) {
         Account a = books.account(accountId);
-        return a != null && a.getAccountType().isLiquid();
+        return a != null && a.isLiquid();
     }
 
     private static BigDecimal average(BigDecimal total) {

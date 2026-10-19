@@ -5,7 +5,8 @@
  *   Categories  every expense and income category: change, share, budget use, size of a typical entry
  *   Accounts    activity per account: opening, in, out, closing, idle accounts, card utilisation
  *   Chits       each chit's contributions, dividends, value, return and what is still due
- * then the chit summary (selected chits together, printable for the organizer), followed by the statements:
+ * then the chit summary (selected chits together, printable for the organizer) and the chits the user hosts
+ * (Hosted chits: collections, dues and earnings), followed by the statements:
  * income statement, trial balance, cash flow and expense analysis.
  * Each report has its own filters, chart(s), table and Excel / PDF / CSV export.
  */
@@ -13,6 +14,8 @@ import { api } from '../core/api.js';
 import { panel, table, esc, stat, printElement, emptyState } from '../core/ui.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { chitSummaryReport } from './chit-summary.js';
+import { hostedChitReport } from './hosted-chit-report.js';
+import { emiReport } from './emi-report.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, sparkline } from '../core/charts.js';
@@ -25,6 +28,8 @@ const REPORTS = [
     { key: 'accounts', label: 'Accounts', iconName: 'wallet', note: 'Money in and out of every account' },
     { key: 'chits', label: 'Chits', iconName: 'chit', note: 'Contributions, value and returns' },
     { key: 'chit-summary', label: 'Chit summary', iconName: 'layers', note: 'Selected chits together, printable' },
+    { key: 'hosted-chits', label: 'Hosted chits', iconName: 'hand-coins', note: 'Chits I run: collections, dues, earnings' },
+    { key: 'emi', label: 'EMI analysis', iconName: 'calendar', note: 'Is buying on EMI worth it: cost against savings interest' },
     { key: 'income-statement', label: 'Income statement', iconName: 'report', note: 'Income, expenses and surplus' },
     { key: 'trial-balance', label: 'Trial balance', iconName: 'scale', note: 'Debit and credit balances' },
     { key: 'cash-flow', label: 'Cash flow', iconName: 'droplet', note: 'Money in and out of cash & bank' },
@@ -90,11 +95,12 @@ export async function render(container, params, isCurrent) {
     const content = container.querySelector('#report-content');
     const usesAsOf = active.key === 'trial-balance';
     const ownToolbar = active.key === 'chit-summary';   // picks chits, not a period, and brings its own export
+    const periodless = active.key === 'emi';             // every EMI, whenever bought: a savings rate instead of a period
 
     toolbar.innerHTML = `
         <h2 class="page-title">${icon(active.iconName)} ${active.label}</h2>
         <span class="spacer"></span>
-        ${ownToolbar ? '' : usesAsOf ? `<label class="row small secondary">As of <input type="date" id="asof" value="${period.asOf}"></label>` : `
+        ${ownToolbar || periodless ? '' : usesAsOf ? `<label class="row small secondary">As of <input type="date" id="asof" value="${period.asOf}"></label>` : `
             <div class="tabs sm" id="presets">${PRESETS.map((p, i) => `<button class="tab" data-preset="${i}">${p.label}</button>`).join('')}</div>
             <input type="date" id="from" value="${period.from}"><span class="muted">→</span><input type="date" id="to" value="${period.to}">`}
         ${ownToolbar ? '' : `${exportButton({ label: 'Export' })}
@@ -105,9 +111,9 @@ export async function render(container, params, isCurrent) {
     const load = async () => {
         content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
         const drawer = { insights: insightsReport, categories: categoriesReport, accounts: accountsReport, chits: chitsReport,
-                         'chit-summary': chitSummaryReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
-                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis }[active.key];
-        exportRows = await drawer(content, toolbar);
+                         'chit-summary': chitSummaryReport, 'hosted-chits': hostedChitReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
+                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport }[active.key];
+        exportRows = await drawer(content, toolbar, period);
     };
 
     toolbar.querySelector('#presets')?.addEventListener('click', e => {

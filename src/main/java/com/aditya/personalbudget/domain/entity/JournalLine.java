@@ -31,8 +31,8 @@ public class JournalLine implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     @References(JournalEntry.class)
@@ -55,7 +55,7 @@ public class JournalLine implements TenantOwned {
     @Column(nullable = false)
     private BigDecimal credit;
 
-    @Column(length = 255)
+    @Column(length = 2000)
     private String memo;
 
     /** Expense or income category, on lines of the Expenses / Income account. */
@@ -65,4 +65,19 @@ public class JournalLine implements TenantOwned {
     /** The chit, on lines of the Chit Funds account. */
     @References(Chit.class)
     private Long chitId;
+
+    /**
+     * The hosted chit whose money this line moves (Host a Chit), on any account: it keeps a sub-ledger per hosted
+     * chit, so the chit's money can be traced even when it sits in a personal bank account.
+     */
+    @References(HostedChit.class)
+    private Long hostedChitId;
+    /**
+     * Snapshot of the account's balance (natural sign) right before this line, in ledger order: entry date, then
+     * entry, then line. Kept by the ledger with {@link #balanceAfter}: an entry posted, changed or deleted on an
+     * earlier date moves the snapshots of the lines after it.
+     */
+    private BigDecimal balanceBefore;
+    /** Snapshot of the account's balance (natural sign) right after this line; see {@link #balanceBefore}. */
+    private BigDecimal balanceAfter;
 }

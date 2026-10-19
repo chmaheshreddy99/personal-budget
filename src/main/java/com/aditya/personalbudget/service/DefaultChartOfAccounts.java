@@ -46,6 +46,8 @@ public final class DefaultChartOfAccounts {
      * chits against it, so chits can have a (committed) budget like rent or an EMI.
      */
     public static final String CHIT_PAYMENTS = "CHIT_PAYMENTS";
+    /** Commission (and its share of late fees) earned from the chits I run (Host a Chit). */
+    public static final String CHIT_COMMISSION = "CHIT_COMMISSION";
 
     public static final List<Template> ACCOUNTS = List.of(
             new Template(CASH, "Cash in Hand", AccountType.CASH, true, "Physical cash / petty cash"),
@@ -67,6 +69,18 @@ public final class DefaultChartOfAccounts {
             new CategoryTemplate("4050", "Chit Gains", CategoryKind.INCOME, CHIT_GAINS, "Chit dividends and gain on chit payout"),
             new CategoryTemplate("4060", "Rental Income", CategoryKind.INCOME, null, null),
             new CategoryTemplate("4070", "Gifts Received", CategoryKind.INCOME, null, null),
+            new CategoryTemplate("4080", "Savings Income", CategoryKind.INCOME, null, "Savings account interest, RD / FD maturity gains, sweep-in returns"),
+            new CategoryTemplate("4090", "Bonus & Incentives", CategoryKind.INCOME, null, "Annual bonus, performance pay, incentives"),
+            new CategoryTemplate("4100", "Pension", CategoryKind.INCOME, null, null),
+            new CategoryTemplate("4110", "Cashback & Rewards", CategoryKind.INCOME, null, "Card cashback, reward points redeemed, UPI cashback"),
+            new CategoryTemplate("4120", "Refunds & Reimbursements", CategoryKind.INCOME, null, "Office reimbursements, tax refunds, order refunds"),
+            new CategoryTemplate("4130", "Agricultural Income", CategoryKind.INCOME, null, "Crops, produce, farm lease"),
+            new CategoryTemplate("4140", "Commission & Brokerage", CategoryKind.INCOME, null, null),
+            new CategoryTemplate("4150", "Tuition & Coaching", CategoryKind.INCOME, null, "Teaching, coaching, training fees"),
+            new CategoryTemplate("4160", "Sale of Items", CategoryKind.INCOME, null, "Old items, scrap, second-hand sales"),
+            new CategoryTemplate("4170", "Allowances", CategoryKind.INCOME, null, "HRA, travel, meal and other allowances"),
+            new CategoryTemplate("4180", "Chit Commission Income", CategoryKind.INCOME, CHIT_COMMISSION,
+                    "Commission and late payment interest from the chits I run (Host a Chit)"),
             new CategoryTemplate("4990", "Other Income", CategoryKind.INCOME, OTHER_INCOME, null),
             // ---- Expenses
             new CategoryTemplate("5010", "Groceries", CategoryKind.EXPENSE, null, "Food and household supplies"),
@@ -78,7 +92,7 @@ public final class DefaultChartOfAccounts {
             new CategoryTemplate("5070", "Medical & Health", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5080", "Education", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5090", "Entertainment", CategoryKind.EXPENSE, null, "Movies, OTT, outings"),
-            new CategoryTemplate("5100", "Shopping & Clothing", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5100", "Clothing & Footwear", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5110", "Insurance Premiums", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5120", "Loan Interest", CategoryKind.EXPENSE, LOAN_INTEREST, "Interest part of EMIs and borrowing"),
             new CategoryTemplate("5130", "Bank Charges & Fees", CategoryKind.EXPENSE, null, null),
@@ -92,6 +106,28 @@ public final class DefaultChartOfAccounts {
             new CategoryTemplate("5180", "Gifts & Donations", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5190", "Taxes", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5200", "Kids & Family", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5210", "Shopping", CategoryKind.EXPENSE, null, "Online and store shopping: Amazon, Flipkart, malls"),
+            new CategoryTemplate("5220", "Electronic Gadgets", CategoryKind.EXPENSE, null, "Phones, laptops, accessories, appliances"),
+            new CategoryTemplate("5230", "Gym & Fitness", CategoryKind.EXPENSE, null, "Gym, yoga, sports, supplements"),
+            new CategoryTemplate("5240", "Milk & Dairy", CategoryKind.EXPENSE, null, "Milk, curd, paneer, the monthly milk bill"),
+            new CategoryTemplate("5250", "Maid & Household Help", CategoryKind.EXPENSE, null, "Maid, cook, driver, watchman"),
+            new CategoryTemplate("5260", "Vegetables & Fruits", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5270", "Food Delivery", CategoryKind.EXPENSE, null, "Swiggy, Zomato, takeaway"),
+            new CategoryTemplate("5280", "Subscriptions", CategoryKind.EXPENSE, null, "OTT, music, apps, cloud storage"),
+            new CategoryTemplate("5290", "Gas Cylinder (LPG)", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5300", "DTH & Cable", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5310", "Vehicle Maintenance", CategoryKind.EXPENSE, null, "Service, repairs, tyres, washing"),
+            new CategoryTemplate("5320", "Cab & Auto", CategoryKind.EXPENSE, null, "Uber, Ola, Rapido, auto rickshaw"),
+            new CategoryTemplate("5330", "Parking & Tolls", CategoryKind.EXPENSE, null, "Parking, FASTag, tolls"),
+            new CategoryTemplate("5340", "Laundry & Ironing", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5350", "Snacks & Beverages", CategoryKind.EXPENSE, null, "Tea, coffee, bakery, snacks"),
+            new CategoryTemplate("5360", "Pharmacy & Medicines", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5370", "Furniture & Home Decor", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5380", "Festivals & Pooja", CategoryKind.EXPENSE, null, "Festival shopping, pooja items, temple"),
+            new CategoryTemplate("5390", "Pets", CategoryKind.EXPENSE, null, "Pet food, vet, grooming"),
+            new CategoryTemplate("5400", "Books & Stationery", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5410", "Water Cans", CategoryKind.EXPENSE, null, "Drinking water cans, RO service"),
+            new CategoryTemplate("5420", "Newspaper & Magazines", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5990", "Miscellaneous", CategoryKind.EXPENSE, MISC_EXPENSE, null)
     );
 

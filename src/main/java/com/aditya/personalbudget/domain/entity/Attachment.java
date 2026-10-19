@@ -29,8 +29,8 @@ public class Attachment implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     /** The entry it belongs to; empty while it belongs to an entry still waiting for approval. */
@@ -48,6 +48,26 @@ public class Attachment implements TenantOwned {
     /** A scan of a personal document (Documents). */
     @References(PersonalDocument.class)
     private Long documentId;
+
+    /**
+     * ID proof and photos attached to an agreement: "CHIT_AGREEMENT" ({@link HostedChitAgreement}) or "LOAN_AGREEMENT"
+     * ({@link ClaimAgreement}), with the row's id. The agreement removes them when it goes.
+     */
+    @Column(length = 20)
+    private String ownerKind;
+
+    private Long ownerId;
+
+    /** What the file is: AADHAAR_FRONT, AADHAAR_BACK, PAN, SELFIE or OTHER (agreements). */
+    @Column(length = 20)
+    private String docType;
+
+    /**
+     * An image rendered from a PDF the member gave (a page of their Aadhaar or PAN card): the SHA-256 of that PDF,
+     * which stays attached unchanged as the original.
+     */
+    @Column(length = 64)
+    private String derivedFromSha;
 
     /** Name of the file as the user had it (or "Photo 2026-10-07 14.32.jpg" for the camera). */
     @Column(nullable = false, length = 200)

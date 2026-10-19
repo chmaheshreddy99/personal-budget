@@ -3,7 +3,7 @@ package com.aditya.personalbudget.service;
 import com.aditya.personalbudget.config.BudgetProperties;
 import com.aditya.personalbudget.domain.entity.AccessLink;
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.dto.UserDtos.LoginRequest;
 import com.aditya.personalbudget.dto.UserDtos.MeView;
@@ -14,7 +14,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.UnauthorizedException;
 import com.aditya.personalbudget.repository.AccessLinkRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.FeaturePolicy;
 import com.aditya.personalbudget.security.RolePolicy;
@@ -40,7 +40,7 @@ public class AuthService {
     private final ApprovalPolicy approvals;
 
     private final AppUserRepository users;
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final SessionRegistry sessions;
     private final PasswordEncoder passwordEncoder;
     private final TenantProvisioningService provisioning;
@@ -48,7 +48,7 @@ public class AuthService {
     private final int lockMinutes;
     private final String defaultPassword;
 
-    public AuthService(AppUserRepository users, TenantRepository tenants, SessionRegistry sessions,
+    public AuthService(AppUserRepository users, OrganizationRepository tenants, SessionRegistry sessions,
                        PasswordEncoder passwordEncoder, TenantProvisioningService provisioning,
                        BudgetProperties properties, AppSettingsService appSettings,
                        AccessLinkService accessLinks, AccessLinkRepository accessLinkRepository, ActivityService activity,
@@ -95,12 +95,12 @@ public class AuthService {
             throw new UnauthorizedException("This user is deactivated");
         }
         boolean mobile = "mobile".equalsIgnoreCase(request.client());
-        if (mobile && FeaturePolicy.granted(user, true).isEmpty()) {
+        if (mobile && FeaturePolicy.granted(user, tenants.findById(user.getTenantId()).orElse(null), true).isEmpty()) {
             throw new UnauthorizedException("The mobile version is not shared with you. Ask your admin, or use the full site.");
         }
-        Tenant tenant = tenants.findById(user.getTenantId()).orElseThrow();
+        Organization tenant = tenants.findById(user.getTenantId()).orElseThrow();
         if (!Boolean.TRUE.equals(tenant.getActive())) {
-            throw new UnauthorizedException("Tenant '" + tenant.getName() + "' is deactivated");
+            throw new UnauthorizedException("Organization '" + tenant.getName() + "' is deactivated");
         }
         user.setLastLoginAt(now);
         user.setFailedLogins(0);
@@ -133,7 +133,7 @@ public class AuthService {
             return linkMe(current, accessLinkRepository.findById(current.linkId()).orElseThrow(() -> new UnauthorizedException("Link removed")));
         }
         AppUser user = users.findById(current.userId()).orElseThrow(() -> new UnauthorizedException("User removed"));
-        Tenant tenant = tenants.findById(user.getTenantId()).orElseThrow();
+        Organization tenant = tenants.findById(user.getTenantId()).orElseThrow();
         return toMe(user, tenant, current.mobile());
     }
 
@@ -163,12 +163,12 @@ public class AuthService {
         activity.record("CHANGED", "Sign-in", forced ? "Replaced the default password" : "Changed the password");
     }
 
-    private MeView toMe(AppUser user, Tenant tenant, boolean mobile) {
+    private MeView toMe(AppUser user, Organization tenant, boolean mobile) {
         return new MeView(user.getId(), user.getUsername(), user.getFullName(), user.getEmail(), user.getRole(),
                 user.getRole().getLabel(), tenant.getId(), tenant.getCode(), tenant.getName(), tenant.getCurrency(),
                 RolePolicy.permissionsOf(user.getRole()), true,
-                FeaturePolicy.granted(user, mobile), mobile, !Boolean.FALSE.equals(user.getMobileAccess()),
-                FeaturePolicy.granted(user, true), appSettings.get().mobilePath(), null, null, approvals.forUser(user, tenant), null,
+                FeaturePolicy.granted(user, tenant, mobile), mobile, !Boolean.FALSE.equals(user.getMobileAccess()),
+                FeaturePolicy.granted(user, tenant, true), appSettings.get().mobilePath(), null, null, approvals.forUser(user, tenant), null,
                 Boolean.TRUE.equals(user.getMustChangePassword()));
     }
 
@@ -178,7 +178,7 @@ public class AuthService {
         AccessLink link = accessLinks.active(token);
         AppUser maker = users.findById(link.getCreatedById()).filter(u -> Boolean.TRUE.equals(u.getActive()))
                 .orElseThrow(() -> new UnauthorizedException("This link is no longer valid"));
-        Tenant tenant = tenants.findById(maker.getTenantId()).filter(t -> Boolean.TRUE.equals(t.getActive()))
+        Organization tenant = tenants.findById(maker.getTenantId()).filter(t -> Boolean.TRUE.equals(t.getActive()))
                 .orElseThrow(() -> new UnauthorizedException("This link is no longer valid"));
         accessLinks.touch(link);
         String sessionToken = sessions.openForLink(link, userAgent);

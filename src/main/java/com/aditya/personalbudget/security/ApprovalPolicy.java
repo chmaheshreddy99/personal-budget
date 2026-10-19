@@ -2,7 +2,7 @@ package com.aditya.personalbudget.security;
 
 import com.aditya.personalbudget.domain.entity.AccessLink;
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.service.AppSettingsService;
 import org.springframework.stereotype.Component;
 
@@ -13,7 +13,7 @@ import java.util.Set;
  * Who has to wait for a checker (maker-checker), decided at three levels, the broadest first:
  * <ol>
  *   <li>the installation ({@code approval.enabled}, super admin): off means nobody, anywhere;</li>
- *   <li>the household ({@link Tenant#getApprovalMode()}): {@code OFF} nobody, {@code LINKS} only access links made
+ *   <li>the household ({@link Organization#getApprovalMode()}): {@code OFF} nobody, {@code LINKS} only access links made
  *       with approval (the default), {@code ALL} also every user who cannot approve;</li>
  *   <li>the user ({@link AppUser#getApproval()}): always, never (exempt) or as the household says; and the link
  *       (its "approval" tick).</li>
@@ -39,16 +39,16 @@ public class ApprovalPolicy {
     }
 
     /** The household's mode, {@code LINKS} when it never chose one. */
-    public static String modeOf(Tenant t) {
+    public static String modeOf(Organization t) {
         String mode = t == null || t.getApprovalMode() == null ? LINKS : t.getApprovalMode().trim().toUpperCase(Locale.ROOT);
         return MODES.contains(mode) ? mode : LINKS;
     }
 
-    public boolean forLink(AccessLink link, Tenant tenant) {
+    public boolean forLink(AccessLink link, Organization tenant) {
         return Boolean.TRUE.equals(link.getApproval()) && enabledGlobally() && !OFF.equals(modeOf(tenant));
     }
 
-    public boolean forUser(AppUser user, Tenant tenant) {
+    public boolean forUser(AppUser user, Organization tenant) {
         if (!RolePolicy.allows(user.getRole(), Permission.POST_TRANSACTIONS)
                 || RolePolicy.allows(user.getRole(), Permission.APPROVE_ENTRIES)
                 || !enabledGlobally() || OFF.equals(modeOf(tenant))) {

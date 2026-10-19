@@ -4,10 +4,12 @@ import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.JournalEntry;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.AccountType;
+import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.domain.type.VoucherType;
 import com.aditya.personalbudget.dto.AccountDtos.AccountRequest;
 import com.aditya.personalbudget.dto.AccountDtos.AccountView;
 import com.aditya.personalbudget.exception.BusinessException;
+import com.aditya.personalbudget.exception.ForbiddenException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.BudgetRepository;
@@ -29,7 +31,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Chart of accounts management. Balances are always derived from the ledger, never stored.
+ * Chart of accounts management. An account's current balance is stored on it and kept by the ledger
+ * ({@link AccountLedgerSync}); balances as of other dates are worked out from the journal lines.
  */
 @Service
 public class AccountService {
@@ -84,7 +87,8 @@ public class AccountService {
         return books.accounts().values().stream()
                 .sorted(Comparator.comparing(Account::getCode))
                 .map(a -> {
-                    BigDecimal balance = balances.getOrDefault(a.getId(), Money.ZERO);
+                    // the stored balance, kept by the ledger on every debit and credit
+                    BigDecimal balance = a.getBalance() != null ? a.getBalance() : balances.getOrDefault(a.getId(), Money.ZERO);
                     List<BigDecimal> trend = trendPoints.stream().map(m -> m.getOrDefault(a.getId(), Money.ZERO)).toList();
                     return toView(a, balance, monthMoves.getOrDefault(a.getId(), Money.ZERO),
                             monthIn.getOrDefault(a.getId(), Money.ZERO), monthOut.getOrDefault(a.getId(), Money.ZERO),
@@ -108,6 +112,14 @@ public class AccountService {
     public Account systemAccount(String code) {
         return accounts.findByTenantIdAndCode(UserContext.tenantId(), code)
                 .orElseThrow(() -> new BusinessException("System account " + code + " is missing"));
+    }
+
+    /**
+     * The account holder's name, account / card number, IFSC and UPI ID are sensitive: only an admin or super admin
+     * sees them (and changes them on an existing account). Work the system does by itself (no one signed in) sees them.
+     */
+    public static boolean canSeeBankDetails() {
+        return UserContext.current().map(u -> u.role() == UserRole.ADMIN || u.role() == UserRole.SUPER_ADMIN).orElse(true);
     }
 
     // ================================================================== commands
@@ -134,6 +146,9 @@ public class AccountService {
         Account account = require(id);
         AccountClass oldClass = account.getAccountClass();
         String oldCode = account.getCode();
+        BigDecimal oldOpening = account.getOpeningBalance();
+        LocalDate oldOpeningDate = account.getOpeningDate();
+        Account stored = require(id);
         if (!Boolean.TRUE.equals(account.getSystemAccount())) {
             requireNotCategory(request);
         }
@@ -151,9 +166,21 @@ public class AccountService {
         if (account.getCode() == null || account.getCode().isBlank()) {
             account.setCode(oldCode);
         }
+        // the opening balance is set when the account is created and never edited (left out of a request: unchanged)
+        if (request.openingBalance() != null && request.openingBalance().compareTo(Money.nz(oldOpening)) != 0) {
+            throw new BusinessException("The opening balance of '" + account.getName()
+                    + "' cannot be changed once the account is created. Post an adjustment entry to correct the balance instead");
+        }
+        account.setOpeningBalance(oldOpening);
+        account.setOpeningDate(oldOpeningDate);
+        if (!canSeeBankDetails()) {   // they never saw the details, so the form cannot change them
+            account.setAccountNumber(stored.getAccountNumber());
+            account.setHolderName(stored.getHolderName());
+            account.setIfsc(stored.getIfsc());
+            account.setUpiId(stored.getUpiId());
+        }
         account.setVersion(request.version());   // a stale form is refused
         account = accounts.save(account);
-        syncOpeningBalance(account);
         return get(account.getId());
     }
 
@@ -220,6 +247,7 @@ public class AccountService {
         account.setMaturityDate(r.maturityDate());
         account.setQuantity(r.quantity());
         account.setDescription(r.description());
+        applyBankDetails(account, r);
         account.setActive(r.active() == null || r.active());
 
         boolean balanceSheet = type.getAccountClass() == AccountClass.ASSET
@@ -231,6 +259,55 @@ public class AccountService {
             account.setOpeningBalance(null);
             account.setOpeningDate(r.openingDate());
         }
+    }
+
+    /**
+     * Bank and wallet accounts carry the details chit members pay into: the holder's name, IFSC (banks) and UPI ID,
+     * checked for their form; other kinds of account have none.
+     */
+    private static void applyBankDetails(Account account, AccountRequest r) {
+        boolean bank = account.getAccountType() == AccountType.BANK;
+        boolean wallet = account.getAccountType() == AccountType.WALLET;
+        String holder = clean(r.holderName());
+        String ifsc = clean(r.ifsc()) == null ? null : r.ifsc().trim().toUpperCase();
+        String upi = clean(r.upiId());
+        if (ifsc != null && !ifsc.matches("[A-Z]{4}0[A-Z0-9]{6}")) {
+            throw new BusinessException("The IFSC should look like ICIC0000598 (4 letters, 0, then 6 letters or digits)");
+        }
+        if (upi != null && !upi.matches("[\\w.\\-]{2,}@[A-Za-z][\\w.]{1,}")) {
+            throw new BusinessException("The UPI ID should look like name@bank");
+        }
+        if (r.accountNumber() != null && !r.accountNumber().isBlank() && bank && !r.accountNumber().trim().matches("[A-Za-z0-9 \\-]{4,40}")) {
+            throw new BusinessException("The account number can have letters, digits, spaces and dashes");
+        }
+        account.setHolderName(bank || wallet ? holder : null);
+        account.setIfsc(bank ? ifsc : null);
+        account.setUpiId(bank || wallet ? upi : null);
+    }
+
+    /** Updates only the bank details of a bank or wallet account (e.g. when it is picked for chit members to pay into). */
+    @Transactional
+    public AccountView updateBankDetails(Long id, com.aditya.personalbudget.dto.AccountDtos.BankDetailsRequest r) {
+        if (!canSeeBankDetails()) {
+            throw new ForbiddenException("Only an admin can change an account's bank details");
+        }
+        Account account = require(id);
+        if (account.getAccountType() != AccountType.BANK && account.getAccountType() != AccountType.WALLET) {
+            throw new BusinessException(account.getName() + " is not a bank or wallet account");
+        }
+        if (r.version() != null && !r.version().equals(account.getVersion())) {
+            throw new BusinessException(account.getName() + " was changed by someone else; reopen it and try again");
+        }
+        account.setInstitution(clean(r.institution()));
+        account.setAccountNumber(clean(r.accountNumber()));
+        applyBankDetails(account, new AccountRequest(account.getCode(), account.getName(), account.getAccountType(), account.getInstitution(),
+                account.getAccountNumber(), null, null, null, null, null, null, null, null, null, r.holderName(), r.ifsc(), r.upiId()));
+        accounts.save(account);
+        return get(id);
+    }
+
+    private static String clean(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     /**
@@ -296,6 +373,7 @@ public class AccountService {
 
     private AccountView toView(Account a, BigDecimal balance, BigDecimal monthMove, BigDecimal in, BigDecimal out,
                                BigDecimal change30, LocalDate last, long count, List<BigDecimal> trend, LocalDate today) {
+        boolean details = canSeeBankDetails();   // sensitive: admins only
         BigDecimal utilization = null;
         BigDecimal available = null;
         if (Money.isPositive(a.getCreditLimit())) {
@@ -304,10 +382,11 @@ public class AccountService {
         }
         Long daysToMaturity = a.getMaturityDate() == null ? null : ChronoUnit.DAYS.between(today, a.getMaturityDate());
         return new AccountView(a.getId(), a.getCode(), a.getName(), a.getAccountClass(), a.getAccountType(),
-                a.getAccountType().getLabel(), a.getInstitution(), a.getAccountNumber(), a.getOpeningBalance(),
+                a.getAccountType().getLabel(), a.getInstitution(), details ? a.getAccountNumber() : null, a.getOpeningBalance(),
                 a.getOpeningDate(), a.getInterestRate(), a.getCreditLimit(), a.getMaturityDate(), a.getQuantity(),
                 a.getDescription(), Boolean.TRUE.equals(a.getSystemAccount()), Boolean.TRUE.equals(a.getActive()),
                 balance, monthMove, in, out, change30, utilization, available, daysToMaturity,
-                ReportService.bucket(a.getAccountType()), last, count, trend, a.getVersion());
+                ReportService.bucket(a), last, count, trend, a.getVersion(), a.isChitBook(), a.getHostedChitId(), a.getChitRole(),
+                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount());
     }
 }

@@ -88,10 +88,14 @@ public final class UserDtos {
             /* Admin user created together with a new tenant */
             @Size(min = 3, max = 50) String adminUsername,
             @Size(max = 100) String adminFullName,
-            @Size(min = 6, max = 100) String adminPassword) {
+            @Size(min = 6, max = 100) String adminPassword,
+            /* the sections (menu items) the organization has; null = every section */
+            Set<Feature> features) {
     }
 
     public record TenantView(Long id, String code, String name, String currency, boolean active,
-                             LocalDateTime createdAt, long userCount, long accountCount) {
+                             LocalDateTime createdAt, long userCount, long accountCount,
+                             /* the sections the organization has, and whether that is fewer than all */
+                             Set<Feature> features, boolean limited) {
     }
 }

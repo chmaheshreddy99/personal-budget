@@ -17,9 +17,15 @@ export async function loadOptions() {
     return state.options;
 }
 
-export async function loadAccounts(force = false) {
+/**
+ * Your own accounts. The hosted-chit book (Host a Chit's collection, commission and common chit accounts: the
+ * members' money) is left out, so it never shows up in expenses, income, transfers, gifts, loans and the like.
+ * { all: true } adds it, for the chit pages, the journal and the Accounts page. state.accounts keeps every account
+ * (for looking up names).
+ */
+export async function loadAccounts(force = false, { all = false } = {}) {
     if (!state.accounts || force) state.accounts = await api.get('/accounts');
-    return state.accounts;
+    return all ? state.accounts : state.accounts.filter(a => !a.chitBook && !a.projectBook);
 }
 
 /** Expense and income categories with this / last month's figures. */
@@ -55,8 +61,9 @@ export function can(permission) {
 }
 
 /**
- * The app's sections an admin can share with a user (server: Feature). The server refuses calls of a section
- * that is not shared; this keeps its menu entries, shortcuts and buttons away.
+ * The app's sections (its menu items) an organization has and an admin can share with a user (server: Feature),
+ * in menu order. The server refuses calls of a section that is not shared; this keeps its menu entries, shortcuts
+ * and buttons away. `needs`: a role permission the section also requires.
  */
 export const FEATURES = [
     { key: 'DASHBOARD', label: 'Dashboard', path: 'dashboard', iconName: 'dashboard', mobile: true },
@@ -65,12 +72,22 @@ export const FEATURES = [
     { key: 'JOURNAL', label: 'Journal', path: 'transactions', iconName: 'journal', mobile: true },
     { key: 'ACCOUNTS', label: 'Accounts', path: 'accounts', iconName: 'wallet', mobile: true },
     { key: 'CHITS', label: 'Chits', path: 'chits', iconName: 'chit', mobile: true },
+    { key: 'HOST_CHITS', label: 'Host a Chit', path: 'host-chits', iconName: 'hand-coins', mobile: false },
     { key: 'BUDGETS', label: 'Budgets', path: 'planning', iconName: 'target', mobile: true },
     { key: 'BALANCE_SHEET', label: 'Balance sheet', path: 'balance-sheet', iconName: 'scale', mobile: true },
     { key: 'REPORTS', label: 'Reports', path: 'reports', iconName: 'report', mobile: true },
     { key: 'FORECAST', label: 'Forecast', path: 'forecast', iconName: 'trending', mobile: true },
     { key: 'GIFTS', label: 'Gifts', path: 'gifts', iconName: 'gift', mobile: true },
     { key: 'DOCUMENTS', label: 'Documents', path: 'documents', iconName: 'file-text', mobile: true },
+    { key: 'CONSTRUCTION', label: 'Construction', path: 'construction', iconName: 'hard-hat', mobile: false },
+    { key: 'ACTIVITY', label: 'Activity', path: 'activity', iconName: 'history', mobile: false, needs: 'APPROVE_ENTRIES' },
+];
+
+/** Menu items that go by role, not by sharing: listed in the access grids so every menu item is accounted for. */
+export const ROLE_SECTIONS = [
+    { label: 'Data integrity', iconName: 'shield', who: 'Admins and super admins' },
+    { label: 'Users & roles', iconName: 'users', who: 'Admins (manage users); everyone sees their profile' },
+    { label: 'Settings', iconName: 'settings', who: 'Everyone (what they may change goes by role)' },
 ];
 
 /** True when the section is shared with the signed-in user. */

@@ -11,13 +11,17 @@
  */
 import { api } from '../core/api.js';
 import { can } from '../core/store.js';
-import { esc, toast, confirmDialog } from '../core/ui.js';
+import { esc, toast, confirmDialog, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
+import { chitTrailChips, chitTrailHtml } from '../core/chit-trail.js';
 import { openJournalEditor } from './transaction-forms.js';
 import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim-panel.js';
 
-const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', accounts: 'Open Accounts' };
+const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
+    construction: 'Open Construction', 'expenses/emi': 'Open EMIs' };
+/** Where an entry is managed: a construction entry opens its own project. */
+const manageTarget = e => e.manageAt === 'construction' && e.construction?.projectId ? `construction/${e.construction.projectId}` : e.manageAt;
 
 /**
  * Toggles the detail row under `row`.
@@ -58,7 +62,7 @@ export async function toggleEntryRow(row, entry, { onChanged } = {}) {
                 btn.classList.toggle('active', !more.hidden);
                 btn.querySelector('span').textContent = more.hidden ? 'More' : 'Less';
             }
-            if (action === 'manage') location.hash = `#/${data.manageAt}`;
+            if (action === 'manage') location.hash = `#/${manageTarget(data)}`;
             if (action === 'delete' && await confirmDialog(`Delete ${data.entryNo}? Account balances will be recalculated.`)) {
                 await api.del(`/transactions/${data.id}`);
                 toast(`${data.entryNo} deleted`);
@@ -106,11 +110,28 @@ function claimEntryHtml(e, claim) {
                 <span class="ed-arrow">${icon('chevron-left')}</span>
                 <div class="ed-side">${e.lines.filter(l => Number(l.credit) > 0).map(l => pill(l, 'cr')).join('')}</div>
             </div>
+            ${balancesHtml(e.lines)}
             <div class="small muted">${esc(e.entryNo)} · ${date(e.entryDate)} · recorded ${dateTime(e.createdAt)} by ${esc(e.createdBy)}</div>
             ${claimFiguresHtml(claim)}
         </div>
         <div data-ev-entry="${e.id}" data-ev-count="${e.attachmentCount || 0}"></div>
     </div>`;
+}
+
+/**
+ * Each account the entry touches, with its balance just before and just after this entry (the stored snapshots,
+ * in ledger order): one slim line per account, the amounts being in the pills above.
+ */
+function balancesHtml(lines) {
+    const shown = lines.filter(l => l.balanceAfter !== null && l.balanceAfter !== undefined);
+    if (!shown.length) return '';
+    return `<div class="ed-balances" title="Each account's balance just before and just after this entry">
+        <span class="edb-head">Balance</span>${shown.map(l => {
+            const move = Number(l.balanceAfter) - Number(l.balanceBefore);
+            return `<span class="edb-row"><span class="edb-name ellipsis" title="${esc(l.ledgerAccountName || l.accountName)}">${esc(l.accountName)}</span>
+                <span class="edb-before">${money(l.balanceBefore, { decimals: 2 })}</span><i>→</i><b>${money(l.balanceAfter, { decimals: 2 })}</b>
+                <em class="${move > 0 ? 'up' : move < 0 ? 'down' : ''}">${move > 0 ? '▲' : move < 0 ? '▼' : ''}</em></span>`;
+        }).join('')}</div>`;
 }
 
 function detailHtml(e) {
@@ -121,7 +142,7 @@ function detailHtml(e) {
             <span class="mono">${money(side === 'dr' ? l.debit : l.credit, { decimals: 2 })}</span></span>`;
     const debits = e.lines.filter(l => Number(l.debit) > 0).map(l => pill(l, 'dr')).join('');
     const credits = e.lines.filter(l => Number(l.credit) > 0).map(l => pill(l, 'cr')).join('');
-    const memos = e.lines.filter(l => l.memo).map(l => `<b>${esc(l.accountName)}:</b> ${esc(l.memo)}`);
+    const memos = e.lines.filter(l => l.memo).map(l => `<b>${esc(l.accountName)}:</b> ${narrativeHtml(l.memo)}`);
     const fact = (iconName, html, cls = '') => `<span class="ed-fact ${cls}">${icon(iconName)}${html}</span>`;
     return `
     <div class="entry-detail">
@@ -130,8 +151,11 @@ function detailHtml(e) {
             <span class="ed-arrow" title="Debit ← Credit">${icon('chevron-left')}</span>
             <div class="ed-side">${credits}</div>
         </div>
+        ${balancesHtml(e.lines)}
+        ${chitTrailHtml(e.chitTrail)}
         <div class="ed-bar">
             ${fact('journal', `<b>${esc(e.entryNo)}</b> ${esc(e.voucherLabel)}`)}
+            ${e.construction ? fact('hard-hat', `Construction · <b>${esc(e.construction.project)}</b>${e.construction.what ? ` · ${esc(e.construction.what)}` : ''}`, 'cn-fact') : ''}
             ${fact('calendar', date(e.entryDate))}
             ${e.party ? fact('user', esc(e.party)) : ''}
             ${e.reference ? fact('tag', esc(e.reference)) : ''}
@@ -143,7 +167,7 @@ function detailHtml(e) {
             ${manageJournals && e.editable ? `<button class="btn sm" data-entry-action="edit">${icon('edit')}Edit</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon" data-entry-action="copy" title="Duplicate">${icon('copy')}</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
-            ${e.manageAt && !e.claimId && !location.hash.startsWith(`#/${e.manageAt}`) ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
+            ${e.manageAt && !e.claimId && !location.hash.startsWith(`#/${manageTarget(e)}`) ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
             ${e.reversible && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="reverse">${icon('undo')}Reverse</button>` : ''}
             <button class="btn sm ghost icon" data-entry-action="close" title="Close">${icon('x')}</button>
         </div>

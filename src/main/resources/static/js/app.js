@@ -26,6 +26,7 @@ import * as income from './views/income.js';
 import * as settings from './views/settings.js';
 import * as accounts from './views/accounts.js';
 import * as chits from './views/chits.js';
+import * as hostChits from './views/host-chits.js';
 import * as planning from './views/planning.js';
 import * as balanceSheet from './views/balance-sheet.js';
 import * as reports from './views/reports.js';
@@ -34,6 +35,8 @@ import * as admin from './views/admin.js';
 import * as activity from './views/activity.js';
 import * as gifts from './views/gifts.js';
 import * as documents from './views/documents.js';
+import * as construction from './views/construction.js';
+import * as integrity from './views/integrity.js';
 
 /** Top menu, in display order. */
 const ROUTES = [
@@ -43,6 +46,10 @@ const ROUTES = [
     { path: 'transactions', label: 'Journal', iconName: 'journal', view: transactions, feature: 'JOURNAL' },
     { path: 'accounts', label: 'Accounts', iconName: 'wallet', view: accounts, feature: 'ACCOUNTS' },
     { path: 'chits', label: 'Chits', iconName: 'chit', view: chits, feature: 'CHITS' },
+    // chits the user runs as the organiser (shared with the Chits section)
+    { path: 'host-chits', label: 'Host a Chit', iconName: 'hand-coins', view: hostChits, feature: 'HOST_CHITS' },
+    // the construction business: contract works and developments, their books, sales and agreements
+    { path: 'construction', label: 'Construction', iconName: 'hard-hat', view: construction, feature: 'CONSTRUCTION' },
     { path: 'planning', label: 'Budgets', iconName: 'target', view: planning, feature: 'BUDGETS' },
     { path: 'balance-sheet', label: 'Balance Sheet', iconName: 'scale', view: balanceSheet, feature: 'BALANCE_SHEET' },
     { path: 'reports', label: 'Reports', iconName: 'report', view: reports, feature: 'REPORTS' },
@@ -50,7 +57,9 @@ const ROUTES = [
     { path: 'gifts', label: 'Gifts', iconName: 'gift', view: gifts, feature: 'GIFTS' },
     { path: 'documents', label: 'Documents', iconName: 'file-text', view: documents, feature: 'DOCUMENTS' },
     // who changed what, approvals (maker-checker) and access links: checkers and admins only
-    { path: 'activity', label: 'Activity', iconName: 'history', view: activity, permission: 'APPROVE_ENTRIES' },
+    { path: 'activity', label: 'Activity', iconName: 'history', view: activity, permission: 'APPROVE_ENTRIES', feature: 'ACTIVITY' },
+    // what the check of the books found: admins and super admins only
+    { path: 'integrity', label: 'Data integrity', iconName: 'shield', view: integrity, permission: 'DATA_INTEGRITY' },
     // users, roles and tenants: opened from Settings and the user menu, not the top menu
     { path: 'admin', label: 'Users & roles', iconName: 'shield', view: admin, hidden: true },
     { path: 'settings', label: 'Settings', iconName: 'settings', view: settings, hidden: true },
@@ -67,6 +76,17 @@ async function refreshApprovalBadge() {
         const { pending } = await api.get('/approvals/count');
         link.querySelector('.menu-badge')?.remove();
         if (pending) link.insertAdjacentHTML('beforeend', `<i class="menu-badge" title="${pending} waiting for approval">${pending}</i>`);
+    } catch { /* not important */ }
+}
+
+/** Data integrity issues, as a badge on its menu item (admins only; refreshed with live updates). */
+async function refreshIntegrityBadge() {
+    const link = document.querySelector('#main-menu a[data-path="integrity"]');
+    if (!link || !can('DATA_INTEGRITY')) return;
+    try {
+        const issues = await api.get('/integrity');
+        link.querySelector('.menu-badge')?.remove();
+        if (issues.length) link.insertAdjacentHTML('beforeend', `<i class="menu-badge" title="${issues.length} data integrity issue(s)">${issues.length}</i>`);
     } catch { /* not important */ }
 }
 
@@ -271,6 +291,7 @@ function startLiveUpdates() {
         invalidateAccounts();
         refreshFooter(true);
         refreshApprovalBadge();
+        refreshIntegrityBadge();
         const who = change.userId === state.user?.userId ? 'You (another window)' : (change.by || 'Someone');
         if (document.querySelector('.modal-backdrop, .ev-overlay')) {
             if (!pendingRefresh) toast(`${who} changed data; this page refreshes when you close the dialog`, 'info');
@@ -326,6 +347,7 @@ async function enterApp() {
     startFooter();
     startLiveUpdates();
     refreshApprovalBadge();
+    refreshIntegrityBadge();
     if (!location.hash) location.hash = '#/' + allowedRoutes()[0].path;
     else route();
 }
@@ -391,6 +413,8 @@ function bindShell() {
 // ===================================================================== router
 
 let renderToken = 0;
+/** The page on screen: moving within it (e.g. Host a Chit's Chits and Chit accounts) keeps it until the new view is drawn. */
+let shownPath = null;
 
 async function route({ silent = false } = {}) {
     if (!state.user) return;
@@ -408,10 +432,11 @@ async function route({ silent = false } = {}) {
     const scrolls = silent ? [...container.querySelectorAll('*')].filter(el => el.scrollTop > 0)
         .map(el => [el.id || el.className, el.scrollTop]) : [];
     const pageScroll = window.scrollY;
-    if (!silent) container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    if (!silent && match.path !== shownPath) container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
     try {
         await match.view.render(container, params, () => token === renderToken);
         if (token !== renderToken) return;
+        shownPath = match.path;
         if (silent) {
             window.scrollTo(0, pageScroll);
             scrolls.forEach(([key, top]) => {
@@ -422,6 +447,7 @@ async function route({ silent = false } = {}) {
         hydrateIcons(container);
     } catch (error) {
         if (token !== renderToken) return;
+        shownPath = null;
         container.innerHTML = `<div class="empty">${icon('alert-circle')}<div>${esc(error.message)}</div></div>`;
         if (error.status !== 401) toast(error.message, 'error');
     }

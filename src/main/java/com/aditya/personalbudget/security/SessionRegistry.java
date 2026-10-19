@@ -3,13 +3,13 @@ package com.aditya.personalbudget.security;
 import com.aditya.personalbudget.config.BudgetProperties;
 import com.aditya.personalbudget.domain.entity.AccessLink;
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.entity.UserSession;
 import com.aditya.personalbudget.domain.type.Feature;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.repository.AccessLinkRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.repository.UserSessionRepository;
 import org.springframework.stereotype.Component;
 
@@ -37,12 +37,12 @@ public class SessionRegistry {
     private final SecureRandom random = new SecureRandom();
     private final UserSessionRepository sessions;
     private final AppUserRepository users;
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final AccessLinkRepository links;
     private final ApprovalPolicy approvals;
     private final int sessionHours;
 
-    public SessionRegistry(UserSessionRepository sessions, AppUserRepository users, TenantRepository tenants,
+    public SessionRegistry(UserSessionRepository sessions, AppUserRepository users, OrganizationRepository tenants,
                            BudgetProperties properties, AccessLinkRepository links, ApprovalPolicy approvals) {
         this.approvals = approvals;
         this.sessions = sessions;
@@ -131,7 +131,7 @@ public class SessionRegistry {
     }
 
     /** {@code approval}: what it records waits for a checker (see {@link ApprovalPolicy#forLink}). */
-    public static CurrentUser forLink(AccessLink l, Tenant t, boolean approval) {
+    public static CurrentUser forLink(AccessLink l, Organization t, boolean approval) {
         Set<Feature> features = EnumSet.noneOf(Feature.class);
         features.addAll(Feature.parse(l.getFeatures(), EnumSet.noneOf(Feature.class)));
         if (!l.opensDesktop()) {
@@ -154,14 +154,14 @@ public class SessionRegistry {
         sessions.deleteAll(sessions.findByUserId(userId));
     }
 
-    public static CurrentUser toCurrent(AppUser u, Tenant t, boolean mobile) {
+    public static CurrentUser toCurrent(AppUser u, Organization t, boolean mobile) {
         return toCurrent(u, t, mobile, false);
     }
 
     /** {@code approval}: what the user records waits for a checker (see {@link ApprovalPolicy#forUser}). */
-    public static CurrentUser toCurrent(AppUser u, Tenant t, boolean mobile, boolean approval) {
+    public static CurrentUser toCurrent(AppUser u, Organization t, boolean mobile, boolean approval) {
         return new CurrentUser(u.getId(), u.getUsername(), u.getFullName(), u.getRole(),
-                t.getId(), t.getCode(), t.getName(), t.getCurrency(), FeaturePolicy.granted(u, mobile), mobile, null, approval,
+                t.getId(), t.getCode(), t.getName(), t.getCurrency(), FeaturePolicy.granted(u, t, mobile), mobile, null, approval,
                 Boolean.TRUE.equals(u.getMustChangePassword()));
     }
 

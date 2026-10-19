@@ -7,10 +7,11 @@
 import { api } from '../core/api.js';
 import { loadAccounts, can, state } from '../core/store.js';
 import { panel, table, esc, field, accountOptions, readForm, emptyState, loading, stat } from '../core/ui.js';
-import { kindChip, movementHtml, entryKind } from '../core/entry-kind.js';
+import { kindChip, movementHtml, entryKind, projectTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon } from '../core/icons.js';
 import { money, date, firstOfMonth, isoDate } from '../core/format.js';
+import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry, openJournalEditor } from '../components/transaction-forms.js';
 import { toggleEntryRow } from '../components/entry-inline.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
@@ -24,7 +25,7 @@ const filters = DEFAULTS();
 const isFiltered = () => Object.entries(DEFAULTS()).some(([k, v]) => String(filters[k] ?? '') !== String(v));
 
 export async function render(container, _params, isCurrent) {
-    const accounts = await loadAccounts();
+    const accounts = await loadAccounts(false, { all: true });
     if (!isCurrent()) return;
     const voucherOptions = [{ value: '', label: 'All types' }, ...state.options.voucherTypes];
 
@@ -39,8 +40,8 @@ export async function render(container, _params, isCurrent) {
                     ${field({ label: 'From', name: 'from', type: 'date', value: filters.from })}
                     ${field({ label: 'To', name: 'to', type: 'date', value: filters.to })}
                     ${field({ label: 'Type', name: 'voucherType', type: 'select', value: filters.voucherType, options: voucherOptions })}
-                    ${field({ label: 'Account', name: 'accountId', type: 'select', options: accountOptions(accounts, () => true, filters.accountId, 'All accounts') })}
-                    ${field({ label: 'Search', name: 'q', value: filters.q, placeholder: 'Description, party, ref, entry no. or #id' })}
+                    ${field({ label: 'Account', name: 'accountId', type: 'select', options: accountOptions(accounts, () => true, filters.accountId, 'All accounts', { chitBook: true }) })}
+                    ${field({ label: 'Search', name: 'q', value: filters.q, placeholder: 'Description, party, ref, entry no., #id or construction' })}
                     <button class="btn primary" type="submit">${icon('search')}Apply</button>
                     <button class="btn ghost" type="button" id="clear-filters" ${isFiltered() ? '' : 'hidden'} title="Back to the last 3 months, every type and account">${icon('x')}Clear</button>
                    </form>
@@ -122,8 +123,10 @@ export async function render(container, _params, isCurrent) {
         target.innerHTML = table([
             { label: 'Date', render: e => date(e.entryDate), cls: 'nowrap c-date' },
             { label: 'Entry', cls: 'c-entry', render: e => entryCell(e) },
-            { label: 'Movement (Dr → Cr)', cls: 'c-move', render: e => movementHtml(e.lines) },
-            { label: 'Amount', align: 'r', render: e => `<b class="mono">${money(e.amount)}</b>` },
+            { label: 'Movement (Dr → Cr)', cls: 'c-move', render: e => movementHtml(e.lines, chitCodeOf(e.chitTrail)) },
+            // a hosted chit's status: its own narrow column (no heading: most entries have none), left of the amount
+            ...(hasChitStatus(entries) ? [{ label: '', cls: 'c-ctst', render: e => chitStatus(e.chitTrail) }] : []),
+            { label: 'Amount', align: 'r', cls: 'c-amt', render: e => `<b class="mono">${money(e.amount)}</b>` },
             { label: '', align: 'r', cls: 'c-caret', render: () => `<span class="expand-caret">${icon('chevron-down')}</span>` },
         ], entries, {
             dense: true,
@@ -175,8 +178,15 @@ function postButton(kind, iconName, tone, title, sub) {
 }
 
 /** The entry: its kind as an icon, the description, the person or shop grayed beside it, and small flags. */
+/**
+ * The entry in a collapsed row: a short description (a chit's entries say what happened in a few words, chit account
+ * names are shortened) and the party only when it adds something; the full narration is the tooltip and the
+ * expanded view.
+ */
 export function entryCell(e) {
+    const shown = shortNarration(e.narration, e.chitTrail, e.party);
+    const party = partyAdds(e.party, shown, e.chitTrail) ? e.party : '';
     return `<div class="entry-cell">${kindChip(e.voucherType, 'sm', e.voucherLabel)}
-        <span class="entry-text"><b class="ellipsis">${esc(e.narration)}</b>${e.party ? `<span class="entry-party ellipsis">${esc(e.party)}</span>` : ''}</span>
+        <span class="entry-text">${projectTag(e.construction)}<b class="ellipsis" title="${esc(e.narration)}">${esc(shown)}</b>${party ? `<span class="entry-party ellipsis">${esc(party)}</span>` : ''}</span>
         ${evidenceBadge(e.attachmentCount)}${e.reversedBy ? `<span class="mini-flag" title="Reversed">${icon('undo')}</span>` : ''}</div>`;
 }

@@ -140,7 +140,7 @@ async function drawApprovals(body, actions, reload, isCurrent) {
     if (!isCurrent()) return;
     actions.innerHTML = `<div class="seg-chips sm" id="ap-status">${['PENDING', 'APPROVED', 'REJECTED', 'ALL'].map(s =>
         `<button class="seg-chip ${approvalStatus === s ? 'active' : ''}" data-status="${s}">${s.charAt(0) + s.slice(1).toLowerCase()}</button>`).join('')}</div>
-        ${can('MANAGE_USERS') ? `<button class="btn sm" id="ap-who" title="Switch approval off or on for the household, for each user, or everywhere">${icon('settings')}Who needs approval</button>` : ''}`;
+        ${can('MANAGE_USERS') ? `<button class="btn sm" id="ap-who" title="Switch approval off or on for the organization, for each user, or everywhere">${icon('settings')}Who needs approval</button>` : ''}`;
     actions.querySelector('#ap-who')?.addEventListener('click', () => approvalSettingsDialog(reload));
     actions.querySelector('#ap-status').addEventListener('click', e => {
         const b = e.target.closest('[data-status]');
@@ -234,7 +234,7 @@ const MODES = [
     ['LINKS', 'link', 'Access links only', 'Links made with approval wait; users post directly'],
     ['ALL', 'users', 'Links and users', 'Also every user who cannot approve, unless exempted below'],
 ];
-const USER_SETTINGS = [['TENANT', 'As the household'], ['REQUIRED', 'Always needs approval'], ['EXEMPT', 'Never needs approval']];
+const USER_SETTINGS = [['TENANT', 'As the organization'], ['REQUIRED', 'Always needs approval'], ['EXEMPT', 'Never needs approval']];
 
 /** The household's mode, each user's setting (saved as soon as it changes) and, for a super admin, the installation switch. */
 async function approvalSettingsDialog(reload) {
@@ -252,12 +252,12 @@ async function approvalSettingsDialog(reload) {
     const draw = m => {
         m.el.querySelector('[data-ap-body]').innerHTML = `
             ${!settings.globalEnabled ? `<div class="xp-subs-bar has-rejected">${icon('alert')}<span>Approval is switched off for the whole installation: nothing waits, whatever is set below.</span></div>` : ''}
-            <div><div class="ln-label">This household</div>
+            <div><div class="ln-label">This organization</div>
                 <div class="ln-modes ap-mode">${MODES.map(([k, ico, l, hint]) => `<button type="button" class="mode-tile ${settings.mode === k ? 'active' : ''}" data-mode="${k}">${icon(ico)}<b>${l}</b><small>${hint}</small></button>`).join('')}</div></div>
             <div><div class="ln-label">Each user <small class="muted">· approvers (Manager, Admin) never wait; the setting is saved at once</small></div>
                 <div class="ap-users">${users.map(userRow).join('')}</div></div>
             ${settings.canChangeGlobal ? `<label class="switch"><input type="checkbox" data-global ${settings.globalEnabled ? 'checked' : ''}><span></span>
-                <b>Approval on the whole installation</b> <small class="muted">(every household; super admin only)</small></label>` : ''}
+                <b>Approval on the whole installation</b> <small class="muted">(every organization; super admin only)</small></label>` : ''}
             ${settings.pending ? `<p class="small muted" style="margin:0">${settings.pending} entr${settings.pending === 1 ? 'y is' : 'ies are'} still waiting: switching approval off does not post them; approve or reject them as usual.</p>` : ''}`;
     };
     const modal = openModal({

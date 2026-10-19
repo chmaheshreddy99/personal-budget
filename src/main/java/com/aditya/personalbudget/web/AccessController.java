@@ -1,9 +1,9 @@
 package com.aditya.personalbudget.web;
 
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.dto.JournalDtos.ExpenseRequest;
 import com.aditya.personalbudget.exception.BusinessException;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.ApprovalPolicy;
 import com.aditya.personalbudget.security.Permission;
 import com.aditya.personalbudget.security.RolePolicy;
@@ -61,12 +61,12 @@ public class AccessController {
     private final AccessLinkService links;
     private final PendingService pending;
     private final ActivityService activity;
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final ApprovalPolicy approvalPolicy;
     private final AppSettingsService appSettings;
 
     public AccessController(AccessLinkService links, PendingService pending, ActivityService activity,
-                            TenantRepository tenants, ApprovalPolicy approvalPolicy, AppSettingsService appSettings) {
+                            OrganizationRepository tenants, ApprovalPolicy approvalPolicy, AppSettingsService appSettings) {
         this.tenants = tenants;
         this.approvalPolicy = approvalPolicy;
         this.appSettings = appSettings;
@@ -155,7 +155,7 @@ public class AccessController {
     @GetMapping("/api/admin/approval")
     @RequiresPermission(Permission.MANAGE_USERS)
     public ApprovalSettings approvalSettings() {
-        Tenant t = tenants.findById(UserContext.tenantId()).orElseThrow();
+        Organization t = tenants.findById(UserContext.tenantId()).orElseThrow();
         return new ApprovalSettings(ApprovalPolicy.modeOf(t), approvalPolicy.enabledGlobally(),
                 RolePolicy.allows(UserContext.get().role(), Permission.MANAGE_TENANTS), pending.countPending());
     }
@@ -168,7 +168,7 @@ public class AccessController {
         if (!ApprovalPolicy.MODES.contains(mode)) {
             throw new BusinessException("Approval is OFF, LINKS or ALL");
         }
-        Tenant t = tenants.findById(UserContext.tenantId()).orElseThrow();
+        Organization t = tenants.findById(UserContext.tenantId()).orElseThrow();
         String before = ApprovalPolicy.modeOf(t);
         t.setApprovalMode(mode);
         tenants.save(t);

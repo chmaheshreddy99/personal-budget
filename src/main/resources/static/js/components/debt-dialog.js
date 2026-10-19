@@ -55,19 +55,21 @@ export async function openDebtDialog({ kind = 'BORROWED', claim = null, payableA
                 ${field({ label: 'Reference', name: 'reference', value: c.reference, placeholder: 'Optional' })}
                 ${field({ label: 'Notes', name: 'notes', value: c.notes, placeholder: 'Optional' })}
             </div>
+            <div class="form-grid two debt-interest">
             <label class="field" title="Monthly or yearly: interest falls due on each anniversary of the loan. Whenever paid: it keeps adding up until you pay.">
                 <span>Interest is paid</span><select name="interestCollection" title="When the interest is expected to be paid">
                             <option value="MONTHLY" ${(claim?.interestCollection || 'MONTHLY') ==='MONTHLY' ? 'selected' : ''}>Every month</option>
                             <option value="YEARLY" ${(claim?.interestCollection || 'MONTHLY') ==='YEARLY' ? 'selected' : ''}>Every year</option>
                             <option value="ON_PAYMENT" ${(claim?.interestCollection || 'MONTHLY') ==='ON_PAYMENT' ? 'selected' : ''}>Whenever paid</option>
                         </select></label>
-            <label class="check-line" title="Books the interest as an expense (and as owed) as each month (or year) ends, without waiting for the payment">
-                <input type="checkbox" name="postInterestMonthly" ${claim?.postInterestMonthly ? 'checked' : ''}> Book the interest automatically as it falls due
-                <b class="post-amount" data-post-amount></b></label>
             <label class="field" title="Payables: the interest stays owed until paid. A bank or card: the interest is paid from it every month.">
                 <span>Post interest to <small class="muted">optional</small></span>
                 <select name="interestAccountId">${accountOptions(accounts, interestAccountFilter('BORROWED'),
                     claim && claim.interestAccountId !== claim.receivableAccountId ? claim.interestAccountId : null, 'Payables (default)')}</select></label>
+            </div>
+            <label class="check-line" title="Books the interest as an expense (and as owed) as each month (or year) ends, without waiting for the payment">
+                <input type="checkbox" name="postInterestMonthly" ${claim?.postInterestMonthly ? 'checked' : ''}> Book the interest automatically as it falls due
+                <b class="post-amount" data-post-amount></b></label>
             <div class="xp-claim-line" data-preview></div>
             ${claim ? `<div data-ev-entry="${claim.journalEntryId}" data-ev-count="${claim.attachmentCount || 0}"></div>` : evidenceFieldHtml({ hint: 'Bill, promissory note or transfer screenshot' })}
         </form>`,

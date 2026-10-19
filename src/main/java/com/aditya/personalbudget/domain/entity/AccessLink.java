@@ -38,8 +38,8 @@ public class AccessLink implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     /** Who or what it is for, e.g. "Ravi (driver)". Shown as the author of what is recorded. */

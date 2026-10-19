@@ -6,7 +6,7 @@
  */
 import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, invalidateAccounts, can, categoriesOf, loadCategories } from '../core/store.js';
-import { openModal, field, readForm, accountOptions, categoryOptions, esc, toast, confirmDialog, table } from '../core/ui.js';
+import { openModal, field, readForm, accountOptions, categoryOptions, esc, toast, confirmDialog, table, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, isoDate, date } from '../core/format.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
@@ -154,7 +154,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
 /** Create (entry = null), edit, or duplicate (copy = true) a multi-line journal. */
 export async function openJournalEditor({ entry: source = null, copy = false, onSaved } = {}) {
     const saveKey = newRequestKey();   // one key per dialog: a retry or a second click saves once
-    const accounts = await loadAccounts();
+    const accounts = await loadAccounts(false, { all: true });   // the pickers still hide chit-book accounts unless a line uses one
     const allCategories = await loadCategories();
     const chits = await api.get('/chits').catch(() => []);
     const accountById = new Map(accounts.map(a => [a.id, a]));
@@ -177,7 +177,7 @@ export async function openJournalEditor({ entry: source = null, copy = false, on
 
     const lineRow = (l, i) => `
         <tr data-line="${i}">
-            <td><select name="accountId" required>${accountOptions(accounts, () => true, l.ledgerAccountId ?? l.accountId)}</select></td>
+            <td><select name="accountId" required>${accountOptions(accounts, () => true, l.ledgerAccountId ?? l.accountId, undefined, { chitBook: true })}</select></td>
             <td data-dimension>${dimension(l.ledgerAccountId ?? l.accountId, l)}</td>
             <td><input name="debit" class="num" data-type="number" type="number" step="any" min="0" value="${Number(l.debit) || ''}"></td>
             <td><input name="credit" class="num" data-type="number" type="number" step="any" min="0" value="${Number(l.credit) || ''}"></td>
@@ -272,7 +272,7 @@ export async function openEntryDetail(entryId, { onChanged } = {}) {
             l.ledgerAccountName && l.ledgerAccountName !== l.accountName ? ' · ' + esc(l.ledgerAccountName) : ''}</span>` },
         { label: 'Debit', align: 'r', render: l => Number(l.debit) ? money(l.debit, { decimals: 2 }) : '' },
         { label: 'Credit', align: 'r', render: l => Number(l.credit) ? money(l.credit, { decimals: 2 }) : '' },
-        { label: 'Memo', render: l => esc(l.memo || ''), cls: 'muted' },
+        { label: 'Memo', render: l => narrativeHtml(l.memo || ''), cls: 'muted' },
     ], entry.lines, {
         footer: `<tr class="total"><td>Total</td><td class="r">${money(entry.amount, { decimals: 2 })}</td>
                  <td class="r">${money(entry.amount, { decimals: 2 })}</td><td></td></tr>`,

@@ -4,12 +4,12 @@ import com.aditya.personalbudget.repository.CategoryRepository;
 import com.aditya.personalbudget.domain.entity.Category;
 import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,13 +28,13 @@ public class TenantProvisioningService {
                             String adminEmail, String adminPassword, UserRole adminRole) {
     }
 
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final AppUserRepository users;
     private final AccountRepository accounts;
     private final CategoryRepository categories;
     private final PasswordEncoder passwordEncoder;
 
-    public TenantProvisioningService(TenantRepository tenants, AppUserRepository users, AccountRepository accounts,
+    public TenantProvisioningService(OrganizationRepository tenants, AppUserRepository users, AccountRepository accounts,
                                      CategoryRepository categories, PasswordEncoder passwordEncoder) {
         this.tenants = tenants;
         this.users = users;
@@ -46,12 +46,12 @@ public class TenantProvisioningService {
     @Transactional
     public AppUser provision(NewTenant request) {
         if (tenants.findByCode(request.code()).isPresent()) {
-            throw new BusinessException("Tenant code '" + request.code() + "' is already taken");
+            throw new BusinessException("Organization code '" + request.code() + "' is already taken");
         }
         if (users.findByUsername(request.adminUsername()).isPresent()) {
             throw new BusinessException("Username '" + request.adminUsername() + "' is already taken");
         }
-        Tenant tenant = new Tenant();
+        Organization tenant = new Organization();
         tenant.setCode(request.code().toLowerCase());
         tenant.setName(request.name());
         tenant.setCurrency(request.currency() == null || request.currency().isBlank() ? "INR" : request.currency());

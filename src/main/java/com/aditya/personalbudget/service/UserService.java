@@ -2,7 +2,7 @@ package com.aditya.personalbudget.service;
 
 import com.aditya.personalbudget.config.BudgetProperties;
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.Feature;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.dto.UserDtos.TenantRequest;
@@ -13,7 +13,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.FeaturePolicy;
 import com.aditya.personalbudget.security.ApprovalPolicy;
@@ -34,7 +34,7 @@ import java.util.List;
 public class UserService {
 
     private final AppUserRepository users;
-    private final TenantRepository tenants;
+    private final OrganizationRepository tenants;
     private final AccountRepository accounts;
     private final PasswordEncoder passwordEncoder;
     private final SessionRegistry sessions;
@@ -42,7 +42,7 @@ public class UserService {
     private final UserRole defaultRole;
     private final ApprovalPolicy approvals;
 
-    public UserService(AppUserRepository users, TenantRepository tenants, AccountRepository accounts,
+    public UserService(AppUserRepository users, OrganizationRepository tenants, AccountRepository accounts,
                        PasswordEncoder passwordEncoder, SessionRegistry sessions,
                        TenantProvisioningService provisioning, BudgetProperties properties, ApprovalPolicy approvals) {
         this.approvals = approvals;
@@ -142,7 +142,9 @@ public class UserService {
         if (r.features() != null && r.features().isEmpty()) {
             throw new BusinessException("Share at least one section with the user");
         }
-        user.setFeatures(Feature.format(r.features(), Feature.all()));
+        // every section the organization has is stored as "everything", so sections it gets later come along
+        java.util.Set<Feature> available = FeaturePolicy.ofTenant(tenants.findById(UserContext.tenantId()).orElse(null));
+        user.setFeatures(r.features() == null || r.features().containsAll(available) ? null : Feature.format(r.features(), Feature.all()));
         user.setMobileAccess(r.mobileAccess() == null || r.mobileAccess() ? null : Boolean.FALSE);
         user.setMobileFeatures(Feature.format(r.mobileFeatures(), Feature.allMobile()));
         if (r.approval() != null) {
@@ -156,10 +158,10 @@ public class UserService {
     }
 
     private UserView toView(AppUser u) {
-        Tenant tenant = tenants.findById(u.getTenantId()).orElse(null);
+        Organization tenant = tenants.findById(u.getTenantId()).orElse(null);
         return new UserView(u.getId(), u.getUsername(), u.getFullName(), u.getEmail(), u.getRole(),
                 u.getRole().getLabel(), Boolean.TRUE.equals(u.getActive()), u.getCreatedAt(), u.getLastLoginAt(),
-                FeaturePolicy.granted(u, false), u.getFeatures() != null, !Boolean.FALSE.equals(u.getMobileAccess()),
+                FeaturePolicy.granted(u, tenant, false), u.getFeatures() != null, !Boolean.FALSE.equals(u.getMobileAccess()),
                 Feature.parse(u.getMobileFeatures(), Feature.allMobile()),
                 ApprovalPolicy.userSetting(u), tenant != null && approvals.forUser(u, tenant));
     }
@@ -168,35 +170,55 @@ public class UserService {
 
     public List<TenantView> tenants() {
         return tenants.findAll().stream()
-                .sorted(Comparator.comparing(Tenant::getCode))
+                .sorted(Comparator.comparing(Organization::getCode))
                 .map(t -> new TenantView(t.getId(), t.getCode(), t.getName(), t.getCurrency(),
                         Boolean.TRUE.equals(t.getActive()), t.getCreatedAt(),
-                        users.findByTenantId(t.getId()).size(), accounts.findByTenantId(t.getId()).size()))
+                        users.findByTenantId(t.getId()).size(), accounts.findByTenantId(t.getId()).size(),
+                        FeaturePolicy.ofTenant(t), t.getFeatures() != null))
                 .toList();
     }
 
     @Transactional
     public void createTenant(TenantRequest request) {
         if (request.adminUsername() == null || request.adminPassword() == null) {
-            throw new BusinessException("Admin username and password are required for a new tenant");
+            throw new BusinessException("Admin username and password are required for a new organization");
         }
-        provisioning.provision(new TenantProvisioningService.NewTenant(request.code(), request.name(),
+        AppUser admin = provisioning.provision(new TenantProvisioningService.NewTenant(request.code(), request.name(),
                 request.currency(), request.adminUsername(),
                 request.adminFullName() != null ? request.adminFullName() : request.adminUsername(),
                 null, request.adminPassword(), UserRole.ADMIN));
+        Organization tenant = tenants.findById(admin.getTenantId()).orElseThrow();
+        tenant.setFeatures(tenantFeatures(request.features()));
+        tenants.save(tenant);
     }
 
     @Transactional
     public void updateTenant(Long id, TenantRequest request) {
-        Tenant tenant = tenants.findById(id).orElseThrow(() -> new NotFoundException("Tenant", id));
+        Organization tenant = tenants.findById(id).orElseThrow(() -> new NotFoundException("Organization", id));
         if (tenant.getId().equals(UserContext.tenantId()) && Boolean.FALSE.equals(request.active())) {
-            throw new BusinessException("You cannot deactivate your own tenant");
+            throw new BusinessException("You cannot deactivate your own organization");
         }
         tenant.setName(request.name());
         if (request.currency() != null) {
             tenant.setCurrency(request.currency());
         }
         tenant.setActive(request.active() == null || request.active());
+        if (request.features() != null) {
+            tenant.setFeatures(tenantFeatures(request.features()));
+        }
         tenants.save(tenant);
+    }
+
+    /** The sections the signed-in user's organization has. */
+    public java.util.Set<Feature> organizationSections() {
+        return FeaturePolicy.ofTenant(tenants.findById(UserContext.tenantId()).orElse(null));
+    }
+
+    /** The organization's sections as stored: null when it has every section. At least one is needed. */
+    private static String tenantFeatures(java.util.Set<Feature> features) {
+        if (features != null && features.isEmpty()) {
+            throw new BusinessException("Give the organization at least one section");
+        }
+        return Feature.format(features, Feature.all());
     }
 }

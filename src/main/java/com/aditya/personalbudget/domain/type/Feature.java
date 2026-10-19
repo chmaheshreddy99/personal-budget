@@ -7,8 +7,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The sections of the app an admin can share with a user, on the desktop and, for those marked
- * {@code mobile}, in the mobile version (every section has a simple mobile screen). A user's role still decides what they may change inside a section.
+ * The sections of the app (its menu items) an organization has and an admin can share with a user, on the desktop
+ * and, for those marked {@code mobile}, in the mobile version. A user gets the sections shared with them that their
+ * organization has; their role still decides what they may change inside a section (and Activity needs a role
+ * that approves entries). Users &amp; roles, Data integrity and Settings go by role, not by sharing.
  */
 public enum Feature {
 
@@ -18,12 +20,18 @@ public enum Feature {
     JOURNAL("Journal", true),
     ACCOUNTS("Accounts", true),
     CHITS("Chits", true),
+    /** Host a Chit: chits the organization runs as organiser (desktop only). */
+    HOST_CHITS("Host a Chit", false),
     BUDGETS("Budgets", true),
     BALANCE_SHEET("Balance sheet", true),
     REPORTS("Reports", true),
     FORECAST("Forecast", true),
     GIFTS("Gifts", true),
-    DOCUMENTS("Documents", true);
+    DOCUMENTS("Documents", true),
+    /** The construction business: projects, their money, sales and agreements (desktop only). */
+    CONSTRUCTION("Construction", false),
+    /** Who changed what, approvals and access links (also needs a role that approves entries). */
+    ACTIVITY("Activity", false);
 
     private final String label;
     private final boolean mobile;

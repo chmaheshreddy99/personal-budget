@@ -26,7 +26,7 @@ import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
 import com.aditya.personalbudget.repository.CategoryRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.service.AccountService;
@@ -74,7 +74,7 @@ class PersonalBudgetApplicationTests {
         registry.add("budget.seed.demo-data", () -> "true");   // the tests need sample books, whatever application.yml says
     }
 
-    @Autowired TenantRepository tenants;
+    @Autowired OrganizationRepository tenants;
     @Autowired AppUserRepository users;
     @Autowired AccountRepository accounts;
     @Autowired JournalEntryRepository entries;
@@ -146,7 +146,7 @@ class PersonalBudgetApplicationTests {
 
     @Test
     void tenantsAreIsolated() {
-        var other = new com.aditya.personalbudget.domain.entity.Tenant();
+        var other = new com.aditya.personalbudget.domain.entity.Organization();
         other.setCode("other-" + System.nanoTime() % 100000);
         other.setName("Other");
         other.setCurrency("USD");
@@ -372,7 +372,7 @@ class PersonalBudgetApplicationTests {
         Long tenantId = UserContext.tenantId();
         Long bank = accounts.findByTenantId(tenantId).stream()
                 .filter(a -> a.getAccountType() == AccountType.BANK).findFirst().orElseThrow().getId();
-        Long shopping = categoryRepository.findByName(tenantId, CategoryKind.EXPENSE, "Shopping & Clothing").orElseThrow().getId();
+        Long shopping = categoryRepository.findByName(tenantId, CategoryKind.EXPENSE, "Clothing & Footwear").orElseThrow().getId();
         LocalDate day = LocalDate.now().minusDays(2);
         var expense = expenseService.create(new com.aditya.personalbudget.dto.JournalDtos.ExpenseRequest(day, new BigDecimal("3000"),
                 shopping, bank, "Shoes", "Store", null, null, null));

@@ -42,8 +42,12 @@ import java.util.stream.Collectors;
 public class ReportService {
 
     private final LedgerService ledger;
+    private final ChitTrailService trails;
+    private final ConstructionTagService projectTags;
 
-    public ReportService(LedgerService ledger) {
+    public ReportService(LedgerService ledger, ChitTrailService trails, ConstructionTagService projectTags) {
+        this.projectTags = projectTags;
+        this.trails = trails;
         this.ledger = ledger;
     }
 
@@ -125,16 +129,22 @@ public class ReportService {
         equityRows.add(new AccountAmount(null, "", "Accumulated Surplus (Income - Expenses)", AccountType.EQUITY,
                 surplus(books, now), surplus(books, before)));
 
-        SheetSection assets = section("Assets", assetRows);
-        SheetSection liabilities = section("Liabilities", liabilityRows);
+        // the hosted-chit book (members' money and the organiser's chit accounts) is its own group, never liquid money
+        Set<Long> chitBook = books.accounts().values().stream().filter(Account::isChitBook).map(Account::getId)
+                .collect(Collectors.toSet());
+        Set<Long> projectBook = books.accounts().values().stream().filter(Account::isProjectBook).map(Account::getId)
+                .collect(Collectors.toSet());
+        PROJECT_BOOK.set(projectBook);
+        SheetSection assets = section("Assets", assetRows, chitBook);
+        SheetSection liabilities = section("Liabilities", liabilityRows, chitBook);
         SheetSection equity = new SheetSection("Equity", total(equityRows), previousTotal(equityRows),
                 List.of(new SheetGroup("Owner's Equity", total(equityRows), previousTotal(equityRows), equityRows)));
 
         BigDecimal netWorth = assets.total().subtract(liabilities.total());
         BigDecimal previousNetWorth = assets.previous().subtract(liabilities.previous());
-        BigDecimal liquid = sumBucket(assetRows, "Liquid money");
-        BigDecimal investments = sumBucket(assetRows, "Investments");
-        BigDecimal shortTerm = sumBucket(liabilityRows, "Short-term dues");
+        BigDecimal liquid = sumBucket(assetRows, "Liquid money", chitBook);
+        BigDecimal investments = sumBucket(assetRows, "Investments", chitBook);
+        BigDecimal shortTerm = sumBucket(liabilityRows, "Short-term dues", chitBook);
         BigDecimal longTerm = liabilities.total().subtract(shortTerm);
 
         YearMonth month = YearMonth.from(asOf);
@@ -150,7 +160,7 @@ public class ReportService {
                 lAndE, assets.total().compareTo(lAndE) == 0,
                 liquid, Money.percent(liabilities.total(), assets.total()), Money.percent(liabilities.total(), netWorth),
                 ratio(liquid, shortTerm), ratio(liquid, avgExpense), avgExpense, Money.percent(investments, assets.total()),
-                shortTerm, longTerm, mix(assetRows), mix(liabilityRows), netWorthTrend(books, asOf));
+                shortTerm, longTerm, mix(assetRows, chitBook), mix(liabilityRows, chitBook), netWorthTrend(books, asOf));
     }
 
     /**
@@ -198,6 +208,25 @@ public class ReportService {
         return points;
     }
 
+    /** The bucket of an account: its type's, or "Hosted chits" / "Construction business" for those books. */
+    public static String bucket(Account a) {
+        return a.isChitBook() ? HOSTED_CHITS : a.isProjectBook() ? CONSTRUCTION : bucket(a.getAccountType());
+    }
+
+    /** The asset / liability group of the construction book on the balance sheet. */
+    public static final String CONSTRUCTION = "Construction business";
+
+    /** The construction book's accounts while a balance sheet is made (one request at a time per thread). */
+    private static final ThreadLocal<Set<Long>> PROJECT_BOOK = ThreadLocal.withInitial(Set::of);
+
+    /** The asset / liability group of the hosted-chit book on the balance sheet. */
+    public static final String HOSTED_CHITS = "Hosted chits";
+
+    private static String bucket(AccountAmount r, Set<Long> chitBook) {
+        if (r.accountId() != null && PROJECT_BOOK.get().contains(r.accountId())) return CONSTRUCTION;
+        return r.accountId() != null && chitBook.contains(r.accountId()) ? HOSTED_CHITS : bucket(r.accountType());
+    }
+
     /** Groups an account type into a broad bucket used for the asset / liability mix. */
     public static String bucket(AccountType type) {
         return switch (type) {
@@ -218,16 +247,16 @@ public class ReportService {
         return books.totalOfClass(balances, AccountClass.INCOME).subtract(books.totalOfClass(balances, AccountClass.EXPENSE));
     }
 
-    private static BigDecimal sumBucket(List<AccountAmount> rows, String bucket) {
+    private static BigDecimal sumBucket(List<AccountAmount> rows, String bucket, Set<Long> chitBook) {
         return rows.stream()
-                .filter(r -> bucket.equals(bucket(r.accountType()))
+                .filter(r -> bucket.equals(bucket(r, chitBook))
                         || ("Short-term dues".equals(bucket) && r.accountType() == AccountType.CHIT_FUND))
                 .map(AccountAmount::amount).reduce(Money.ZERO, BigDecimal::add);
     }
 
-    private static List<ValuePoint> mix(List<AccountAmount> rows) {
+    private static List<ValuePoint> mix(List<AccountAmount> rows, Set<Long> chitBook) {
         Map<String, BigDecimal> totals = new LinkedHashMap<>();
-        rows.forEach(r -> totals.merge(bucket(r.accountType()), r.amount(), BigDecimal::add));
+        rows.forEach(r -> totals.merge(bucket(r, chitBook), r.amount(), BigDecimal::add));
         return totals.entrySet().stream()
                 .filter(e -> e.getValue().signum() > 0)
                 .map(e -> new ValuePoint(e.getKey(), e.getValue()))
@@ -260,6 +289,8 @@ public class ReportService {
         BigDecimal totalDebit = Money.ZERO;
         BigDecimal totalCredit = Money.ZERO;
         List<LedgerRow> rows = new ArrayList<>();
+        Map<Long, ChitTrailService.Trail> chitTrails = trails.forEntryIds(own.stream().map(PostedLine::entryId).toList());
+        Map<Long, ConstructionTagService.ProjectTag> projects = projectTags.forEntryIds(own.stream().map(PostedLine::entryId).toList());
         for (PostedLine l : own) {
             running = running.add(books.natural(accountId, l.net()));
             totalDebit = totalDebit.add(l.debit());
@@ -270,7 +301,7 @@ public class ReportService {
                     .distinct()
                     .collect(Collectors.joining(", "));
             rows.add(new LedgerRow(l.entryId(), l.entryNo(), l.date(), l.voucherType(), l.voucherType().getLabel(), l.narration(),
-                    counter, l.debit(), l.credit(), running));
+                    counter, l.debit(), l.credit(), running, chitTrails.get(l.entryId()), projects.get(l.entryId())));
         }
         return new AccountLedger(accountId, account.getCode(), account.getName(), account.getAccountClass(), from, to,
                 opening, totalDebit, totalCredit, running, rows);
@@ -330,7 +361,7 @@ public class ReportService {
     public CashFlow cashFlow(LocalDate from, LocalDate to) {
         LedgerSnapshot books = ledger.snapshot();
         Set<Long> liquid = books.accounts().values().stream()
-                .filter(a -> a.getAccountType().isLiquid()).map(Account::getId).collect(Collectors.toSet());
+                .filter(Account::isLiquid).map(Account::getId).collect(Collectors.toSet());
 
         Map<Long, List<PostedLine>> byEntry = books.lines().stream().collect(Collectors.groupingBy(PostedLine::entryId));
         BigDecimal opening = liquid.stream().map(id -> books.balanceAsOf(id, from.minusDays(1)))
@@ -438,13 +469,27 @@ public class ReportService {
         return rows.stream().map(AccountAmount::amount).reduce(Money.ZERO, BigDecimal::add);
     }
 
-    /** Groups rows by account type label, keeping the enum order of types. */
-    private static SheetSection section(String label, List<AccountAmount> rows) {
-        Map<AccountType, List<AccountAmount>> byType = rows.stream()
+    /**
+     * Groups rows by account type label, keeping the enum order of types; the hosted-chit book's accounts form one
+     * group of their own ("Hosted chits"), last.
+     */
+    private static SheetSection section(String label, List<AccountAmount> rows, Set<Long> chitBook) {
+        Set<Long> projectBook = PROJECT_BOOK.get();
+        java.util.function.Predicate<AccountAmount> inProjects = r -> r.accountId() != null && projectBook.contains(r.accountId());
+        java.util.function.Predicate<AccountAmount> inBook = r -> r.accountId() != null && (chitBook.contains(r.accountId()) || projectBook.contains(r.accountId()));
+        Map<AccountType, List<AccountAmount>> byType = rows.stream().filter(inBook.negate())
                 .collect(Collectors.groupingBy(AccountAmount::accountType, () -> new java.util.TreeMap<>(), Collectors.toList()));
-        List<SheetGroup> groups = byType.entrySet().stream()
+        List<SheetGroup> groups = new ArrayList<>(byType.entrySet().stream()
                 .map(e -> new SheetGroup(e.getKey().getLabel(), total(e.getValue()), previousTotal(e.getValue()), e.getValue()))
-                .toList();
+                .toList());
+        List<AccountAmount> book = rows.stream().filter(inBook).filter(inProjects.negate()).toList();
+        if (!book.isEmpty()) {
+            groups.add(new SheetGroup(HOSTED_CHITS, total(book), previousTotal(book), book));
+        }
+        List<AccountAmount> projects = rows.stream().filter(inProjects).toList();
+        if (!projects.isEmpty()) {
+            groups.add(new SheetGroup(CONSTRUCTION, total(projects), previousTotal(projects), projects));
+        }
         return new SheetSection(label, total(rows), previousTotal(rows), groups);
     }
 }

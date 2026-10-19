@@ -132,6 +132,341 @@ public class AttachmentService implements ApplicationRunner {
         }
     }
 
+    // ================================================================== agreements: ID proof and photos
+
+    /** Kinds of files an agreement keeps. */
+    public static final Set<String> DOC_TYPES = Set.of("AADHAAR_FRONT", "AADHAAR_BACK", "PAN", "SELFIE", "OTHER",
+            // the documents of a construction project or a flat's sale (several of a kind are kept)
+            "SANCTION_LETTER", "DISBURSAL_LETTER", "TITLE_DEED", "LINK_DOCUMENT", "ENCUMBRANCE", "PLAN_APPROVAL", "SALE_DEED",
+            "SIGNED_COPY", "NOC", "ALLOTMENT", "PHOTO", "INVOICE");
+
+    /** ID proof and the selfie: one of each (a new one replaces the old); a PDF of them is taken as images. */
+    public static final Set<String> KYC_TYPES = Set.of("AADHAAR_FRONT", "AADHAAR_BACK", "PAN", "SELFIE");
+
+    /**
+     * A file of an agreement, with what it is and its SHA-256 (sealed into the acceptance). intact: the bytes on disk
+     * still have that SHA-256 (checked every time it is listed). derivedFromSha: an image rendered from a PDF, the PDF's
+     * SHA-256; page: which page of it.
+     */
+    public record AgreementFile(Long id, String docType, String fileName, String contentType, long sizeBytes, boolean image,
+                                boolean pdf, boolean hasThumbnail, String sha256, String source, String createdBy,
+                                LocalDateTime createdAt, boolean intact, String derivedFromSha, String caption) {
+    }
+
+    /** At most this many pages of a PDF are rendered (an ID card is one or two). */
+    private static final int PDF_PAGES = 2;
+
+    public List<AgreementFile> listForAgreement(String kind, Long ownerId) {
+        return attachments.findByOwnerKind(kind, ownerId).stream().map(this::agreementFile).toList();
+    }
+
+    /** The old signature, without a watermark text. */
+    public AgreementFile addToAgreement(String kind, Long ownerId, String docType, String originalName, byte[] bytes, String source) {
+        return addToAgreement(kind, ownerId, docType, originalName, bytes, source, null);
+    }
+
+    /**
+     * Adds an ID proof or photo to an agreement ({@code kind} CHIT_AGREEMENT or LOAN_AGREEMENT); the caller has checked
+     * the agreement belongs to the household in context. A new file of the same type (other than OTHER) replaces the
+     * old one. A PDF is kept as it is (the original) and its first pages are rendered into images for the agreement,
+     * each watermarked with {@code mark} (the agreement it is for), the date and the PDF's fingerprint, so a copy
+     * cannot be passed off for another purpose and can always be traced back to the original.
+     */
+    @Transactional
+    public AgreementFile addToAgreement(String kind, Long ownerId, String docType, String originalName, byte[] bytes, String source, String mark) {
+        String type = docType == null ? "OTHER" : docType.trim().toUpperCase();
+        if (!DOC_TYPES.contains(type)) {
+            throw new BusinessException("Say what the file is: Aadhaar (front or back), PAN, a selfie, or a document");
+        }
+        if ("SELFIE".equals(type) && bytes != null && "application/pdf".equals(sniff(bytes))) {
+            throw new BusinessException("The selfie is a photo from the camera, not a PDF");
+        }
+        List<Attachment> existing = attachments.findByOwnerKind(kind, ownerId);
+        if (KYC_TYPES.contains(type)) {
+            List<Attachment> same = existing.stream().filter(a -> type.equals(a.getDocType())).toList();
+            if (!same.isEmpty()) {
+                attachments.deleteAllById(same.stream().map(Attachment::getId).toList());
+                afterCommitDelete(same);
+                existing = existing.stream().filter(a -> !type.equals(a.getDocType())).toList();
+            }
+        }
+        String label = switch (type) {
+            case "AADHAAR_FRONT" -> "Aadhaar card (front)";
+            case "AADHAAR_BACK" -> "Aadhaar card (back)";
+            case "PAN" -> "PAN card";
+            case "SELFIE" -> "Selfie";
+            default -> KYC_TYPES.contains(type) || "OTHER".equals(type) ? "Document" : MaybeLabel.of(type);
+        };
+        String name = originalName == null || originalName.isBlank() ? type.toLowerCase().replace('_', '-') : originalName;
+        // a PDF is read before anything is stored: a damaged or password-protected one is refused with a clear reason
+        List<Rendered> pages = KYC_TYPES.contains(type) && "application/pdf".equals(bytes == null ? null : sniff(bytes)) ? renderPdf(bytes, label, mark) : List.of();
+        // the images taken from a PDF do not count towards the limit of files: only what the person gave
+        AttachmentView v = store(UserContext.tenantId(), null, null, "This agreement",
+                existing.stream().filter(x -> x.getDerivedFromSha() == null).toList(), name, bytes, source, label);
+        Attachment a = attachments.findById(v.id()).orElseThrow();
+        if (kind.equals(a.getOwnerKind()) && ownerId.equals(a.getOwnerId()) && type.equals(a.getDocType())) {
+            return agreementFile(a);   // the very same file was already there
+        }
+        if (a.getOwnerKind() != null) {
+            // store() keeps one copy of the same bytes per agreement: the file is already there as another document
+            throw new BusinessException("This file is already attached as the " + a.getCaption() + "; add a separate photo for each side or card");
+        }
+        a.setOwnerKind(kind);
+        a.setOwnerId(ownerId);
+        a.setDocType(type);
+        a = attachments.save(a);
+        String base = name.replaceAll("(?i)\\.pdf$", "");
+        for (int i = 0; i < pages.size(); i++) {
+            AttachmentView pv = store(UserContext.tenantId(), null, null, "This agreement", List.of(), base + "-" + pages.get(i).suffix()
+                    + (pages.get(i).png()[0] == (byte) 0x89 ? ".png" : ".jpg"),
+                    pages.get(i).png(), "UPLOAD", pages.get(i).caption());
+            Attachment page = attachments.findById(pv.id()).orElseThrow();
+            if (page.getOwnerKind() != null) continue;   // the same page already there
+            page.setOwnerKind(kind);
+            page.setOwnerId(ownerId);
+            page.setDocType(type);
+            page.setSource("PDF_PAGE");
+            page.setDerivedFromSha(a.getSha256());
+            attachments.save(page);
+        }
+        return agreementFile(a);
+    }
+
+    /** An image taken from a PDF: its file-name suffix, its caption and the PNG. */
+    private record Rendered(String suffix, String caption, byte[] png) {
+    }
+
+    /**
+     * The first pages of a PDF as PNG images (300 dpi, sharp enough to read the card printed across a page; the blank
+     * margins cut away so the content fills the picture).
+     * When the first page has the card itself as a separate block (an e-Aadhaar: a letter above, the card to cut out
+     * below), that block also comes as a close-up, first. Each image carries the agreement's watermark and, below it, a
+     * strip naming the PDF's SHA-256 and when it was taken.
+     */
+    private List<Rendered> renderPdf(byte[] bytes, String label, String mark) {
+        String sha = sha256(bytes);
+        try (org.apache.pdfbox.pdmodel.PDDocument pdf = org.apache.pdfbox.Loader.loadPDF(bytes)) {
+            if (pdf.isEncrypted()) {
+                throw new BusinessException("The PDF is password protected: upload it without the password, or a photo of the card");
+            }
+            int total = pdf.getNumberOfPages();
+            int count = Math.min(PDF_PAGES, total);
+            if (count == 0) throw new BusinessException("The PDF has no pages");
+            org.apache.pdfbox.rendering.PDFRenderer renderer = new org.apache.pdfbox.rendering.PDFRenderer(pdf);
+            List<Rendered> out = new java.util.ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                BufferedImage page = trim(renderer.renderImageWithDPI(i, 300, org.apache.pdfbox.rendering.ImageType.RGB));
+                if (i == 0) {
+                    BufferedImage card = cardBlock(page);
+                    if (card != null) {
+                        out.add(new Rendered("card", label + " · close-up from the PDF", png(stamp(card, mark, label + " · close-up", sha))));
+                    }
+                }
+                String what = label + " · page " + (i + 1) + " of " + total;
+                out.add(new Rendered("page-" + (i + 1), label + " · page " + (i + 1) + " of the PDF", png(stamp(page, mark, what, sha))));
+            }
+            return out;
+        } catch (org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException e) {
+            throw new BusinessException("The PDF is password protected: upload it without the password, or a photo of the card");
+        } catch (IOException e) {
+            throw new BusinessException("The PDF could not be read; upload a photo of the card instead");
+        }
+    }
+
+    /** PNG (sharp text); a very busy page that would come out too large is a fine JPEG instead. */
+    private static byte[] png(BufferedImage img) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        ImageIO.write(img, "png", out);
+        if (out.size() <= 7 * 1024 * 1024) return out.toByteArray();
+        java.io.ByteArrayOutputStream jpg = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+        param.setCompressionQuality(0.92f);
+        try (var stream = ImageIO.createImageOutputStream(jpg)) {
+            writer.setOutput(stream);
+            writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
+        } finally {
+            writer.dispose();
+        }
+        return jpg.toByteArray();
+    }
+
+    private static boolean ink(int rgb) {
+        return ((rgb >> 16) & 0xff) < 200 || ((rgb >> 8) & 0xff) < 200 || (rgb & 0xff) < 200;
+    }
+
+    /**
+     * The card on a page that has more than the card: the page split into blocks at wide blank gaps, and the last block
+     * holding a long straight line (the card's border or the cut line) that is clearly smaller than the page. Null when
+     * the page is just the card (nothing to zoom).
+     */
+    static BufferedImage cardBlock(BufferedImage img) {
+        int w = img.getWidth(), h = img.getHeight();
+        boolean[] filled = new boolean[h];
+        int[] longest = new int[h];
+        for (int y = 0; y < h; y++) {
+            int run = 0, best = 0;
+            for (int x = 0; x < w; x++) {
+                if (ink(img.getRGB(x, y))) {
+                    filled[y] = true;
+                    best = Math.max(best, ++run);
+                } else {
+                    run = 0;
+                }
+            }
+            longest[y] = best;
+        }
+        int gap = Math.max(30, h / 20);
+        List<int[]> blocks = new java.util.ArrayList<>();
+        int start = -1, blank = 0;
+        for (int y = 0; y < h; y++) {
+            if (filled[y]) {
+                if (start < 0) start = y;
+                blank = 0;
+            } else if (start >= 0 && ++blank >= gap) {
+                blocks.add(new int[]{start, y - blank});
+                start = -1;
+            }
+        }
+        if (start >= 0) blocks.add(new int[]{start, h - 1 - blank});
+        if (blocks.size() < 2) return null;
+        for (int i = blocks.size() - 1; i >= 0; i--) {
+            int[] b = blocks.get(i);
+            boolean lined = false;
+            for (int y = b[0]; y <= b[1] && !lined; y++) lined = longest[y] >= w / 4;
+            int height = b[1] - b[0] + 1;
+            if (lined && height >= h / 8 && height <= h * 0.7) {
+                int pad = Math.max(10, height / 30);
+                int top = Math.max(0, b[0] - pad), bottom = Math.min(h - 1, b[1] + pad);
+                return trim(img.getSubimage(0, top, w, bottom - top + 1));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The page without its blank margins (anything near white), with a little border kept: an ID card printed small on a
+     * big page comes out zoomed in. A blank page is returned as it is.
+     */
+    static BufferedImage trim(BufferedImage img) {
+        int w = img.getWidth(), h = img.getHeight(), top = h, left = w, right = -1, bottom = -1;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int rgb = img.getRGB(x, y);
+                if (((rgb >> 16) & 0xff) < 232 || ((rgb >> 8) & 0xff) < 232 || (rgb & 0xff) < 232) {
+                    if (x < left) left = x;
+                    if (x > right) right = x;
+                    if (y < top) top = y;
+                    if (y > bottom) bottom = y;
+                }
+            }
+        }
+        if (right < 0) return img;
+        int pad = Math.max(12, Math.min(w, h) / 60);
+        left = Math.max(0, left - pad);
+        top = Math.max(0, top - pad);
+        right = Math.min(w - 1, right + pad);
+        bottom = Math.min(h - 1, bottom + pad);
+        if (right - left > w * 0.97 && bottom - top > h * 0.97) return img;
+        BufferedImage out = new BufferedImage(right - left + 1, bottom - top + 1, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.drawImage(img.getSubimage(left, top, right - left + 1, bottom - top + 1), 0, 0, null);
+        g.dispose();
+        return out;
+    }
+
+    /**
+     * The image with the watermark across it (light, so the card stays readable, but every copy says what it is for)
+     * and a dark strip added below it (never over the card) naming what it is, the PDF's SHA-256 and when it was taken.
+     */
+    private static BufferedImage stamp(BufferedImage img, String mark, String what, String sha) {
+        int w = img.getWidth(), h = img.getHeight();
+        int band = Math.max(28, Math.min(54, w / 48));
+        BufferedImage out = new BufferedImage(w, h + band, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.drawImage(img, 0, 0, null);
+            String text = (mark == null || mark.isBlank() ? "For this agreement only" : "For " + mark + " only") + " · "
+                    + java.time.LocalDate.now();
+            java.awt.Font font = new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, Math.max(16, Math.max(Math.min(w, h) / 26, w / 52)));
+            g.setFont(font);
+            g.setColor(new java.awt.Color(192, 20, 28, 30));
+            g.setClip(0, 0, w, h);
+            g.rotate(-Math.PI / 7, w / 2.0, h / 2.0);
+            int step = font.getSize() * 7;
+            int tw = g.getFontMetrics().stringWidth(text) + font.getSize() * 4;
+            int row = 0;
+            for (int y = -h; y < h * 2; y += step, row++) {
+                for (int x = -w; x < w * 2; x += tw) {
+                    g.drawString(text, x + (row % 2 == 0 ? 0 : tw / 2), y);
+                }
+            }
+            g.setTransform(new java.awt.geom.AffineTransform());
+            g.setClip(null);
+            g.setColor(new java.awt.Color(10, 46, 79));
+            g.fillRect(0, h, w, band);
+            g.setColor(java.awt.Color.WHITE);
+            java.awt.Font small = new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, Math.max(11, band * 2 / 5));
+            g.setFont(small);
+            String line = what + " · from PDF SHA-256 " + sha.substring(0, 24) + "… · taken " + LocalDateTime.now().withNano(0);
+            while (g.getFontMetrics().stringWidth(line) > w - band && small.getSize() > 8) {
+                small = small.deriveFont(small.getSize2D() - 1);
+                g.setFont(small);
+            }
+            g.drawString(line, band / 3, h + band * 2 / 3);
+        } finally {
+            g.dispose();
+        }
+        return out;
+    }
+
+    @Transactional
+    public void deleteFromAgreement(String kind, Long ownerId, Long attachmentId) {
+        Attachment a = attachments.findById(attachmentId)
+                .filter(x -> kind.equals(x.getOwnerKind()) && ownerId.equals(x.getOwnerId()) && UserContext.tenantId().equals(x.getTenantId()))
+                .orElseThrow(() -> new NotFoundException("File", attachmentId));
+        List<Attachment> gone = new java.util.ArrayList<>(List.of(a));
+        attachments.findByOwnerKind(kind, ownerId).stream().filter(x -> a.getSha256().equals(x.getDerivedFromSha())).forEach(gone::add);
+        attachments.deleteAllById(gone.stream().map(Attachment::getId).toList());
+        afterCommitDelete(gone);
+    }
+
+    /** When an agreement is deleted, its files go too. */
+    public void deleteAllForAgreement(String kind, Long ownerId) {
+        List<Attachment> list = attachments.findByOwnerKind(kind, ownerId);
+        if (!list.isEmpty()) {
+            attachments.deleteAllById(list.stream().map(Attachment::getId).toList());
+            afterCommitDelete(list);
+        }
+    }
+
+    /** The bytes of an agreement's file (for printing the stamp-paper copy with its annexures). */
+    public FileContent agreementFileContent(String kind, Long ownerId, Long attachmentId, boolean thumbnail) {
+        Attachment a = attachments.findById(attachmentId)
+                .filter(x -> kind.equals(x.getOwnerKind()) && ownerId.equals(x.getOwnerId()) && UserContext.tenantId().equals(x.getTenantId()))
+                .orElseThrow(() -> new NotFoundException("File", attachmentId));
+        return fileOf(a, thumbnail);
+    }
+
+    private AgreementFile agreementFile(Attachment a) {
+        return new AgreementFile(a.getId(), a.getDocType(), a.getFileName(), a.getContentType(), a.getSizeBytes(),
+                a.getContentType().startsWith("image/"), a.getContentType().equals("application/pdf"),
+                Boolean.TRUE.equals(a.getHasThumbnail()), a.getSha256(), a.getSource(), a.getCreatedBy(), a.getCreatedAt(),
+                intact(a), a.getDerivedFromSha(), a.getCaption());
+    }
+
+    /** The bytes on disk still hash to what was recorded when the file came in (a changed or missing file is not intact). */
+    private boolean intact(Attachment a) {
+        try {
+            return a.getSha256().equals(sha256(Files.readAllBytes(path(a))));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** The bytes of a document scan for a share link (no signed-in user). */
     public FileContent sharedFile(Long tenantId, Long documentId, Long attachmentId, boolean thumbnail) {
         Attachment a = attachments.findById(attachmentId)
@@ -505,5 +840,13 @@ public class AttachmentService implements ApplicationRunner {
         }
         String t = text.trim();
         return t.length() > max ? t.substring(0, max) : t;
+    }
+
+    /** "SANCTION_LETTER" → "Sanction letter". */
+    private static final class MaybeLabel {
+        static String of(String type) {
+            String t = type.replace('_', ' ').toLowerCase();
+            return Character.toUpperCase(t.charAt(0)) + t.substring(1);
+        }
     }
 }

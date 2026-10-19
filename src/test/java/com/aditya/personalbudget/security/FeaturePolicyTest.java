@@ -14,8 +14,8 @@ class FeaturePolicyTest {
     @Test
     void anUnlimitedUserGetsEverySectionAndEveryMobileSection() {
         AppUser user = new AppUser();
-        assertThat(FeaturePolicy.granted(user, false)).isEqualTo(Feature.all());
-        assertThat(FeaturePolicy.granted(user, true)).isEqualTo(Feature.allMobile());
+        assertThat(FeaturePolicy.granted(user, null, false)).isEqualTo(Feature.all());
+        assertThat(FeaturePolicy.granted(user, null, true)).isEqualTo(Feature.allMobile());
     }
 
     @Test
@@ -23,10 +23,31 @@ class FeaturePolicyTest {
         AppUser user = new AppUser();
         user.setFeatures("EXPENSES,CHITS,REPORTS");
         user.setMobileFeatures("EXPENSES,BUDGETS");
-        assertThat(FeaturePolicy.granted(user, false)).containsExactlyInAnyOrder(Feature.EXPENSES, Feature.CHITS, Feature.REPORTS);
-        assertThat(FeaturePolicy.granted(user, true)).containsExactly(Feature.EXPENSES);
+        assertThat(FeaturePolicy.granted(user, null, false)).containsExactlyInAnyOrder(Feature.EXPENSES, Feature.CHITS, Feature.REPORTS);
+        assertThat(FeaturePolicy.granted(user, null, true)).containsExactly(Feature.EXPENSES);
         user.setMobileAccess(false);
-        assertThat(FeaturePolicy.granted(user, true)).isEmpty();
+        assertThat(FeaturePolicy.granted(user, null, true)).isEmpty();
+    }
+
+    @Test
+    void aUserGetsOnlyTheSectionsTheirOrganizationHas() {
+        com.aditya.personalbudget.domain.entity.Organization org = new com.aditya.personalbudget.domain.entity.Organization();
+        org.setFeatures("EXPENSES,CHITS,HOST_CHITS");
+        AppUser everything = new AppUser();
+        assertThat(FeaturePolicy.granted(everything, org, false)).containsExactlyInAnyOrder(Feature.EXPENSES, Feature.CHITS, Feature.HOST_CHITS);
+        AppUser some = new AppUser();
+        some.setFeatures("EXPENSES,REPORTS");
+        assertThat(FeaturePolicy.granted(some, org, false)).containsExactly(Feature.EXPENSES);
+        assertThat(FeaturePolicy.granted(some, org, true)).containsExactly(Feature.EXPENSES);
+    }
+
+    @Test
+    void hostAChitAndActivityAreSectionsOfTheirOwn() {
+        Set<Feature> chitsOnly = EnumSet.of(Feature.CHITS);
+        assertThat(FeaturePolicy.allows(chitsOnly, "POST", "/api/hosted-chits/3/payments")).isFalse();
+        assertThat(FeaturePolicy.allows(EnumSet.of(Feature.HOST_CHITS), "POST", "/api/hosted-chits/3/payments")).isTrue();
+        assertThat(FeaturePolicy.allows(chitsOnly, "GET", "/api/activity")).isFalse();
+        assertThat(FeaturePolicy.allows(EnumSet.of(Feature.ACTIVITY), "GET", "/api/activity")).isTrue();
     }
 
     @Test

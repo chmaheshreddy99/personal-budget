@@ -18,7 +18,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 
-const view = { selectedId: null, tab: 'installments', interestFilter: 'all' };
+const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
 
 const prefs = getPref('chits', { includeMatured: false });
 const savePrefs = () => setPref('chits', prefs);
@@ -35,14 +35,20 @@ export async function render(container, _params, isCurrent) {
     <div class="page chits-page">
         <section class="cp-card" id="chit-brand"></section>
         <div class="cs-cards" id="chit-cards"></div>
-        ${panel({
-            title: 'My chits', iconName: 'chit', cls: 'p-chit-list', bodyClass: 'flush',
-            sub: `${chits.filter(isRunning).length} running`,
-            actions: `<a class="btn sm ghost icon" href="#/reports/chit-summary" title="Chit summary: the selected chits together, printable">${icon('printer')}</a>
-                <a class="btn sm ghost icon" href="#/forecast/chit" title="Chit illustrator: bids, dividends and the best month to lift">${icon('calculator')}</a>`
-                + (can('MANAGE_CHITS') ? `<button class="btn sm primary" id="new-chit">${icon('plus')}Chit</button>` : ''),
-            body: `<div class="chit-rows scroll" id="chit-list">${chits.length ? chitRows(chits) : emptyState('Add your first chit', 'chit')}</div>`,
-        })}
+        <section class="panel p-chit-list headless">
+            <div class="panel-body flush">
+                <div class="list-tools">
+                    <div class="lt-top">
+                        <div class="search-box">${icon('search')}<input id="chit-search" name="q-chits" data-plain placeholder="Search chits…  ↑↓ to move" value="${esc(view.search)}">
+                            <span class="lt-count" id="chit-count" title="Running chits">${chits.filter(isRunning).length} running</span></div>
+                        <a class="btn ghost icon lt-micro" href="#/reports/chit-summary" title="Chit summary: the selected chits together, printable">${icon('printer')}</a>
+                        <a class="btn ghost icon lt-micro" href="#/forecast/chit" title="Chit illustrator: bids, dividends and the best month to lift">${icon('calculator')}</a>
+                        ${can('MANAGE_CHITS') ? `<button class="btn primary icon lt-add" id="new-chit" title="Add chit">${icon('plus')}</button>` : ''}
+                    </div>
+                </div>
+                <div class="chit-rows scroll" id="chit-list" tabindex="0" aria-label="Chits, use the arrow keys to move">${chits.length ? chitRows(chits) : emptyState('Add your first chit', 'chit')}</div>
+            </div>
+        </section>
         <div class="chit-detail" id="chit-detail">${chits.length ? '' : panel({ title: 'Chit', iconName: 'chit', body: emptyState('No chits yet') })}</div>
     </div>`;
 
@@ -66,6 +72,29 @@ export async function render(container, _params, isCurrent) {
         if (card) show(Number(card.dataset.id));
     });
 
+    // the search narrows the list on name, organizer, ticket, status and the account it is paid from
+    const matching = () => {
+        const term = view.search.trim().toLowerCase();
+        return term ? chits.filter(c => [c.name, c.organizer, c.ticketNo, c.status, c.accountName, c.notes]
+            .some(v => v && String(v).toLowerCase().includes(term))) : chits;
+    };
+    const drawRows = () => {
+        const list = matching();
+        container.querySelector('#chit-list').innerHTML = list.length ? chitRows(list)
+            : emptyState(chits.length ? 'No chits match' : 'Add your first chit', 'chit');
+        container.querySelector('#chit-count').textContent = view.search.trim() ? `${list.length} of ${chits.length}` : `${chits.filter(isRunning).length} running`;
+        return list;
+    };
+    const search = container.querySelector('#chit-search');
+    search.addEventListener('input', () => {
+        view.search = search.value;
+        const list = drawRows();
+        if (list.length && !list.some(c => c.id === view.selectedId)) show(list[0].id);
+    });
+    search.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && search.value) { search.value = ''; view.search = ''; drawRows(); }
+    });
+
     async function show(id) {
         view.selectedId = id;
         container.querySelectorAll('#chit-list [data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
@@ -85,10 +114,13 @@ export async function render(container, _params, isCurrent) {
             clearTimeout(keyTimer);
             keyTimer = setTimeout(() => show(Number(el.dataset.id)), 130);
         },
-        open: () => container.querySelector('.p-chit-head [data-pay]')?.click(),
+        // Enter in the search box only moves to the list; from the list it pays the next installment
+        open: () => (document.activeElement === search ? listEl.focus() : container.querySelector('.p-chit-head [data-pay]')?.click()),
+        allowWhileTyping: search,
     }));
 
-    if (chits.length) await show(chits.some(c => c.id === view.selectedId) ? view.selectedId : chits[0].id);
+    const shown = view.search.trim() ? drawRows() : chits;
+    if (shown.length) await show(shown.some(c => c.id === view.selectedId) ? view.selectedId : shown[0].id);
 }
 
 /**
@@ -119,31 +151,41 @@ function portfolioStrip(chits) {
     const paidPct = (paid / total) * 100;
     const interest = sum(pool, 'compoundInterestEarned');
     const nextDays = nextDue ? daysFromToday(nextDue.nextDueDate) : null;
+    const stillToPay = sum(running, 'stillToPay');
+    const pending = sum(running, 'installmentsPending');
+    // what the chits ask each month now (running chits with installments left), and when the last one ends
+    const monthly = running.filter(c => Number(c.installmentsPending) > 0).reduce((s, c) => s + Number(c.monthlyInstallment || 0), 0);
+    const lastEnd = running.map(c => c.maturityDate).filter(Boolean).sort().at(-1);
+    const month = isoDate().slice(0, 7);
+    const dueThisMonth = running.filter(c => c.nextDueDate && c.nextDueDate.slice(0, 7) === month);
+    const dividends = sum(pool, 'dividendsEarned');
     const card = `
         <div class="cp-head"><span class="cp-mark">${icon('chit')}</span>
-            <div class="min-0"><small>Chit portfolio</small><b>${moneyShort(sum(pool, 'paidIn'))} <em>paid in</em></b></div>
+            <div class="min-0"><small>Chit portfolio · <span class="cp-count">${running.length} running${done.length ? ` · ${done.length} done` : ''}</span></small>
+                <div class="cp-line"><b>${moneyShort(sum(pool, 'paidIn'))} <em>paid in</em></b>
+                ${stillToPay > 0 ? `<span class="cp-still" title="${pending} installments left in the running chits">${moneyShort(stillToPay)} to pay · ${pending} left</span>` : '<span class="cp-still done">all installments paid</span>'}</div></div>
             <span class="cp-rate" title="Yearly return, weighted by what is paid in">${percent(weighted, 1)}<small>a year</small></span></div>
-        <div class="cp-progress" title="${percent(paidPct, 0)} of the ${moneyShort(total)} the running chits ask for">
-            <i class="onc-bar"><em style="width:${Math.min(100, paidPct)}%"></em></i>
-            <span>${percent(paidPct, 0)} of ${moneyShort(total)} · interest <b class="up">+${moneyShort(interest)}</b></span></div>
-        <div class="cp-foot">
-            <span class="cp-pill run">${icon('play')}${running.length} running</span>
-            ${done.length ? `<span class="cp-pill done">${icon('lock')}${done.length} matured / closed</span>` : ''}
-            ${done.length ? `<label class="cs-mini-switch" title="Count chits that already matured or paid out in the figures"><input type="checkbox" id="include-matured" ${prefs.includeMatured ? 'checked' : ''}><i></i>with matured</label>` : ''}
-        </div>`;
+        <div class="cp-progress" title="${percent(paidPct, 0)} of the ${moneyShort(total)} the running chits ask for: paid in, then still to pay">
+            <i class="onc-bar cp-split"><em style="width:${Math.min(100, paidPct)}%"></em></i>
+            <span><b>${percent(paidPct, 0)}</b> paid of ${moneyShort(total)} · ${moneyShort(stillToPay)} to go · interest <b class="up">+${moneyShort(interest)}</b>
+                ${done.length ? `<label class="cs-mini-switch" title="Count chits that already matured or paid out in the figures"><input type="checkbox" id="include-matured" ${prefs.includeMatured ? 'checked' : ''}><i></i>with matured</label>` : ''}</span></div>`;
     const cells = `
         ${cell('trending', 'Net gain', `<span class="${expected + realised >= 0 ? 'up' : 'down'}">${moneyShort(expected + realised)}</span>`,
             realised ? `${moneyShort(expected)} expected · ${moneyShort(realised)} realised` : 'expected at maturity', expected + realised >= 0 ? 'good' : 'warn')}
         ${cell('gift', 'Take home now', `<span class="gold">${lift.length ? moneyShort(lift.reduce((s, t) => s + t.prize, 0)) : '—'}</span>`,
-            lift.length ? `+${moneyShort(lift.reduce((s, t) => s + t.waitGain, 0))} more if you wait` : 'nothing to lift', 'highlight')}
-        ${cell('target', 'Future value', moneyShort(future), `at maturity · ${moneyShort(sum(running, 'projectedCompoundInterest'))} interest`, '',
+            lift.length ? `${lift.length} chit${lift.length === 1 ? '' : 's'} · +${moneyShort(lift.reduce((s, t) => s + t.waitGain, 0))} if you wait` : 'nothing to lift', 'highlight')}
+        ${cell('target', 'Future value', moneyShort(future), `+${moneyShort(sum(running, 'projectedCompoundInterest'))} interest${lastEnd ? ` · last ends ${shortDate(lastEnd)}` : ''}`, '',
             future ? (sum(running, 'paidIn') / future) * 100 : null, 'The bar: paid in so far against the maturity amounts')}
-        ${cell('hourglass', 'Still to pay', moneyShort(sum(running, 'stillToPay')), `${sum(running, 'installmentsPending')} installments`, '',
-            (sum(running, 'stillToPay') / total) * 100)}
-        ${overdue ? cell('alert', 'Overdue', `<span class="down">${moneyShort(sum(running, 'overdueAmount'))}</span>`, `${overdue} installment(s)`, 'warn')
+        ${cell('hourglass', 'Still to pay', moneyShort(stillToPay), `${pending} installments${monthly ? ` · ${moneyShort(monthly)}/month` : ''}`, '',
+            (stillToPay / total) * 100, monthly ? `The running chits ask ${money(monthly)} a month together` : '')}
+        ${overdue ? cell('alert', 'Overdue', `<span class="down">${moneyShort(sum(running, 'overdueAmount'))}</span>`, `${overdue} installment(s) · pay them first`, 'warn')
                   : cell('calendar', 'Next due', nextDue ? moneyShort(nextDue.nextDueAmount) : '—',
-                      nextDue ? `${esc(shortName(nextDue.name))} · ${nextDays === 0 ? 'today' : nextDays === 1 ? 'tomorrow' : shortDate(nextDue.nextDueDate)}` : 'nothing due', nextDays !== null && nextDays <= 3 ? 'note' : '')}
-        ${cell('piggy', 'Dividends', moneyShort(sum(pool, 'dividendsEarned')), `${vsFd >= 0 ? '+' : '−'}${moneyShort(Math.abs(vsFd))} vs a 7% FD`, vsFd >= 0 ? 'good' : 'warn')}`;
+                      nextDue ? `${esc(nextDue.name)} · ${nextDays === 0 ? 'today' : nextDays === 1 ? 'tomorrow' : shortDate(nextDue.nextDueDate)}${dueThisMonth.length > 1 ? ` · ${dueThisMonth.length} due this month` : ''}` : 'nothing due',
+                      nextDays !== null && nextDays <= 3 ? 'note' : '', null, nextDue ? `${nextDue.name}: ${money(nextDue.nextDueAmount)} on ${date(nextDue.nextDueDate)}` : '')}
+        ${cell('piggy', 'Earned so far', `<span class="up">+${moneyShort(interest + dividends)}</span>`,
+            dividends ? `${moneyShort(interest)} interest · ${moneyShort(dividends)} dividends` : `interest · ${percent(weighted, 1)} a year · ${vsFd >= 0 ? '+' : '−'}${moneyShort(Math.abs(vsFd))} vs FD`,
+            vsFd >= 0 ? 'good' : 'warn', null,
+            `Interest earned so far ${money(interest)}${dividends ? ` and dividends ${money(dividends)} (${percent((dividends / (sum(pool, 'paidIn') || 1)) * 100, 1)} of paid in)` : ', no dividends'}; against a 7% fixed deposit the chits are ${vsFd >= 0 ? 'ahead' : 'behind'} by ${money(Math.abs(vsFd))}`)}`;
     return [card, cells];
 }
 
@@ -175,10 +217,6 @@ export function takeHomeNow(c) {
     };
 }
 
-function shortName(name) {
-    return name.length > 14 ? name.slice(0, 13) + '…' : name;
-}
-
 /**
  * The chit's return both ways:
  *   compound  the effective annual rate (IRR of the installments against the maturity amount)
@@ -197,6 +235,52 @@ export function chitReturns(c) {
     let fd = 0;
     for (let k = 0; k < n; k++) fd = (fd + m) * (1 + 0.07 / 12);
     return { compound, simple, interest, fdInterest: fd - m * n, vsFd: interest - (fd - m * n) };
+}
+
+/**
+ * The chit's progress in its banner: a bar of what is paid in (and what is overdue) against the whole contribution,
+ * a tick where you should be by today (installments fallen due), and a line with the percent, the money and the
+ * installments.
+ */
+function chitProgress(c, installments, total, upcoming) {
+    const pct = v => Math.max(0, Math.min(100, (Number(v) / total) * 100));
+    const today = isoDate();
+    const due = installments.filter(i => i.dueDate <= today).length;
+    const duePct = Math.min(100, (due / c.numberOfInstallments) * 100);
+    const paidPct = pct(c.paidIn);
+    const overdue = Number(c.overdueAmount) || 0;
+    const ahead = c.installmentsPaid - due;
+    return `<div class="cb-progress" title="${esc(`Paid ${money(c.paidIn)} of ${money(total)} · ${due} of ${c.numberOfInstallments} installments fallen due by today`)}">
+        <div class="cb-track">
+            <span class="cb-paid" style="width:${paidPct}%"></span>
+            ${overdue ? `<span class="cb-overdue" style="width:${pct(overdue)}%"></span>` : ''}
+            ${due && due < c.numberOfInstallments ? `<i class="cb-now" style="left:${duePct}%" title="Today: ${due} of ${c.numberOfInstallments} installments due"></i>` : ''}
+        </div>
+        <div class="cb-legend"><b>${percent(paidPct, 0)}</b> paid · ${money(c.paidIn)} of ${moneyShort(total)}
+            <span>· ${c.installmentsPaid}/${c.numberOfInstallments} installments</span>
+            ${overdue ? `<span class="cb-late">· ${moneyShort(overdue)} overdue</span>` : ahead > 0 ? `<span class="cb-ahead">· ${ahead} ahead</span>` : ''}
+            ${upcoming > 0 ? `<span>· ${moneyShort(upcoming)} to go</span>` : ''}</div>
+    </div>`;
+}
+
+/**
+ * The dividend facts of the stat line. With dividends: what they came to, per installment on average and as a share of
+ * what was paid in. Most chits pay none, so then the line says what the chit gives back instead: the payout as a
+ * multiple of the contribution and the months left.
+ */
+function dividendFacts(c, installments) {
+    const dividends = Number(c.dividendsEarned) || 0;
+    if (dividends > 0) {
+        const withDividend = installments.filter(i => Number(i.dividend) > 0).length || 1;
+        return `<span title="Dividends cut the cash you paid">${icon('piggy')}Dividends <b class="pos">${money(dividends)}</b></span>
+            <span title="Average dividend per installment that had one, and dividends as a share of what is paid in">${icon('coins')}Avg <b>${moneyShort(dividends / withDividend)}</b>
+                <small>yield</small><b>${percent((dividends / (Number(c.paidIn) || 1)) * 100, 1)}</b></span>`;
+    }
+    const multiple = Number(c.totalContribution) ? Number(c.maturityAmount) / Number(c.totalContribution) : 0;
+    const monthsLeft = Math.max(0, c.numberOfInstallments - c.installmentsPaid);
+    return `<span title="What the chit pays out against all the installments together">${icon('piggy')}Payout <b class="pos">${multiple.toFixed(2)}×</b><small>of contribution</small></span>
+        <span title="Installments still to pay, and the gain each month of waiting adds">${icon('hourglass')}<b>${monthsLeft}</b> months left${monthsLeft
+            ? ` · <b class="pos">+${moneyShort((Number(c.maturityAmount) - Number(c.totalContribution)) / c.numberOfInstallments)}</b>/month gain` : ''}</span>`;
 }
 
 /**
@@ -271,11 +355,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
                     <div class="ab-name">${esc(c.name)} ${statusBadge(c.status)}${closed && c.closedAt ? `<span class="ab-closed">${icon('lock')}closed ${date(c.closedAt.slice(0, 10))}</span>` : ''}</div>
                     <div class="ab-meta">${[c.organizer, c.ticketNo ? 'Ticket ' + c.ticketNo : '', `${c.numberOfInstallments} × ${money(c.monthlyInstallment)}`]
                         .filter(Boolean).map(esc).join('<i>·</i>')}</div>
-                    <div class="cb-progress">
-                        <i class="split-bar on-dark"><span class="paid" style="width:${(Number(c.paidIn) / total) * 100}%"></span>
-                            <span class="overdue" style="width:${(Number(c.overdueAmount) / total) * 100}%"></span></i>
-                        <small>${money(c.paidIn)} paid · ${c.installmentsPaid}/${c.numberOfInstallments}${upcoming > 0 ? ` · ${moneyShort(upcoming)} to go` : ''}</small>
-                    </div>
+                    ${chitProgress(c, installments, total, upcoming)}
                 </div>
                 <div class="ab-bal">
                     <small>${paidOut ? 'Received' : 'You receive'}</small>
@@ -301,7 +381,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
             <div class="chit-statline">
                 <span title="Interest earned so far at the chit's rate (compound / simple)">${icon('trending')}Interest so far <b class="pos">${money(Math.round(c.compoundInterestEarned))}</b></span>
                 <span title="Effective annual return: compound / simple equivalent">${icon('percent')}Return <b>${percent(chitReturns(c).compound, 1)}</b><small>C</small> <b>${percent(chitReturns(c).simple, 1)}</b><small>S</small></span>
-                <span title="Dividends cut the cash you paid">${icon('piggy')}Dividends <b class="pos">${money(c.dividendsEarned)}</b></span>
+                ${dividendFacts(c, installments)}
                 <span title="The same installments in a 7% fixed deposit">${icon('scale')}vs 7% FD <b class="${chitReturns(c).vsFd >= 0 ? 'pos' : 'neg'}">${chitReturns(c).vsFd >= 0 ? '+' : '−'}${moneyShort(Math.abs(chitReturns(c).vsFd))}</b></span>
                 <span title="Cash actually paid after dividends">${icon('cash')}Cash paid <b>${moneyShort(c.cashPaid)}</b></span>
             </div>
@@ -405,7 +485,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
 /** A key figure of the selected chit: label, value, a short note and an optional bar. */
 function keyTile(iconName, label, value, note, extra = '', cls = '', title = '') {
     return `<div class="ck-tile ${cls}" ${title ? `title="${esc(title)}"` : ''}><span class="ck-icon">${icon(iconName)}</span>
-        <div class="min-0 grow"><small>${esc(label)}</small><b>${value}</b>${extra}<span class="ck-note">${note}</span></div></div>`;
+        <div class="min-0 grow"><small>${esc(label)}</small><div class="ck-line"><b>${value}</b><span class="ck-note">${note}</span></div>${extra}</div></div>`;
 }
 
 function tile(iconName, label, value, note, cls = '') {

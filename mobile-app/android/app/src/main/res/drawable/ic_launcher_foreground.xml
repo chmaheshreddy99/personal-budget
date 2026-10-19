@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's foreground: a water drop (the web app's logo) with a rupee sign, inside the 72dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,22C54,22 32,46 32,62a22,22 0,0 0,44 0C76,46 54,22 54,22z" />
+    <path
+        android:fillColor="#FF0B7CBD"
+        android:pathData="M45,50h18v4h-5.6c0.9,1 1.5,2.2 1.7,3.5H63v4h-4c-0.7,3.9 -3.9,6.9 -7.9,7.4L60.6,78h-6.2l-9,-9.4v-3.6h4.5c1.9,0 3.6,-1.2 4.2,-3H45v-4h9.1c-0.6,-1.8 -2.3,-3 -4.2,-3H45z" />
+</vector>

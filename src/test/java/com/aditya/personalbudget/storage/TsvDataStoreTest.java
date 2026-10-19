@@ -1,10 +1,10 @@
 package com.aditya.personalbudget.storage;
 
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.repository.AppUserRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,7 +29,7 @@ class TsvDataStoreTest {
 
     private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
     private TsvDataStore store;
-    private TenantRepository tenants;
+    private OrganizationRepository tenants;
     private AppUserRepository users;
 
     @BeforeEach
@@ -39,14 +39,14 @@ class TsvDataStoreTest {
 
     private void open() {
         store = new TsvDataStore(dataDir.toString(), validator);
-        tenants = new TenantRepository(store);
+        tenants = new OrganizationRepository(store);
         users = new AppUserRepository(store);
     }
 
-    private static Tenant tenant(String code) {
-        Tenant t = new Tenant();
+    private static Organization tenant(String code) {
+        Organization t = new Organization();
         t.setCode(code);
-        t.setName("Tenant " + code);
+        t.setName("Organization " + code);
         t.setCurrency("INR");
         t.setActive(true);
         t.setCreatedAt(LocalDateTime.now());
@@ -67,12 +67,12 @@ class TsvDataStoreTest {
 
     @Test
     void savesRowsToATabSeparatedFileWithHeaderAndReloadsThem() throws Exception {
-        Tenant saved = tenants.save(tenant("home"));
+        Organization saved = tenants.save(tenant("home"));
         assertThat(saved.getId()).isEqualTo(1L);
 
-        List<String> lines = Files.readAllLines(dataDir.resolve("tenants.tbl"));
-        assertThat(lines.getFirst()).isEqualTo("id\tcode\tname\tcurrency\tactive\tcreatedAt\tapprovalMode\tversion");
-        assertThat(lines.get(1)).startsWith("1\thome\tTenant home\tINR\ttrue\t");
+        List<String> lines = Files.readAllLines(dataDir.resolve("organizations.tbl"));
+        assertThat(lines.getFirst()).isEqualTo("id\tcode\tname\tcurrency\tactive\tcreatedAt\tapprovalMode\tchitCompanyName\tfeatures\tversion");
+        assertThat(lines.get(1)).startsWith("1\thome\tOrganization home\tINR\ttrue\t");
 
         open(); // a fresh store reads the file back
         assertThat(tenants.findByCode("home")).isPresent();
@@ -81,7 +81,7 @@ class TsvDataStoreTest {
 
     @Test
     void escapesTabsAndNewLinesInsideText() {
-        Tenant t = tenant("esc");
+        Organization t = tenant("esc");
         t.setName("Line one\tand\nline two");
         tenants.save(t);
         open();
@@ -90,15 +90,15 @@ class TsvDataStoreTest {
 
     @Test
     void rejectsNullsInNotNullColumns() {
-        Tenant t = tenant("nulls");
+        Organization t = tenant("nulls");
         t.setName(null);
         assertThatThrownBy(() -> tenants.save(t))
-                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("tenants.name");
+                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("organizations.name");
     }
 
     @Test
     void rejectsTextLongerThanTheColumnLength() {
-        Tenant t = tenant("long");
+        Organization t = tenant("long");
         t.setName("x".repeat(101));
         assertThatThrownBy(() -> tenants.save(t))
                 .isInstanceOf(DataIntegrityException.class).hasMessageContaining("maximum length 100");
@@ -107,7 +107,7 @@ class TsvDataStoreTest {
     @Test
     void rejectsDuplicateUniqueKeysIgnoringCase() {
         tenants.save(tenant("home"));
-        Tenant duplicate = tenant("home");
+        Organization duplicate = tenant("home");
         duplicate.setCode("home");
         assertThatThrownBy(() -> tenants.save(duplicate))
                 .isInstanceOf(DataIntegrityException.class).hasMessageContaining("unique key (code)");
@@ -115,7 +115,7 @@ class TsvDataStoreTest {
 
     @Test
     void enforcesBeanValidationChecks() {
-        Tenant t = tenant("BAD CODE!");
+        Organization t = tenant("BAD CODE!");
         assertThatThrownBy(() -> tenants.save(t))
                 .isInstanceOf(DataIntegrityException.class).hasMessageContaining("code");
     }
@@ -123,17 +123,17 @@ class TsvDataStoreTest {
     @Test
     void enforcesForeignKeysOnInsertAndDelete() {
         assertThatThrownBy(() -> users.save(user(99L, "ghost")))
-                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("refers to missing Tenant #99");
+                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("refers to missing Organization #99");
 
-        Tenant home = tenants.save(tenant("home"));
+        Organization home = tenants.save(tenant("home"));
         users.save(user(home.getId(), "admin"));
         assertThatThrownBy(() -> tenants.deleteById(home.getId()))
-                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("still referenced by app_users.tenantId");
+                .isInstanceOf(DataIntegrityException.class).hasMessageContaining("still referenced by app_users.organizationId");
     }
 
     @Test
     void rollsBackEveryTableWhenATransactionFails() {
-        Tenant home = tenants.save(tenant("home"));
+        Organization home = tenants.save(tenant("home"));
 
         store.begin();
         try {
@@ -145,7 +145,7 @@ class TsvDataStoreTest {
         }
 
         assertThat(users.findAll()).isEmpty();
-        assertThat(tenants.findAll()).extracting(Tenant::getCode).containsExactly("home");
+        assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactly("home");
         open(); // nothing reached the files either
         assertThat(users.findAll()).isEmpty();
         assertThat(tenants.count()).isEqualTo(1);
@@ -153,17 +153,17 @@ class TsvDataStoreTest {
 
     @Test
     void returnsCopiesSoCallersCannotChangeCachedRows() {
-        Tenant saved = tenants.save(tenant("home"));
+        Organization saved = tenants.save(tenant("home"));
         saved.setName("Changed without saving");
-        assertThat(tenants.findById(saved.getId()).orElseThrow().getName()).isEqualTo("Tenant home");
+        assertThat(tenants.findById(saved.getId()).orElseThrow().getName()).isEqualTo("Organization home");
     }
 
     @Test
     void refusesASaveBasedOnAnOlderVersion() {
-        Tenant saved = tenants.save(tenant("home"));
+        Organization saved = tenants.save(tenant("home"));
         assertThat(saved.getVersion()).isZero();
-        Tenant mine = tenants.findById(saved.getId()).orElseThrow();
-        Tenant theirs = tenants.findById(saved.getId()).orElseThrow();
+        Organization mine = tenants.findById(saved.getId()).orElseThrow();
+        Organization theirs = tenants.findById(saved.getId()).orElseThrow();
 
         theirs.setName("Changed by someone else");
         assertThat(tenants.save(theirs).getVersion()).isEqualTo(1L);
@@ -177,10 +177,10 @@ class TsvDataStoreTest {
     void seesChangesWrittenByAnotherStoreOnTheSameFiles() {
         tenants.save(tenant("home"));
         TsvDataStore other = new TsvDataStore(dataDir.toString(), validator);
-        TenantRepository otherTenants = new TenantRepository(other);
+        OrganizationRepository otherTenants = new OrganizationRepository(other);
         otherTenants.save(tenant("second"));   // e.g. another process writing the same data folder
 
-        assertThat(tenants.findAll()).extracting(Tenant::getCode).containsExactlyInAnyOrder("home", "second");
+        assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactlyInAnyOrder("home", "second");
         assertThat(otherTenants.save(tenant("third")).getId()).isEqualTo(3L);   // ids are never handed out twice
     }
 

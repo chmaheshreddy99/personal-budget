@@ -30,7 +30,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
     height: 100vh;
     display: grid;
     grid-template-rows: var(--topbar-height) minmax(0, 1fr) var(--footer-height);
+    /* one column exactly as wide as the window: the menu's full width (every label) never widens the page; the menu
+       scrolls (and compacts, see responsive.css) instead */
+    grid-template-columns: minmax(0, 1fr);
 }
+.app > * { min-width: 0; }
 
 /* ---------------------------------------------------------------- top bar */
 .topbar {
@@ -234,6 +238,15 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 
 /* ---------------------------------------------------------------- small screens
    On phones the fixed-canvas layout cannot fit, so the view itself scrolls. */
+/* laptops: the full menu needs ~1540px; make room step by step so every item stays in view */
+@media (max-width: 1600px) {
+    .brand-text, .user-text { display: none; }
+    .topbar { gap: 10px; }
+    .menu a { padding: 0 8px; gap: 5px; font-size: 12px; }
+}
+@media (max-width: 1440px) {
+    .menu a:not(.active) span { display: none; }   /* icons (named in their tooltips); the open page keeps its name */
+}
 @media (max-width: 1280px) {
     .brand-text, .user-text { display: none; }
     .foot-keys, .foot-hide-md { display: none !important; }

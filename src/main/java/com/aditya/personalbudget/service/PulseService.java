@@ -62,7 +62,7 @@ public class PulseService {
         Map<Long, BigDecimal> month = snapshot.movementsBetween(today.withDayOfMonth(1), today);
         Map<Long, BigDecimal> day = snapshot.movementsBetween(today, today);
 
-        BigDecimal liquid = sum(snapshot, balances, a -> a.getAccountType().isLiquid());
+        BigDecimal liquid = sum(snapshot, balances, Account::isLiquid);
         BigDecimal dues = sum(snapshot, balances,
                 a -> a.getAccountType() == AccountType.CREDIT_CARD || a.getAccountType() == AccountType.PAYABLE);
         BigDecimal spentToday = sum(snapshot, day, a -> a.getAccountClass() == AccountClass.EXPENSE);

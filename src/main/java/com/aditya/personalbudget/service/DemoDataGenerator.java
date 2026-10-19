@@ -98,7 +98,7 @@ public class DemoDataGenerator {
         long medical = expense("Medical & Health");
         long education = expense("Education");
         long entertainment = expense("Entertainment");
-        long shopping = expense("Shopping & Clothing");
+        long shopping = expense("Clothing & Footwear");
         long insurance = expense("Insurance Premiums");
         long loanInterest = expense("Loan Interest");
         long maintenance = expense("Home Maintenance");

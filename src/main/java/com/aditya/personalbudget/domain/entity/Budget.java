@@ -24,7 +24,7 @@ import java.math.BigDecimal;
  * Table file: {@code data/budgets.tbl}
  */
 @Entity
-@Table(name = "budgets", uniqueConstraints = @UniqueConstraint(columnNames = {"tenantId", "categoryId", "month"}))
+@Table(name = "budgets", uniqueConstraints = @UniqueConstraint(columnNames = {"organizationId", "categoryId", "month"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -34,8 +34,8 @@ public class Budget implements TenantOwned {
     @GeneratedValue
     private Long id;
 
-    @References(Tenant.class)
-    @Column(nullable = false)
+    @References(Organization.class)
+    @Column(name = "organizationId", nullable = false)
     private Long tenantId;
 
     /** Must be an EXPENSE account. */

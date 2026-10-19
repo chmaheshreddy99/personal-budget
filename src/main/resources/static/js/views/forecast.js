@@ -11,6 +11,7 @@ import { icon } from '../core/icons.js';
 import { money, moneyShort, monthLabel, shortDate, percent } from '../core/format.js';
 import { barChart, lineChart, legend } from '../core/charts.js';
 import { renderChitIllustrator, renderInterestCalculator } from './planners.js';
+import { renderChitAnalyzer } from './chit-analyzer.js';
 import { chitReturns, takeHomeNow } from './chits.js';
 
 const MODES = [
@@ -18,6 +19,8 @@ const MODES = [
     { value: 'chits', label: 'Chit outlook', iconName: 'timeline' },
     { value: 'chit', label: 'Chit illustrator', iconName: 'chit' },
     { value: 'interest', label: 'Interest calculator', iconName: 'calculator' },
+    // chits the user hosts: member's interest by winning month, the host's commission and what to keep aside
+    { value: 'analyzer', label: 'Chit analyzer', iconName: 'scale' },
 ];
 
 const settings = { months: 12, incomeAdjust: 0, expenseAdjust: 0, sideTab: 'events' };
@@ -40,6 +43,7 @@ export async function render(container, params, isCurrent) {
     if (mode === 'chit') { await renderChitIllustrator(body); return; }
     if (mode === 'interest') { renderInterestCalculator(body); return; }
     if (mode === 'chits') { await renderChitOutlook(body); return; }
+    if (mode === 'analyzer') { await renderChitAnalyzer(body, params[1]); return; }
     await renderProjection(container, body, isCurrent);
 }
 

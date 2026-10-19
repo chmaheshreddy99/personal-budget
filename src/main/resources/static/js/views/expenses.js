@@ -14,7 +14,10 @@
  * Lent, Paid for, To collect and You owe list every item still open, whatever the period (settled ones only when
  * they started in it); an expanded item scrolls on its own inside the list.
  *
- * Routes: #/expenses, #/expenses/today (opens on today), #/expenses/collect (opens on "to collect"),
+ * EMIs lists everything bought on EMI (card or loan) that is still being paid, whatever the period, plus those finished
+ * in it; an expanded plan shows where it stands, the money and every instalment, with pay, undo and pay off early.
+ *
+ * Routes: #/expenses, #/expenses/today (opens on today), #/expenses/collect (opens on "to collect"), #/expenses/emi[/<id>],
  * #/expenses/owe (money you borrowed and bills still to pay), #/expenses/claim/<id> (opens that lent / borrowed
  * item, wherever the link came from: this is where it is managed).
  */
@@ -31,6 +34,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceBadge, evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { openSubmissions } from '../components/submissions.js';
+import { emiPanelHtml, bindEmiPanel, emiBadge, emiSideHtml } from '../components/emi.js';
 
 /** Periods, in toolbar order; the first four are always visible, the rest sit behind "More". */
 const PERIODS = {
@@ -53,6 +57,7 @@ const TYPES = [
     { key: 'LENT', label: 'Lent', iconName: 'hand' },
     { key: 'collect', label: 'To collect', iconName: 'clock' },
     { key: 'owe', label: 'You owe', iconName: 'card' },
+    { key: 'emi', label: 'EMIs', iconName: 'calendar' },
 ];
 
 const view = {
@@ -102,6 +107,7 @@ export async function render(container, params, isCurrent) {
     if (params[0] === 'today') { view.period = 'today'; view.type = 'all'; }
     if (params[0] === 'collect') { view.type = 'collect'; }
     if (params[0] === 'owe') { view.type = 'owe'; }
+    if (params[0] === 'emi') { view.type = 'emi'; if (params[1]) view.focusEmi = Number(params[1]); }
     if (params[0] === 'claim' && params[1]) { view.focusClaim = Number(params[1]); view.q = ''; }
     if (params.length) history.replaceState(null, '', '#/expenses');
 
@@ -113,35 +119,47 @@ export async function render(container, params, isCurrent) {
     const prevTo = addDays(fromD, -1), prevFrom = addDays(fromD, -days);
 
     const waitsForApproval = !!state.user?.approval && !state.user?.linkId;
-    const [rows, previous, budgets, claimData, accounts, expenseCategories, mine] = await Promise.all([
+    const [rows, previous, budgets, claimData, accounts, expenseCategories, mine, emiBook] = await Promise.all([
         api.get('/expenses', { from, to }),
         api.get('/expenses', { from: isoDate(prevFrom), to: isoDate(prevTo) }),
         api.get('/budgets', { month: to.slice(0, 7) }),
         api.get('/claims'),
         loadAccounts(), categoriesOf('EXPENSE'),
         waitsForApproval ? api.get('/approvals/mine').catch(() => []) : Promise.resolve([]),
+        api.get('/expenses/emis', view.emiClosed ? { closed: true } : {}).catch(() => ({ summary: null, plans: [] })),
     ]);
     if (!isCurrent()) return;
     const reload = () => render(container, [], isCurrent);
     Object.assign(prefs, getPref('expenses', { grouped: false, sort: { key: 'date', dir: 'desc' } }));
 
-    // ---- one list: expenses + money lent / paid for others
+    // ---- one list: expenses + money lent / paid for others (+ what was bought on EMI)
     const claimRows = claimData.claims.map(claimRow);
+    // an expense entry that is an EMI's purchase or one of its instalments points at its plan
+    const emiByEntry = new Map();
+    emiBook.plans.forEach(pl => {
+        if (pl.purchaseEntryId) emiByEntry.set(pl.purchaseEntryId, { plan: pl, what: 'purchase' });
+        pl.installments.forEach(i => { if (i.journalEntryId) emiByEntry.set(i.journalEntryId, { plan: pl, what: `EMI ${i.seq}/${pl.months}` }); });
+    });
+    const emiRows = emiBook.plans.map(emiRow);
     const inPeriod = c => c.date >= from && c.date <= to;
     const isOpen = c => ['OPEN', 'PARTIAL'].includes(c.claim.status);   // principal or posted interest still owed
     // Lent / Paid for: every item still open, whatever its date, plus those settled that started in the period
     const all = {
-        EXPENSE: rows.map(expenseRow),
+        EXPENSE: rows.map(r => ({ ...expenseRow(r), emiOf: emiByEntry.get(r.entryId) || null })),
         PAID_FOR: claimRows.filter(c => c.type === 'PAID_FOR' && (isOpen(c) || inPeriod(c))),
         LENT: claimRows.filter(c => c.type === 'LENT' && (isOpen(c) || inPeriod(c))),
         collect: claimRows.filter(c => (c.type === 'LENT' || c.type === 'PAID_FOR') && isOpen(c)),
         // borrowed money and bills not yet paid off, whatever the period (posted interest still owed counts too)
         owe: claimRows.filter(c => (c.type === 'BORROWED' || c.type === 'BILL_DUE') && isOpen(c)),
+        // every plan still being paid, whatever the period, and those finished that were bought in it
+        // every plan not closed (finished ones until they are closed), and the closed ones when asked for
+        emi: emiRows,
     };
     // "All" stays the period's picture: what went out in it
     all.all = [...all.EXPENSE, ...claimRows.filter(c => (c.type === 'LENT' || c.type === 'PAID_FOR') && inPeriod(c))];
-    const openTypes = ['LENT', 'PAID_FOR', 'collect', 'owe'];
-    const olderOpen = openTypes.includes(view.type) ? all[view.type].filter(c => isOpen(c) && !inPeriod(c)).length : 0;
+    const openTypes = ['LENT', 'PAID_FOR', 'collect', 'owe', 'emi'];
+    // lent / borrowed items only: an EMI row has no claim
+    const olderOpen = CLAIM_VIEWS.includes(view.type) ? all[view.type].filter(c => c.claim && isOpen(c) && !inPeriod(c)).length : 0;
     view.periodFrom = from; view.periodTo = to;
     // opened from a link (journal, statement): show the item in its own list, even outside the period, expanded
     if (view.focusClaim) {
@@ -155,6 +173,11 @@ export async function render(container, params, isCurrent) {
             view.categoryId = null; view.paidFromId = null; view.min = ''; view.max = '';
         }
         view.focusClaim = null;
+    }
+    if (view.focusEmi) {
+        const focus = emiRows.find(r => r.emi.id === view.focusEmi);
+        if (focus) { view.type = 'emi'; if (!all.emi.includes(focus)) all.emi.push(focus); view.open = focus.key; view.categoryId = null; view.paidFromId = null; }
+        view.focusEmi = null;
     }
     const query = parseQuery(view.q);
     const matches = r => (!view.categoryId || String(r.categoryId) === String(view.categoryId))
@@ -182,6 +205,9 @@ export async function render(container, params, isCurrent) {
         ...query.category.map(c => `category: ${c}`), ...query.payer.map(p => `from: ${p}`), ...query.is.map(f => `is ${f}`),
     ].filter(Boolean);
 
+    // the last side panel: who owes you, or (a tab beside it) the EMIs; EMIs first when nobody owes anything
+    const hasEmis = emiBook.plans.some(pl => pl.status === 'ACTIVE' && !pl.archived);
+    const sideTab = hasEmis && (view.owedTab === 'emi' || (!view.owedTab && !all.collect.length)) ? 'emi' : 'owed';
     container.innerHTML = `
     <div class="page expenses-page">
         <div class="page-toolbar glass xp-toolbar">
@@ -208,6 +234,7 @@ export async function render(container, params, isCurrent) {
             ${exportButton({ label: '' })}
             ${can('POST_TRANSACTIONS') ? `
                 <button class="btn sm" id="xp-lend" title="Lent money or paid for someone">${icon('hand')}Lent / paid for</button>
+                <button class="btn sm" id="xp-emi" title="Bought on EMI: a credit card EMI or a loan / finance EMI">${icon('calendar')}On EMI</button>
                 <button class="btn primary" id="xp-add">${icon('plus')}Add expense <span class="kbd light">E</span></button>` : ''}
         </div>
 
@@ -225,7 +252,10 @@ export async function render(container, params, isCurrent) {
                     </div>` : ''}
                     ${queryChips.length ? `<div class="xp-query">${icon('sparkles')}${queryChips.map(c => `<span class="tag">${esc(c)}</span>`).join('')}</div>` : ''}
                     ${submissionsBar(mine)}
-                    ${openTypes.includes(view.type) ? `<div class="xp-open-note">${icon('clock')}<span>${['collect', 'owe'].includes(view.type)
+                    ${openTypes.includes(view.type) ? `<div class="xp-open-note">${icon('clock')}<span>${view.type === 'emi'
+                        ? `Every EMI not closed, whatever the period${emiBook.summary ? ` · ${money(emiBook.summary.outstanding)} still owed` : ''}</span>
+                            <label class="switch sm" title="Closed EMIs are put away; show them to look back or re-open one"><input type="checkbox" id="xp-emi-closed" ${view.emiClosed ? 'checked' : ''}><span></span>Show closed${emiBook.summary?.closed ? ` (${emiBook.summary.closed})` : ''}</label><span hidden>`
+                        : ['collect', 'owe'].includes(view.type)
                         ? 'Every open item, whatever the period'
                         : `Every open item, whatever the period${olderOpen ? ` (${olderOpen} from before ${date(from)})` : ''}, plus those settled in this period`}</span></div>` : ''}
                     <div class="scroll xp-list" id="xp-list">${tableHtml(list)}</div>` })}
@@ -243,8 +273,12 @@ export async function render(container, params, isCurrent) {
                           : view.side === 'category' ? categoryBars(byCategory, budgets, total, singleMonth) : payerList(byPayer, total) })}
             ${panel({ title: days > 62 ? 'Monthly spending' : 'Daily spending', iconName: 'calendar', cls: 'p-xp-daily', bodyClass: 'chart',
                       body: expenses.length ? '<div class="chart" id="xp-daily"></div>' : emptyState('No expenses') })}
-            ${panel({ title: 'Owed to you', iconName: 'hand', cls: 'p-xp-owed', sub: money(s.outstanding),
-                      body: owedList(all.collect) })}
+            ${panel({ title: sideTab === 'emi' ? 'EMIs' : 'Owed to you', iconName: sideTab === 'emi' ? 'calendar' : 'hand', cls: 'p-xp-owed',
+                      sub: sideTab === 'emi' ? (emiBook.summary ? `${moneyShort(emiBook.summary.outstanding)} owed` : '') : money(s.outstanding),
+                      actions: hasEmis ? `<div class="seg-chips sm" id="xp-owed-tabs">
+                          <button class="seg-chip ${sideTab === 'owed' ? 'active' : ''}" data-owed-tab="owed" title="Who owes you">${icon('hand')}</button>
+                          <button class="seg-chip ${sideTab === 'emi' ? 'active' : ''}" data-owed-tab="emi" title="Your EMIs">${icon('calendar')}EMIs</button></div>` : '',
+                      body: sideTab === 'emi' ? emiSideHtml(emiBook) : owedList(all.collect) })}
         </div>
     </div>`;
 
@@ -263,6 +297,16 @@ export async function render(container, params, isCurrent) {
     on('#xp-add', 'click', () => openExpenseDialog({ onSaved: reload }));
     on('[data-my-subs]', 'click', () => openSubmissions({ onChanged: reload }));
     on('#xp-lend', 'click', () => openExpenseDialog({ mode: 'PAID_FOR', onSaved: reload }));
+    on('#xp-emi', 'click', () => openExpenseDialog({ mode: 'EMI', onSaved: () => { view.type = 'emi'; reload(); } }));
+    on('#xp-owed-tabs', 'click', e => {
+        const b = e.target.closest('[data-owed-tab]');
+        if (b) { e.stopPropagation(); view.owedTab = b.dataset.owedTab; reload(); }
+    });
+    on('.p-xp-owed', 'click', e => {
+        const plan = e.target.closest('[data-emi-plan]');
+        if (plan) { view.type = 'emi'; view.open = `m${plan.dataset.emiPlan}`; reload(); return; }
+        if (e.target.closest('[data-emi-open]')) { view.type = 'emi'; view.open = null; reload(); }
+    });
     on('[data-summary-collect]', 'click', () => { view.type = view.type === 'collect' ? 'all' : 'collect'; reload(); });
     on('#xp-periods', 'click', e => {
         if (e.target.closest('#xp-more-periods')) { view.morePeriods = !view.morePeriods; reload(); return; }
@@ -275,6 +319,7 @@ export async function render(container, params, isCurrent) {
         const b = e.target.closest('[data-type]');
         if (b) { view.type = b.dataset.type; view.open = null; reload(); }
     });
+    on('#xp-emi-closed', 'change', e => { view.emiClosed = e.target.checked; reload(); });
     on('#xp-grouped', 'change', e => { prefs.grouped = e.target.checked; savePrefs(); reload(); });
     on('#xp-filters', 'click', () => { view.moreFilters = !view.moreFilters; reload(); });
     on('#xp-side-tabs', 'click', e => {
@@ -357,6 +402,7 @@ export async function render(container, params, isCurrent) {
                 if (action.dataset.xpAction === 'edit') openExpenseDialog({ expense: r.raw, onSaved: reload });
                 if (action.dataset.xpAction === 'copy') openExpenseDialog({ expense: r.raw, copy: true, onSaved: reload });
                 if (action.dataset.xpAction === 'journal') location.hash = '#/transactions';
+                if (action.dataset.xpAction === 'emi-plan') { view.type = 'emi'; view.open = `m${action.dataset.plan}`; reload(); }
                 if (action.dataset.xpAction === 'refund') openRefundDialog(r, reload);
                 if (action.dataset.xpAction === 'reverse') openReverseDialog(r, reload);
                 if (action.dataset.xpAction === 'undo-refund') {
@@ -389,9 +435,10 @@ export async function render(container, params, isCurrent) {
         tr.classList.add('expanded');
         const detail = document.createElement('tr');
         detail.className = 'detail-row';
-        detail.innerHTML = `<td colspan="${tr.children.length}">${r.claim ? claimPanelHtml(r.claim, { scroll: true }) : await expenseDetail(r, { rows: all.EXPENSE, budgets, accounts, month: to.slice(0, 7),
+        detail.innerHTML = `<td colspan="${tr.children.length}">${r.emi ? emiPanelHtml(r.emi) : r.claim ? claimPanelHtml(r.claim, { scroll: true }) : await expenseDetail(r, { rows: all.EXPENSE, budgets, accounts, month: to.slice(0, 7),
             monthLabel: new Date(to + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short' }) })}</td>`;
         tr.after(detail);
+        if (r.emi) bindEmiPanel(detail, r.emi, { onChanged: reload, onEdit: p => openExpenseDialog({ emi: p, onSaved: reload }) });
         if (r.claim) {
             bindClaimPanel(detail, r.claim, { onChanged: reload });   // Edit opens the matching lend / borrow form
             fitPanel(listEl, tr, detail);
@@ -494,6 +541,16 @@ function expenseRow(r) {
     };
 }
 
+/** Something bought on EMI, as a row of the EMIs list. */
+function emiRow(p) {
+    return {
+        key: `m${p.id}`, sortId: p.purchaseEntryId || p.id, type: 'EMI', typeLabel: p.kind === 'CARD' ? 'Card EMI' : 'Loan EMI', emi: p,
+        date: p.purchaseDate, entryNo: p.purchaseEntryNo, category: p.categoryName, categoryId: p.categoryId, description: p.narration, party: p.party,
+        reference: p.reference, notes: p.notes, paidFrom: p.payAccountName, paidFromId: p.payAccountId, paidFromType: p.payAccountType,
+        amount: Number(p.principal), owed: Number(p.outstanding),
+    };
+}
+
 /** Refunded / reversed marker for an expense row. */
 const STATUS_META = {
     REVERSED: { label: 'Reversed', tone: 'gray', iconName: 'undo' },
@@ -518,7 +575,8 @@ const SORTS = {
     // lent / borrowed lists
     person: r => (r.party || '').toLowerCase(), type: r => (r.typeLabel || '').toLowerCase(),
     status: r => r.claim ? (r.claim.overdue ? 0 : STATUS_RANK[r.claim.status] ?? 9) : 9,
-    owed: r => r.claim ? Number(r.claim.outstanding) : 0,
+    owed: r => r.claim ? Number(r.claim.outstanding) : r.emi ? Number(r.emi.outstanding) : 0,
+    next: r => r.emi?.next?.dueDate || '9999',
 };
 
 /** Lists of money lent, paid for someone, to collect or owed: their own columns and words. */
@@ -549,8 +607,10 @@ function th(key, label, cls) {
 function tableHtml(rows) {
     if (!rows.length) return emptyState(view.type === 'collect' ? 'Nobody owes you anything right now.'
         : view.type === 'owe' ? 'You owe nobody right now. Press B to record money borrowed or a bill to pay later.'
+        : view.type === 'emi' ? 'Nothing on EMI. Add an expense and pick “On EMI”: a card EMI or a loan from a finance company.'
         : 'Nothing for this selection. Press E to add an expense.', 'receipt');
     const grouped = prefs.grouped;
+    if (view.type === 'emi') return emiTableHtml(rows);
     const claims = CLAIM_VIEWS.includes(view.type);
     const w = claimWords();
     const heads = claims
@@ -573,6 +633,30 @@ function tableHtml(rows) {
             <span class="spacer"></span><b class="mono">${money(sum(items))}</b></div></td></tr>
         ${items.map(line).join('')}`).join('');
     return `<table class="${cls}">${head}<tbody>${body}</tbody></table>`;
+}
+
+/** The EMIs list: what and from where, its progress and next EMI, the instalment, the price and what is still owed. */
+function emiTableHtml(rows) {
+    const head = `<thead><tr>${th('date', 'Bought on', 'c-date')}${th('description', 'What / lender', 'c-desc')}<th class="c-prog">Progress</th>
+        ${th('next', 'Next EMI', 'c-status')}${th('paidFrom', 'Billed to / paid from', 'c-pay')}${th('amount', 'Price', 'r c-amt')}${th('owed', 'Still owed', 'r c-owed')}<th class="c-caret"></th></tr></thead>`;
+    return `<table class="grid xp-table xp-claims xp-emis">${head}<tbody>${rows.map(r => {
+        const p = r.emi;
+        const payer = accountTypeIcon(r.paidFromType);
+        const next = p.next;
+        return `<tr class="xp-tr is-claim ${p.archived ? 'emi-archived' : ''}" data-key="${r.key}">
+            <td class="c-date"><b>${date(r.date)}</b></td>
+            <td class="c-desc"><div class="xd-cell xd-stack"><span class="xd-text"><span class="chip-icon xs ${p.kind === 'CARD' ? 'coral' : 'violet'}" title="${esc(r.typeLabel)}">${icon(p.kind === 'CARD' ? 'card' : 'briefcase')}</span>
+                <b class="ellipsis" title="${esc(r.description)}">${esc(r.description)}</b>
+                ${Number(p.ratePercent) ? `<span class="xd-rate" title="${Number(p.ratePercent)}% a year">${Number(p.ratePercent)}%</span>` : '<span class="xd-rate" title="No interest">0%</span>'}
+                ${p.autoPost && p.status === 'ACTIVE' ? `<span class="xp-ico" title="Each EMI books itself on its due date">${icon('repeat')}</span>` : ''}</span>
+                <span class="xd-party" title="${esc(p.lender || '')}">${esc([p.lender, r.party].filter(Boolean).join(' · ') || r.category)}</span></div></td>
+            <td class="c-prog"><div class="xd-prog"><span>${p.paidCount}/${p.months} · ${money(Number(p.emiAmount))}/mo</span><i class="xd-bar"><em style="width:${p.progressPercent}%"></em></i></div></td>
+            <td class="c-status"><div class="xd-status">${emiBadge(p)}${next && p.status === 'ACTIVE' ? `<span class="xd-due ${next.overdue ? 'neg' : ''}" title="EMI ${next.seq}: ${money(Number(next.emi) + Number(next.gst))}">${next.overdue ? 'was ' : ''}${shortDate(next.dueDate)}</span>` : ''}</div></td>
+            <td class="c-pay">${r.paidFrom ? `<span class="xd-payer">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></span>` : '<span class="muted">—</span>'}</td>
+            <td class="r c-amt"><b class="mono claim-amt">${money(r.amount)}</b></td>
+            <td class="r c-owed" title="${money(p.stillToPay)} still to pay with interest">${Number(p.outstanding) ? `<b class="mono neg">${money(p.outstanding)}</b>` : '<span class="muted">paid off</span>'}</td>
+            <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td></tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 const CLAIM_KIND = { LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],
@@ -605,6 +689,7 @@ function rowHtml(r, withDate) {
             <span class="xd-text"><b class="ellipsis" title="${esc(r.description)}">${esc(r.description)}</b>${evidenceBadge(r.raw?.attachmentCount)}
                 ${status ? `<span class="mini-flag ${status.tone}" title="${r.status === 'REVERSED' ? 'Reversed: counts for nothing' : `${status.label}: ${money(r.gross - r.amount)} came back`}">${icon(status.iconName)}</span>` : ''}
                 ${r.claim ? claimBadge(r.claim) : ''}
+                ${r.emiOf ? `<span class="mini-flag aqua emi" title="${esc(`${r.emiOf.what === 'purchase' ? 'Bought on EMI' : `Interest of ${r.emiOf.what}`} · ${r.emiOf.plan.narration}`)}">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'EMI' : esc(r.emiOf.what.replace('EMI ', ''))}</span>` : ''}
                 ${r.reference ? `<span class="xp-ico" title="Reference: ${esc(r.reference)}">${icon('tag')}</span>` : ''}
                 ${r.notes ? `<span class="xp-ico" title="${esc(r.notes)}">${icon('info')}</span>` : ''}</span>
             ${party ? `<span class="xd-party" title="${r.claim ? 'Person' : 'Paid to'}: ${esc(r.party)}">${party}</span>` : ''}</div></td>
@@ -681,7 +766,8 @@ async function expenseDetail(r, ctx = {}) {
             <span class="spacer"></span>
             <span class="xd-actions">
                 ${manage && (e.editable || e.viaJournal) ? `<button class="btn xs primary" data-xp-action="edit" data-key="${r.key}">${icon('edit')}Edit</button>` : ''}
-                ${manage ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
+                ${r.emiOf ? `<button class="btn xs primary" data-xp-action="emi-plan" data-plan="${r.emiOf.plan.id}" data-key="${r.key}" title="Pay, undo or pay off this EMI">${icon('calendar')}EMI plan</button>` : ''}
+                ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
                 ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
                     <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
                 ${manage && e.editable ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}

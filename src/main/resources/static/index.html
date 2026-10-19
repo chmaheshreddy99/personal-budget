@@ -16,9 +16,13 @@
     <link rel="stylesheet" href="css/evidence.css">
     <link rel="stylesheet" href="css/widgets.css">
     <link rel="stylesheet" href="css/views.css">
+    <link rel="stylesheet" href="css/host-chit.css">
+    <link rel="stylesheet" href="css/bond.css">
+    <link rel="stylesheet" href="css/construction.css">
     <!-- the light brand theme, then phone / tablet layouts (both only override, so desktop logic is untouched) -->
     <link rel="stylesheet" href="css/lite.css">
     <link rel="stylesheet" href="css/glacier.css">
+    <link rel="stylesheet" href="css/dialogs.css">
     <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
@@ -36,7 +40,7 @@
 
         <div class="tabs" id="login-tabs">
             <button class="tab active" data-tab="signin">Sign in</button>
-            <button class="tab" data-tab="register">Create household</button>
+            <button class="tab" data-tab="register">Create organization</button>
         </div>
 
         <form id="signin-form" class="form-grid one">
@@ -73,7 +77,7 @@
         </form>
 
         <form id="register-form" class="form-grid two" hidden>
-            <label class="field span-2"><span>Household / organisation name</span>
+            <label class="field span-2"><span>Organization name</span>
                 <input name="tenantName" required placeholder="Sharma Family"></label>
             <label class="field"><span>Short code</span>
                 <input name="tenantCode" required pattern="[a-z0-9][a-z0-9-]{1,29}" placeholder="sharma-home"></label>

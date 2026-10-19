@@ -9,6 +9,16 @@ spring:
       # evidence uploads (see budget.attachments.max-file-mb)
       max-file-size: 12MB
       max-request-size: 13MB
+  # E-mail for Host a Chit reminders and receipts (off until a host is set). For Gmail, turn on 2-step
+  # verification and create an app password (Google account > Security > App passwords).
+  # mail:
+  #   host: smtp.gmail.com
+  #   port: 587
+  #   username: you@gmail.com
+  #   password: your-16-letter-app-password
+  #   properties:
+  #     mail.smtp.auth: true
+  #     mail.smtp.starttls.enable: true
 
 server:
   port: 8080
@@ -30,6 +40,10 @@ budget:
     # Interest on money lent / owed: MONTHLY = every month counts as one month (30-day months, 30/360),
     # ACTUAL = actual days / 365
     day-count: MONTHLY
+  # mail:
+  #   # sender address when it is not spring.mail.username, and where members' replies go
+  #   from: chits@example.com
+  #   reply-to: you@example.com
   attachments:
     # Evidence (photos, scans, PDFs) attached to entries, stored under <data-dir>/attachments
     max-file-mb: 10

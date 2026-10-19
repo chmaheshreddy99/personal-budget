@@ -1,7 +1,7 @@
 package com.aditya.personalbudget;
 
 import com.aditya.personalbudget.domain.entity.AppUser;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.domain.type.AccountType;
 import com.aditya.personalbudget.domain.type.CategoryKind;
 import com.aditya.personalbudget.domain.type.ClaimKind;
@@ -16,7 +16,7 @@ import com.aditya.personalbudget.exception.ForbiddenException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.AppUserRepository;
 import com.aditya.personalbudget.repository.CategoryRepository;
-import com.aditya.personalbudget.repository.TenantRepository;
+import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.ApprovalPolicy;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
@@ -56,7 +56,7 @@ class MakerCheckerAndStatementTests {
         registry.add("budget.seed.demo-data", () -> "true");
     }
 
-    @Autowired TenantRepository tenants;
+    @Autowired OrganizationRepository tenants;
     @Autowired AppUserRepository users;
     @Autowired AccountRepository accounts;
     @Autowired CategoryRepository categories;
@@ -68,7 +68,7 @@ class MakerCheckerAndStatementTests {
     @Autowired ReportService reports;
 
     private AppUser admin;
-    private Tenant tenant;
+    private Organization tenant;
 
     @BeforeEach
     void signIn() {
@@ -161,7 +161,7 @@ class MakerCheckerAndStatementTests {
         member.setRole(UserRole.MEMBER);
         AppUser manager = new AppUser();
         manager.setRole(UserRole.MANAGER);
-        Tenant t = new Tenant();
+        Organization t = new Organization();
 
         t.setApprovalMode(null);   // default: access links only
         assertThat(approvalPolicy.forUser(member, t)).isFalse();

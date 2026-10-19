@@ -1,7 +1,7 @@
 package com.aditya.personalbudget.config;
 
 import com.aditya.personalbudget.domain.entity.Category;
-import com.aditya.personalbudget.domain.entity.Tenant;
+import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.service.DefaultChartOfAccounts;
 import com.aditya.personalbudget.service.TenantProvisioningService;
 import com.aditya.personalbudget.storage.TsvDataStore;
@@ -40,7 +40,7 @@ public class SystemCategorySync implements ApplicationRunner {
         List<DefaultChartOfAccounts.CategoryTemplate> system = DefaultChartOfAccounts.CATEGORIES.stream()
                 .filter(t -> t.systemKey() != null).toList();
         int added = 0;
-        for (Tenant tenant : store.findAll(Tenant.class, t -> true)) {
+        for (Organization tenant : store.findAll(Organization.class, t -> true)) {
             List<Category> own = store.findAll(Category.class, c -> c.getTenantId().equals(tenant.getId()));
             if (own.isEmpty()) {
                 continue;   // not set up yet: provisioning seeds everything

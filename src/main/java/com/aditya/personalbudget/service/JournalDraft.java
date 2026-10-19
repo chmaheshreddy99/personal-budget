@@ -18,19 +18,31 @@ import java.util.List;
  */
 public final class JournalDraft {
 
-    /** One line: the account, and the category (Expenses / Income lines) or chit (Chit Funds lines) it is about. */
-    public record Line(Long accountId, Long categoryId, Long chitId, BigDecimal debit, BigDecimal credit, String memo) {
+    /**
+     * One line: the account, and the category (Expenses / Income lines) or chit (Chit Funds lines) it is about, and
+     * the hosted chit whose money it moves (any account).
+     */
+    public record Line(Long accountId, Long categoryId, Long chitId, BigDecimal debit, BigDecimal credit, String memo,
+                       Long hostedChitId) {
+
+        public Line(Long accountId, Long categoryId, Long chitId, BigDecimal debit, BigDecimal credit, String memo) {
+            this(accountId, categoryId, chitId, debit, credit, memo, null);
+        }
 
         public Line(Long accountId, BigDecimal debit, BigDecimal credit, String memo) {
-            this(accountId, null, null, debit, credit, memo);
+            this(accountId, null, null, debit, credit, memo, null);
         }
 
         Line withCategory(Long id) {
-            return new Line(accountId, id, chitId, debit, credit, memo);
+            return new Line(accountId, id, chitId, debit, credit, memo, hostedChitId);
         }
 
         Line withChit(Long id) {
-            return new Line(accountId, categoryId, id, debit, credit, memo);
+            return new Line(accountId, categoryId, id, debit, credit, memo, hostedChitId);
+        }
+
+        Line withHostedChit(Long id) {
+            return new Line(accountId, categoryId, chitId, debit, credit, memo, id);
         }
     }
 
@@ -82,6 +94,14 @@ public final class JournalDraft {
     public JournalDraft chit(Long chitId) {
         if (!lastSkipped && !lines.isEmpty()) {
             lines.set(lines.size() - 1, lines.getLast().withChit(chitId));
+        }
+        return this;
+    }
+
+    /** Tags the line just added with the hosted chit whose money it moves (null leaves it untagged). */
+    public JournalDraft hostedChit(Long hostedChitId) {
+        if (!lastSkipped && !lines.isEmpty()) {
+            lines.set(lines.size() - 1, lines.getLast().withHostedChit(hostedChitId));
         }
         return this;
     }

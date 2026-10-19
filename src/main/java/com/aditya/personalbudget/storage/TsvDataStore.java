@@ -72,6 +72,7 @@ public class TsvDataStore {
     /** Bumped on every commit in this process, so a request never reuses a view older than a local write. */
     private final AtomicLong generation = new AtomicLong();
     private final List<Consumer<Set<String>>> commitListeners = new CopyOnWriteArrayList<>();
+    private final List<StoreListener> storeListeners = new CopyOnWriteArrayList<>();
 
     public TsvDataStore(@Value("${budget.data-dir:data}") String dataDir, Validator validator) {
         this.dataDir = Path.of(dataDir).toAbsolutePath().normalize();
@@ -81,6 +82,7 @@ public class TsvDataStore {
         } catch (IOException e) {
             throw new StorageException("Cannot create data directory " + this.dataDir, e);
         }
+        StorageRenames.apply(this.dataDir, SEQUENCE_FILE);   // before any table is opened (and created empty)
         log.info("Tab-separated data store at {} (read from disk on demand)", this.dataDir);
     }
 
@@ -96,6 +98,11 @@ public class TsvDataStore {
     /** Called after every successful commit with the names of the tables that changed. */
     public void addCommitListener(Consumer<Set<String>> listener) {
         commitListeners.add(listener);
+    }
+
+    /** Hooks into every save, delete and commit (see {@link StoreListener}). */
+    public void addStoreListener(StoreListener listener) {
+        storeListeners.add(listener);
     }
 
     // ================================================================== request scope
@@ -132,7 +139,15 @@ public class TsvDataStore {
     // ================================================================== writes
 
     public <T extends Identifiable> T save(Class<T> type, T entity) {
-        return write(() -> saveRow(table(type), entity));
+        return write(() -> saveRow(table(type), entity, false));
+    }
+
+    /**
+     * Saves a row the system keeps up to date by itself (a stored balance ...) without touching its
+     * {@code @Version}: an edit form opened before still saves, and a stale copy cannot be written this way.
+     */
+    public <T extends Identifiable> T saveKeepingVersion(Class<T> type, T entity) {
+        return write(() -> saveRow(table(type), entity, true));
     }
 
     public <T extends Identifiable> List<T> saveAll(Class<T> type, Collection<? extends T> entities) {
@@ -140,7 +155,7 @@ public class TsvDataStore {
             TsvTable<T> table = table(type);
             List<T> saved = new ArrayList<>(entities.size());
             for (T e : entities) {
-                saved.add(saveRow(table, e));
+                saved.add(saveRow(table, e, false));
             }
             return saved;
         });
@@ -192,6 +207,9 @@ public class TsvDataStore {
         Set<String> changed = new LinkedHashSet<>();
         try {
             if (!work.rollbackOnly) {
+                storeListeners.forEach(StoreListener::beforeCommit);
+            }
+            if (!work.rollbackOnly) {
                 for (TsvTable<?> table : work.dirty) {
                     writeTable(table, work);
                     changed.add(table.name());
@@ -238,6 +256,7 @@ public class TsvDataStore {
         currentWork.remove();
         views.remove();
         try {
+            storeListeners.forEach(StoreListener::afterEnd);
             work.release();
         } finally {
             lock.writeLock().unlock();
@@ -360,18 +379,27 @@ public class TsvDataStore {
         return table;
     }
 
-    private <T extends Identifiable> T saveRow(TsvTable<T> table, T entity) {
+    private <T extends Identifiable> T saveRow(TsvTable<T> table, T entity, boolean keepVersion) {
         UnitOfWork work = work();
         TreeMap<Long, T> rows = work.rows(table);
         EntityMetadata<T> meta = table.meta();
         T row = meta.copy(entity);
+        T existing = row.getId() == null ? null : rows.get(row.getId());
+        Class<T> type = meta.type();
+        for (StoreListener listener : storeListeners) {
+            listener.beforeSave(type, existing == null ? null : meta.copy(existing), row);
+        }
 
         validateBean(meta, row);
         validateColumns(meta, row);
         if (row.getId() == null) {
             row.setId(work.nextId(table, rows));
         }
-        checkVersion(meta, rows.get(row.getId()), row);
+        if (keepVersion && existing != null) {
+            meta.versionColumn().ifPresent(v -> v.write(row, v.read(existing)));
+        } else {
+            checkVersion(meta, existing, row);
+        }
         validateUniqueKeys(rows.values(), meta, row);
         validateForeignKeys(meta, row);
 
@@ -379,6 +407,9 @@ public class TsvDataStore {
         rows.put(row.getId(), row);
         entity.setId(row.getId()); // like JPA, the caller's instance receives the generated id
         meta.versionColumn().ifPresent(v -> v.write(entity, v.read(row)));
+        for (StoreListener listener : storeListeners) {
+            listener.afterSave(type, existing == null ? null : meta.copy(existing), meta.copy(row));
+        }
         return meta.copy(row);
     }
 
@@ -422,7 +453,10 @@ public class TsvDataStore {
             }
         }
         work.dirty.add(table);
-        rows.remove(id);
+        T removed = rows.remove(id);
+        for (StoreListener listener : storeListeners) {
+            listener.afterDelete(type, table.meta().copy(removed));
+        }
     }
 
     private <T> void validateBean(EntityMetadata<T> meta, T row) {
@@ -467,7 +501,7 @@ public class TsvDataStore {
                     .anyMatch(other -> sameKey(key, values, other));
             if (duplicate) {
                 String columns = key.stream().map(ColumnMeta::name).collect(Collectors.joining(", "));
-                String shown = key.stream().filter(c -> !c.name().equals("tenantId"))
+                String shown = key.stream().filter(c -> !c.name().equals("organizationId"))
                         .map(c -> String.valueOf(c.read(row))).collect(Collectors.joining(", "));
                 throw new DataIntegrityException("Duplicate value '" + shown + "' for unique key ("
                         + columns + ") in " + meta.tableName());

@@ -1,0 +1,124 @@
+/*
+ * Dialogs: the look of the "Host a new chit" form everywhere. A navy header with a gold rule and an icon tile,
+ * fields with the label inside the box (floating-label style), roomy grids and soft section notes.
+ * Loaded after the theme sheets so it wins over their older field and modal styles.
+ */
+
+/* ---------------------------------------------------------------- header */
+.modal-head {
+    background: var(--grad-navy); padding: 11px 14px 11px 16px; gap: 12px;
+}
+.modal-head::before { display: none; }
+.modal-head::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; pointer-events: none;
+    background: linear-gradient(90deg, rgba(201, 154, 59, 0.9), rgba(240, 212, 154, 0.6) 40%, transparent);
+}
+.modal-head h3 { display: flex; align-items: center; gap: 11px; min-width: 0; font-size: 15px; font-weight: 700; }
+.modal-head .modal-icon {
+    width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; display: grid; place-items: center; color: #f0d49a;
+    background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(240, 212, 154, 0.35);
+}
+.modal-head .modal-icon svg { width: 17px; height: 17px; }
+.modal-head .modal-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.modal-head .modal-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.modal-head .modal-title small { color: #a9c6de; font-size: 11px; font-weight: 500; }
+.modal-head .btn.ghost svg { width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------- body and footer */
+.modal-body { padding: 14px 16px 12px; }
+.modal-foot { padding: 10px 14px; border-top: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.7); }
+.modal .form-grid { gap: 12px 12px; }
+.modal .form-grid + .form-grid { margin-top: 12px; }
+.modal .section-title { display: flex; align-items: center; gap: 6px; }
+.modal .section-title svg { width: 14px; height: 14px; color: var(--ocean-600); }
+
+/* ---------------------------------------------------------------- fields: the label inside the box */
+.modal .field:not(.hc-fit .field):has(> input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color], [type=hidden]), > select, > textarea, > .combo, > .dp-wrap, > span ~ span > .combo, > span ~ span > select, > span ~ span > input) {
+    position: relative; gap: 4px;
+}
+.modal .field:not(.hc-fit .field):has(> input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color], [type=hidden]), > select, > textarea, > .combo, > .dp-wrap, > span ~ span > .combo, > span ~ span > select, > span ~ span > input) > span:first-child:not(.dp-wrap) {
+    position: absolute; left: 13px; top: 6px; z-index: 2; max-width: calc(100% - 40px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: none; color: var(--text-secondary); pointer-events: none;
+    line-height: 1.3;
+}
+.modal .field:not(.hc-fit .field):has(> input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color], [type=hidden]), > select, > textarea, > .combo, > .dp-wrap, > span ~ span > .combo, > span ~ span > select, > span ~ span > input) > span:first-child:not(.dp-wrap) small {
+    font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-muted);
+}
+.modal .field:not(.hc-fit .field):focus-within > span:first-child:not(.dp-wrap) { color: var(--ocean-600); }
+
+.modal .field:not(.hc-fit .field) > input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color], [type=hidden]),
+.modal .field:not(.hc-fit .field) > select,
+.modal .field:not(.hc-fit .field) > .dp-wrap > input,
+.modal .field:not(.hc-fit .field) > .combo > .combo-display,
+.modal .field:not(.hc-fit .field) > span ~ span > .combo > .combo-display,
+.modal .field:not(.hc-fit .field) > span ~ span > select,
+.modal .field:not(.hc-fit .field) > span ~ span > input:not([type=checkbox]) {
+    width: 100%; height: 48px; margin: 0; padding: 19px 12px 5px; border-radius: 11px; border: 1px solid var(--hairline-strong);
+    background: linear-gradient(180deg, #ffffff, #f8fbfe); font-size: 14px; font-weight: 600; color: var(--text-primary);
+    box-shadow: inset 0 1px 2px rgba(16, 52, 84, 0.05); transition: border-color 0.15s, box-shadow 0.15s;
+}
+.modal .field:not(.hc-fit .field) > select {
+    padding-right: 30px; appearance: none; cursor: pointer;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235b7a93' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center, linear-gradient(180deg, #ffffff, #f8fbfe);
+}
+.modal .field:not(.hc-fit .field) > textarea {
+    width: 100%; min-height: 70px; padding: 22px 12px 8px; border-radius: 11px; border: 1px solid var(--hairline-strong);
+    background: linear-gradient(180deg, #ffffff, #f8fbfe); font-size: 13.5px; font-weight: 500; line-height: 1.45;
+    box-shadow: inset 0 1px 2px rgba(16, 52, 84, 0.05);
+}
+.modal .field:not(.hc-fit .field) > .combo > .combo-display { padding: 18px 10px 4px 11px; gap: 7px; }
+.modal .field:not(.hc-fit .field) > .combo > .combo-display > svg { align-self: center; margin-top: -14px; }
+.modal .field:not(.hc-fit .field) > .combo .chip-icon.sm { width: 18px; height: 18px; }
+.modal .field:not(.hc-fit .field) > .dp-wrap { width: 100%; flex: none; }
+.modal .field:not(.hc-fit .field) > .dp-wrap > input { padding-right: 34px; }
+.modal .field:not(.hc-fit .field) > .dp-wrap > .dp-btn { top: auto; bottom: 7px; transform: none; right: 8px; }
+
+.modal .field:not(.hc-fit .field) > input:hover, .modal .field:not(.hc-fit .field) > select:hover,
+.modal .field:not(.hc-fit .field) > textarea:hover, .modal .field:not(.hc-fit .field) > .dp-wrap > input:hover,
+.modal .field:not(.hc-fit .field) > .combo > .combo-display:hover { border-color: var(--ocean-400, #5aa9d6); }
+.modal .field:not(.hc-fit .field) > input:focus, .modal .field:not(.hc-fit .field) > select:focus,
+.modal .field:not(.hc-fit .field) > textarea:focus, .modal .field:not(.hc-fit .field) > .dp-wrap > input:focus,
+.modal .field:not(.hc-fit .field) > .combo > .combo-display:focus {
+    outline: none; border-color: var(--ocean-600); box-shadow: 0 0 0 3px rgba(11, 124, 189, 0.15);
+}
+.modal .field:not(.hc-fit .field) > input[readonly] { background: var(--surface-sunken, #f1f5f9); color: var(--text-secondary); }
+.modal .field:not(.hc-fit .field) > input::placeholder, .modal .field:not(.hc-fit .field) > textarea::placeholder { color: #9fb2c3; font-weight: 500; }
+.modal .field:not(.hc-fit .field) > input[type=number] { -moz-appearance: textfield; }
+.modal .field:not(.hc-fit .field) > input::-webkit-outer-spin-button,
+.modal .field:not(.hc-fit .field) > input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.modal .field:not(.hc-fit .field) > input:invalid:not(:placeholder-shown):not(:focus) { border-color: #e3a0a0; }
+.modal .field > small { padding: 0 4px; font-size: 11px; line-height: 1.35; color: var(--text-muted); }
+
+/* labels above other controls (chips, toggles, uploads) keep the same small bold label */
+.modal .field > span:first-child:not(.dp-wrap) { text-transform: none; letter-spacing: 0.02em; font-size: 10.5px; font-weight: 700; color: var(--text-secondary); }
+.modal .field.check > span:not(.dp-wrap) { font-size: 13px; font-weight: 600; color: var(--text-primary); letter-spacing: 0; }
+.modal .field.check {
+    min-height: 48px; padding: 0 12px; border-radius: 11px; border: 1px dashed var(--hairline-strong); background: #fafcfe; align-self: end;
+}
+
+/* notes and disclosure blocks inside dialogs */
+.modal .book-note, .modal .hc-note { border-radius: 11px; }
+.modal .disclosure { border-radius: 11px; }
+.modal .stat-strip { border-radius: 12px; }
+
+@media (max-width: 640px) {
+    .modal-head .modal-icon { width: 28px; height: 28px; }
+    .modal .field:not(.hc-fit .field) > input, .modal .field:not(.hc-fit .field) > select { font-size: 16px; }   /* no zoom on phones */
+}
+
+/* fields whose control sits in a wrapper (an account picker that is redrawn, a rate with its kind) */
+.modal .field:not(.hc-fit .field) > span ~ span:not(.dp-wrap) { display: flex; gap: 8px; min-width: 0; flex: none; }
+.modal .field:not(.hc-fit .field) > span ~ span > .combo { flex: 1; min-width: 0; }
+.modal .field:not(.hc-fit .field) > span ~ span > .combo > .combo-display { padding: 18px 10px 4px 11px; }
+.modal .field:not(.hc-fit .field) > span ~ span > select {
+    padding-right: 30px; appearance: none; cursor: pointer;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235b7a93' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center, linear-gradient(180deg, #ffffff, #f8fbfe);
+}
+.modal .field .rate-type > input { flex: 1 1 0; width: 0 !important; min-width: 0; }
+.modal .field .rate-type > select, .modal .field .rate-type > .combo { flex: 0 0 118px; width: 118px !important; }
+
+/* a tick-box line in a dialog: a soft box like the wizard's switches */
+.modal .debt-form > .form-grid, .modal .debt-form > .check-line { margin-top: 12px; }
+.modal .check-line { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px; border-radius: 11px;
+    border: 1px dashed var(--hairline-strong); background: #fafcfe; font-size: 13px; font-weight: 600; }
+.modal .check-line input[type=checkbox] { width: 16px; height: 16px; flex-shrink: 0; }

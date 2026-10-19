@@ -3,6 +3,7 @@
  * a compact payment note. The note always ends with the installment ("Inst 7/20 Oct26"); its start is
  * the chit's own custom text, or a short label built from the chit name and ticket.
  */
+import { upiLogoStrip } from '../core/upi-logos.js';
 import { esc, openModal, toast } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date } from '../core/format.js';
@@ -57,6 +58,7 @@ export function upiCardHtml(chit, installment, { amount, note }) {
     return `
     <div class="upi-card">
         <div class="upi-head">${icon('qr')}<b>Scan &amp; pay with any UPI app</b></div>
+        <div class="upi-brands">${upiLogoStrip(['gpay', 'phonepe', 'paytm', 'bhim'])}</div>
         <div class="upi-qr">${qrSvg(link, { size: 168 })}</div>
         <div class="upi-amount">${money(amount, { decimals: 2 })}</div>
         <div class="upi-payee"><b>${esc(chit.organizer || 'Organizer')}</b><span class="mono">${esc(chit.organizerUpi)}</span></div>

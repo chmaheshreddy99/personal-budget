@@ -20,7 +20,7 @@ public final class RolePolicy {
         MATRIX.put(UserRole.SUPER_ADMIN, EnumSet.allOf(Permission.class));
         MATRIX.put(UserRole.ADMIN, EnumSet.complementOf(EnumSet.of(MANAGE_TENANTS)));
         MATRIX.put(UserRole.MANAGER, EnumSet.of(VIEW, POST_TRANSACTIONS, MANAGE_JOURNALS,
-                MANAGE_ACCOUNTS, MANAGE_CHITS, MANAGE_BUDGETS, APPROVE_ENTRIES));
+                MANAGE_ACCOUNTS, MANAGE_CHITS, MANAGE_PROJECTS, MANAGE_BUDGETS, APPROVE_ENTRIES));
         MATRIX.put(UserRole.ACCOUNTANT, EnumSet.of(VIEW, POST_TRANSACTIONS, MANAGE_JOURNALS));
         MATRIX.put(UserRole.MEMBER, EnumSet.of(VIEW, POST_TRANSACTIONS));
         MATRIX.put(UserRole.VIEWER, EnumSet.of(VIEW));

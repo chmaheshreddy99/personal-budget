@@ -6,12 +6,13 @@
  * metrics and its statement (named for the kind of account) shown as a plain list or as a timeline.
  */
 import { api } from '../core/api.js';
-import { loadAccounts, can, state } from '../core/store.js';
+import { loadAccounts, can, state, hasFeature } from '../core/store.js';
 import { panel, esc, field, readForm, openModal, toast, confirmDialog, accountChip, emptyState, loading, table } from '../core/ui.js';
-import { kindChip, entryKind } from '../core/entry-kind.js';
+import { kindChip, entryKind, projectTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMonth, isoDate, number, daysFromToday } from '../core/format.js';
+import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, shortAccount, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
 import { toggleEntryRow } from '../components/entry-inline.js';
 import { claimContextHtml, claimBadge, reminderText } from '../components/claim-panel.js';
@@ -21,6 +22,7 @@ import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { sparkline } from '../core/charts.js';
+import { accountIcon, bankLogo } from '../core/bank-logos.js';
 
 const CLASS_TABS = [
     { value: 'ASSET', label: 'Assets' },
@@ -51,7 +53,8 @@ const STATEMENT_NAME = {
 };
 const statementName = a => STATEMENT_NAME[a.accountType] || (a.accountClass === 'LIABILITY' ? 'Loan statement' : 'Statement');
 
-const view = { tab: 'ALL', selectedId: null, search: '', from: firstOfMonth(-5), to: isoDate(), flow: 'all', pane: 'ledger', q: '' };
+/** closed: closed (inactive) accounts are listed too. emi: the list shows only the accounts of things bought on a loan EMI (kept out of the list otherwise). */
+const view = { tab: 'ALL', emi: false, closed: false, selectedId: null, search: '', from: firstOfMonth(-5), to: isoDate(), flow: 'all', pane: 'ledger', q: '' };
 
 /** Statement display preference, kept per browser: plain list or timeline grouped by month / party. */
 const prefs = getPref('statement', { grouped: false, groupBy: 'month' });
@@ -62,8 +65,13 @@ const savePrefs = () => setPref('statement', prefs);
 const toneOf = a => BUCKET_TONE[a.bucket] || (a.accountClass === 'INCOME' ? 'green' : a.accountClass === 'EXPENSE' ? 'coral' : 'slate');
 
 export async function render(container, _params, isCurrent) {
-    const accounts = await loadAccounts(true);
+    const everything = await loadAccounts(true, { all: true });
     if (!isCurrent()) return;
+    // the hosted-chit book (members' money, Host a Chit) has its own page: only its net counts here, in net worth
+    // the hosted-chit book and the construction book have their own pages
+    const accounts = everything.filter(a => !a.chitBook && !a.projectBook);
+    const chitBook = everything.filter(a => a.chitBook);
+    const bookNet = chitBook.reduce((s, a) => s + (a.accountClass === 'ASSET' ? 1 : a.accountClass === 'LIABILITY' ? -1 : 0) * Number(a.balance), 0);
     Object.assign(prefs, getPref('statement', { grouped: false, groupBy: 'month' }));
 
     const of = cls => accounts.filter(a => a.accountClass === cls);
@@ -103,11 +111,11 @@ export async function render(container, _params, isCurrent) {
             <div class="min-0"><span class="ov-label">${label}</span><b>${value}</b><small>${sub}</small>
                 ${meter !== null ? `<i class="ov-meter"><em style="width:${Math.max(2, Math.min(100, meter))}%"></em></i>` : ''}</div>
         </div>`;
-    const netWorth = assets - liabilities;
+    const netWorth = assets - liabilities + bookNet;
     const topMix = [...mix].sort((a, b) => b.value - a.value).slice(0, 3);
     // net worth at each of the last month-ends (from every account's trend), and the 6-month change
-    const points = Math.max(0, ...accounts.map(a => (a.trend || []).length));
-    const nwTrend = Array.from({ length: points }, (_, i) => accounts.reduce((s, a) => {
+    const points = Math.max(0, ...everything.map(a => (a.trend || []).length));
+    const nwTrend = Array.from({ length: points }, (_, i) => everything.reduce((s, a) => {
         const v = Number((a.trend || [])[i] ?? 0);
         return s + (a.accountClass === 'ASSET' ? v : a.accountClass === 'LIABILITY' ? -v : 0);
     }, 0));
@@ -130,6 +138,7 @@ export async function render(container, _params, isCurrent) {
                 <span title="Cash, bank and wallets">${icon('droplet')}Liquid <b>${moneyShort(liquid)}</b></span>
                 <span title="Funds, chits, gold">${icon('trending')}Invested <b>${moneyShort(invested)}</b></span>
                 <span title="Net worth change over the last 6 months" class="${sixChange >= 0 ? 'up' : 'down'}">${icon('history')}6 mo <b>${sixChange >= 0 ? '+' : '−'}${moneyShort(Math.abs(sixChange))}</b></span>
+                ${chitBook.length && Math.round(bookNet) ? `<span title="Your own money in the hosted chit accounts (commission, late interest, advances); the members' money is not yours and is left out">${icon('hand-coins')}Hosted chits <b>${bookNet >= 0 ? '' : '−'}${moneyShort(Math.abs(bookNet))}</b></span>` : ''}
             </div>
         </section>
         <div class="ov-cards">
@@ -156,19 +165,24 @@ export async function render(container, _params, isCurrent) {
             ${chip('clock', 'Idle 90d+', `${idle.length}`, idle.length ? `${moneyShort(idle.reduce((s, a) => s + Number(a.balance), 0))} untouched` : 'all active',
                 idle.length ? 'warn' : 'good', idle.map(a => a.name).join(', '))}
         </div>
-        ${panel({
-            title: 'Accounts', iconName: 'wallet', cls: 'p-list', bodyClass: 'flush',
-            sub: `<span id="acct-count"></span>`,
-            actions: can('MANAGE_ACCOUNTS') ? `<button class="btn sm primary" id="new-account" title="Add account">${icon('plus')}Account</button>` : '',
-            body: `
+        <section class="panel p-list headless">
+            <div class="panel-body flush">
                 <div class="list-tools">
-                    <div class="search-box">${icon('search')}<input id="account-search" name="q-accounts" data-plain placeholder="Search accounts…  ↑↓ to move" value="${esc(view.search)}"></div>
+                    <div class="lt-top">
+                        <div class="search-box">${icon('search')}<input id="account-search" name="q-accounts" data-plain placeholder="Search accounts…  ↑↓ to move" value="${esc(view.search)}">
+                            <span class="lt-count" id="acct-count" title="Accounts shown"></span></div>
+                        ${can('MANAGE_ACCOUNTS') ? `<button class="btn primary icon lt-add" id="new-account" title="Add account">${icon('plus')}</button>` : ''}
+                    </div>
                     <div class="class-filter" id="class-filter">${[{ value: 'ALL', label: 'All' }, ...CLASS_TABS].map(t =>
-                        `<button class="cf-chip ${view.tab === t.value ? 'active' : ''}" data-tab="${t.value}">${t.value === 'ALL' ? 'All' : t.label}<i>${t.value === 'ALL' ? accounts.filter(a => LISTED.has(a.accountClass)).length : of(t.value).length}</i></button>`).join('')}
-                        <label class="switch sm list-group-switch" title="Group the list by assets / liabilities and account type"><input type="checkbox" id="acct-grouped" ${listPrefs.grouped ? 'checked' : ''}><span></span>Group</label></div>
+                        `<button class="cf-chip ${view.tab === t.value && !view.emi ? 'active' : ''}" data-tab="${t.value}">${t.value === 'ALL' ? 'All' : t.label}<i>${t.value === 'ALL' ? accounts.filter(a => LISTED.has(a.accountClass) && !a.emiAccount && (view.closed || a.active)).length : of(t.value).filter(a => !a.emiAccount && (view.closed || a.active)).length}</i></button>`).join('')}
+                        ${accounts.some(a => a.emiAccount) ? `<button class="cf-chip ${view.emi ? 'active' : ''}" data-emi-accounts title="What is still owed on things bought on a loan EMI (managed in Expenses › EMIs); kept out of the list otherwise">${icon('calendar')}EMI<i>${accounts.filter(a => a.emiAccount && (view.closed || a.active)).length}</i></button>` : ''}
+                        ${accounts.some(a => !a.active && LISTED.has(a.accountClass)) ? `<button class="cf-chip ${view.closed ? 'active' : ''}" data-closed-accounts title="Closed (inactive) accounts are left out of the list; show them too">${icon('lock')}Closed<i>${accounts.filter(a => !a.active && LISTED.has(a.accountClass)).length}</i></button>` : ''}
+                        <label class="micro-toggle" title="Group the list by assets / liabilities and account type"><input type="checkbox" id="acct-grouped" ${listPrefs.grouped ? 'checked' : ''}>${icon('layers')}</label></div>
                 </div>
-                <div class="scroll account-list" id="account-list" tabindex="0" aria-label="Accounts, use the arrow keys to move"></div>`,
-        })}
+                <div class="scroll account-list" id="account-list" tabindex="0" aria-label="Accounts, use the arrow keys to move"></div>
+                ${chitBook.length && hasFeature('HOST_CHITS') ? chitBookLink(chitBook) : ''}
+            </div>
+        </section>
         <div class="account-detail" id="account-detail"></div>
     </div>`;
 
@@ -182,7 +196,7 @@ export async function render(container, _params, isCurrent) {
     const ORDER = ['ASSET', 'LIABILITY', 'EQUITY'];
     const visible = () => {
         const term = view.search.toLowerCase();
-        return accounts.filter(a => LISTED.has(a.accountClass) && (view.tab === 'ALL' || a.accountClass === view.tab)
+        return accounts.filter(a => LISTED.has(a.accountClass) && (view.closed || a.active) && (view.emi ? a.emiAccount : !a.emiAccount && (view.tab === 'ALL' || a.accountClass === view.tab))
             && (!term || [a.name, a.institution, a.code, a.typeLabel, a.accountNumber].some(v => v && v.toLowerCase().includes(term))))
             .sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass));
     };
@@ -226,10 +240,20 @@ export async function render(container, _params, isCurrent) {
     };
 
     container.querySelector('#class-filter').addEventListener('click', e => {
+        const closedChip = e.target.closest('[data-closed-accounts]');
+        if (closedChip) {
+            view.closed = !view.closed;
+            closedChip.classList.toggle('active', view.closed);
+            render(container, [], isCurrent);
+            return;
+        }
+        const emiChip = e.target.closest('[data-emi-accounts]');
+        if (emiChip) view.emi = !view.emi;
         const chipEl = e.target.closest('[data-tab]');
-        if (!chipEl || chipEl.dataset.tab === view.tab) return;
-        view.tab = chipEl.dataset.tab;
-        container.querySelectorAll('#class-filter [data-tab]').forEach(c => c.classList.toggle('active', c === chipEl));
+        if (!emiChip && (!chipEl || (chipEl.dataset.tab === view.tab && !view.emi))) return;
+        if (chipEl) { view.tab = chipEl.dataset.tab; view.emi = false; }
+        container.querySelectorAll('#class-filter [data-tab]').forEach(c => c.classList.toggle('active', !view.emi && c.dataset.tab === view.tab));
+        container.querySelector('#class-filter [data-emi-accounts]')?.classList.toggle('active', view.emi);
         drawList();
         if (!visible().some(a => a.id === view.selectedId)) selectFirst();
         else select(view.selectedId);
@@ -271,6 +295,19 @@ export async function render(container, _params, isCurrent) {
     else container.querySelector('#account-detail').innerHTML = panel({ title: 'Account', iconName: 'wallet', body: emptyState('Select an account') });
 }
 
+/**
+ * The way to the hosted chits' accounts, under the list: they are kept on their own page (Host a Chit, Chit accounts)
+ * because the money in them is mostly the members'.
+ */
+function chitBookLink(book) {
+    const held = book.filter(a => a.accountClass === 'ASSET').reduce((s, a) => s + Number(a.balance), 0);
+    const owed = book.filter(a => a.accountClass === 'LIABILITY').reduce((s, a) => s + Number(a.balance), 0);
+    return `<a class="chit-book-link" href="#/host-chits/accounts" title="The accounts of the chits you host are kept on their own page">
+        <span class="chip-icon sm gold">${icon('hand-coins')}</span>
+        <span class="min-0 grow"><b>Hosted chit accounts</b><small>${book.filter(a => a.accountClass === 'ASSET').length} accounts · ${moneyShort(held)} held · ${moneyShort(owed)} owed to members</small></span>
+        ${icon('chevron-right')}</a>`;
+}
+
 /** "today", "3d ago", "5w ago", "4mo ago" */
 function ago(iso) {
     const days = -daysFromToday(iso);
@@ -287,7 +324,7 @@ function accountFacts(a) {
     if (a.accountType === 'CREDIT_CARD' && a.creditLimit) {
         const util = Number(a.utilizationPercent || 0);
         fact(`${percent(util, 0)} used`, util > 70 ? 'bad' : util > 30 ? 'warn' : 'good', 'Credit utilization');
-        fact(`avail ${moneyShort(a.availableCredit)}`);
+        fact(`avail ${money(a.availableCredit, { decimals: 2 })}`, '', 'Available credit');
     } else if (a.creditLimit && a.accountClass === 'LIABILITY') {
         fact(`${percent(100 - Number(a.utilizationPercent || 0), 0)} repaid`, 'good', `Sanctioned ${money(a.creditLimit)}`);
     }
@@ -307,29 +344,28 @@ function accountFacts(a) {
     return facts.slice(0, 2);
 }
 
-/** One compact row in the account list: name and balance, institution and 30-day change, key facts. */
 /** Sparkline colour per family, matching the row's accent. */
 const SPARK = { ocean: '#0b7cbd', violet: '#5b4fc9', aqua: '#13a89a', gold: '#c99a3b', teal: '#13808f', coral: '#d9603c', red: '#b02a2a', green: '#0b7a3b', slate: '#7b8fa3' };
 
+/**
+ * One compact row in the account list: the bank's logo (or the account-type icon), name and balance, the kind of
+ * account, key facts and the 30-day change. Account numbers, IFSC and UPI ID are in the detail pane.
+ */
 function accountItem(a) {
     const change = Number(a.change30Days);
     const debt = a.accountClass === 'LIABILITY';
     const good = debt ? change <= 0 : change >= 0;
     const util = a.utilizationPercent !== null ? Number(a.utilizationPercent) : null;
-    const meta = [a.institution || a.typeLabel, a.accountNumber ? maskNumber(a.accountNumber) : ''].filter(Boolean);
-    const trend = (a.trend || []).map(Number);
-    const moving = trend.length > 1 && trend.some(v => v !== trend[0]);
     return `
     <div class="acct-item rich accent-${toneOf(a)} ${a.id === view.selectedId ? 'selected' : ''} ${a.active ? '' : 'inactive'}" data-id="${a.id}">
-        ${accountChip(a.accountType, true)}
+        ${accountIcon(a)}
         <div class="acct-main">
             <div class="acct-line">
                 <span class="acct-name">${esc(a.name)}${a.systemAccount ? `<span class="lock" title="System account">${icon('lock')}</span>` : ''}</span>
-                ${moving ? `<span class="acct-spark" title="Balance over the last 6 months">${sparkline(trend, { width: 46, height: 16, color: SPARK[toneOf(a)] || SPARK.slate })}</span>` : ''}
                 <b class="acct-bal ${Number(a.balance) < 0 ? 'neg' : ''}">${money(a.balance)}</b>
             </div>
             <div class="acct-line sub">
-                <span class="acct-meta">${meta.map(esc).join(' · ')}</span>
+                <span class="acct-meta">${esc(a.typeLabel || '')}</span>
                 <span class="acct-facts">${accountFacts(a).join('')}</span>
                 ${change ? `<span class="acct-delta ${good ? 'pos' : 'neg'}" title="Change in the last 30 days">${change > 0 ? '▲' : '▼'}${moneyShort(Math.abs(change))}</span>`
                          : '<span class="acct-delta muted" title="No change in the last 30 days">–</span>'}
@@ -337,6 +373,77 @@ function accountItem(a) {
             ${util !== null && debt ? `<div class="acct-util ${util > 70 ? 'over' : util > 40 ? 'warning' : 'good'}"><span style="width:${Math.min(util, 100)}%"></span></div>` : ''}
         </div>
     </div>`;
+}
+
+// ===================================================================== account details: copy and share
+
+/** What can be shared to receive money into the account (a card number never is). */
+const shareable = a => a.accountType !== 'CREDIT_CARD' && !!(a.upiId || (a.accountNumber && a.ifsc));
+
+/** The account's details as a message: holder, number, IFSC, bank and UPI ID. */
+function detailsText(a) {
+    return [
+        '*Account details*',
+        a.holderName && `Name: ${a.holderName}`,
+        a.accountNumber && `A/c no.: ${a.accountNumber}`,
+        a.ifsc && `IFSC: ${a.ifsc}`,
+        a.institution && `Bank: ${a.institution}`,
+        a.upiId && `UPI ID: ${a.upiId}`,
+    ].filter(Boolean).join('\n');
+}
+
+const WHATSAPP = `<svg viewBox="0 0 24 24" class="wa-mark"><path fill="#25d366" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z"/><path fill="#fff" d="M9.2 7.4c-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4-.3.3-1.1 1.1-1.1 2.7s1.2 3.2 1.3 3.4c.2.2 2.3 3.6 5.6 4.9 2.8 1.1 3.3.9 3.9.8.6-.1 1.9-.8 2.2-1.5.3-.8.3-1.4.2-1.5-.1-.1-.3-.2-.6-.4l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.2c-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5.3-.5c.1-.2 0-.4 0-.5l-.9-2.3z"/></svg>`;
+
+/** Holder, number, IFSC and UPI ID are sensitive: only an admin or super admin sees them (the server leaves them out for others). */
+const seesBankDetails = () => ['ADMIN', 'SUPER_ADMIN'].includes(state.user?.role);
+
+/**
+ * The middle of the account's banner, within its height: holder, number (masked until revealed), IFSC and UPI ID
+ * as two quiet rows of label and value, each copied on click, and beside them small buttons to reveal, copy all
+ * or send on WhatsApp.
+ */
+function accountDetailsHtml(a) {
+    if (!seesBankDetails()) return '';
+    const card = a.accountType === 'CREDIT_CARD';
+    const row = (label, value, { mono = false, secret = false } = {}) => value ? `
+        <div class="ai-row"><dt>${label}</dt>
+            <dd><button type="button" class="ai-value ${mono ? 'mono' : ''}" data-copy="${esc(value)}" data-label="${esc(label)}" title="Copy ${esc(label.toLowerCase())}">
+                <span ${secret ? `data-secret="${esc(maskNumber(value))}"` : ''}>${esc(secret ? maskNumber(value) : value)}</span>${icon('copy')}</button></dd></div>` : '';
+    const rows = [
+        row('Holder', a.holderName),
+        row(card ? 'Card no.' : 'A/c no.', a.accountNumber, { mono: true, secret: true }),
+        row('IFSC', a.ifsc, { mono: true }),
+        row('UPI ID', a.upiId),
+    ].join('');
+    if (!rows.trim()) return '';
+    return `
+        <div class="ab-info" title="Account details: click a value to copy it">
+            <dl>${rows}</dl>
+            <span class="ai-tools">
+                ${a.accountNumber ? `<button type="button" class="ai-tool" data-reveal title="Show / hide the full number">${icon('eye')}</button>` : ''}
+                ${shareable(a) ? `<button type="button" class="ai-tool" data-copy-all title="Copy all the details">${icon('copy')}</button>
+                <a class="ai-tool" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(detailsText(a))}" title="Share on WhatsApp">${WHATSAPP}</a>` : ''}
+            </span>
+        </div>`;
+}
+
+function bindAccountDetails(el, a) {
+    if (!el) return;
+    const copy = async (text, what) => {
+        try { await navigator.clipboard.writeText(text); toast(`${what} copied`, 'info'); }
+        catch { toast('Copying is not allowed here', 'error'); }
+    };
+    el.addEventListener('click', e => {
+        const one = e.target.closest('[data-copy]');
+        if (one) copy(one.dataset.copy, one.dataset.label);
+        if (e.target.closest('[data-copy-all]')) copy(detailsText(a).replace(/\*/g, ''), 'Account details');
+        const reveal = e.target.closest('[data-reveal]');
+        if (reveal) {
+            const shown = reveal.classList.toggle('active');
+            el.querySelectorAll('[data-secret]').forEach(b => { b.textContent = shown ? b.closest('[data-copy]').dataset.copy : b.dataset.secret; });
+            reveal.title = shown ? 'Hide the full number' : 'Show the full number';
+        }
+    });
 }
 
 function maskNumber(number) {
@@ -384,13 +491,13 @@ async function drawDetail(target, account, reload, all = []) {
     const actions = quickActions(account).map(([act, iconName, label, title]) =>
         `<button class="btn sm on-dark" data-act="${act}" title="${esc(title)}">${icon(iconName)}${label}</button>`).join('')
         + (can('MANAGE_ACCOUNTS') ? `<button class="btn sm on-dark icon" data-act="edit" title="Edit account">${icon('edit')}</button>` : '');
-    const meta = [account.institution, account.typeLabel, account.code, account.accountNumber ? maskNumber(account.accountNumber) : '']
-        .filter(Boolean).filter((v, i, list) => list.indexOf(v) === i);
+    const meta = [account.institution, account.typeLabel, account.code].filter(Boolean).filter((v, i, list) => list.indexOf(v) === i);
+    const details = accountDetailsHtml(account);
 
     target.innerHTML = `
         <section class="panel p-account-head">
-            <div class="acct-banner tone-${tone}">
-                <span class="hero-icon">${icon(iconName)}</span>
+            <div class="acct-banner tone-${tone} ${details ? 'has-info' : ''}">
+                ${bankLogo(account, 'hero') || `<span class="hero-icon">${icon(iconName)}</span>`}
                 <div class="ab-id">
                     <div class="ab-name">${esc(account.name)}
                         ${account.systemAccount ? `<span class="hero-badge">${icon('lock')}System</span>` : ''}
@@ -398,6 +505,7 @@ async function drawDetail(target, account, reload, all = []) {
                     <div class="ab-meta">${meta.map(esc).join('<i>·</i>')}</div>
                     ${account.description ? `<div class="ab-desc" title="${esc(account.description)}">${icon('info')}<span>${esc(account.description)}</span></div>` : ''}
                 </div>
+                ${details}
                 <div class="ab-bal">
                     <small>${debt ? 'Outstanding' : 'Balance'}</small>
                     <b>${money(account.balance)}</b>
@@ -437,6 +545,7 @@ async function drawDetail(target, account, reload, all = []) {
 
 
     target.querySelector('[data-act="edit"]')?.addEventListener('click', () => openAccountForm(account, reload));
+    bindAccountDetails(target.querySelector('.ab-info'), account);
     target.querySelector('.ab-actions').addEventListener('click', e => {
         const b = e.target.closest('[data-act]');
         if (!b || b.dataset.act === 'edit') return;
@@ -450,6 +559,7 @@ async function drawDetail(target, account, reload, all = []) {
             in: () => openQuickEntry({ kind: 'TRANSFER', preset: { toAccountId: id }, onSaved: reload }),
             lend: () => openExpenseDialog({ mode: 'LENT', onSaved: reload }),
             owe: () => openDebtDialog({ payableAccountId: id, onSaved: reload }),
+            emi: () => { location.hash = '#/expenses/emi'; },
         })[b.dataset.act]?.();
     });
 
@@ -506,17 +616,24 @@ async function drawDetail(target, account, reload, all = []) {
         const hit = entryClaims.get(r.entryId);
         return hit ? `<span class="ls-cell" title="${esc(`${hit.claim.party} · ${hit.claim.narration} · ${hit.role}`)}">${claimBadge(hit.claim)}<span class="ls-role">${esc(hit.role)}</span></span>` : '';
     } };
+    /** The other side, a chit's own accounts shortened ("MH75 collections"). */
+    const shortCounter = r => String(r.counterAccounts || '').split(', ').map(n => shortAccount(n, chitCodeOf(r.chitTrail))).join(', ');
     const baseColumns = [
         { label: 'Date', render: r => date(r.date), cls: 'nowrap c-date' },
         { label: 'Entry', cls: 'c-entry', render: r => `<div class="entry-cell">${kindChip(r.voucherType, 'sm', r.voucherLabel)}
-            <span class="entry-text"><b class="ellipsis">${esc(r.narration)}</b>${personOf(r)}${peopleAccount ? '' : inlineStatus(r)}${r.counterAccounts ? `<span class="entry-party ellipsis" title="The other side">${icon(isIn(r) ? 'arrow-in' : 'arrow-out')}${esc(r.counterAccounts)}</span>` : ''}</span></div>` },
+            <span class="entry-text">${projectTag(r.construction)}<b class="ellipsis" title="${esc(r.narration)}">${esc(shortNarration(r.narration, r.chitTrail))}</b>${personOf(r)}${peopleAccount ? '' : inlineStatus(r)}${r.counterAccounts ? `<span class="entry-party ellipsis" title="${esc(`The other side: ${r.counterAccounts}`)}">${icon(isIn(r) ? 'arrow-in' : 'arrow-out')}${esc(shortCounter(r))}</span>` : ''}</span></div>` },
         { label: debitNormal ? 'In (Dr)' : 'Out (Dr)', align: 'r', render: r => Number(r.debit) ? `<span class="dr-amt">${money(r.debit)}</span>` : '' },
         { label: debitNormal ? 'Out (Cr)' : 'In (Cr)', align: 'r', render: r => Number(r.credit) ? `<span class="cr-amt">${money(r.credit)}</span>` : '' },
         { label: 'Balance', align: 'r', render: r => `<b>${money(r.balance)}</b>` },
         { label: '', align: 'r', render: () => `<span class="expand-caret">${icon('chevron-down')}</span>` },
     ];
     // the Status column on receivables / payables; elsewhere (bank, interest accounts) the status sits inline
-    const columns = () => (peopleAccount ? [baseColumns[0], baseColumns[1], statusCol, ...baseColumns.slice(2)] : baseColumns);
+    const chitCol = { label: '', cls: 'c-ctst', render: r => chitStatus(r.chitTrail) };
+    const columns = () => {
+        const cols = peopleAccount ? [baseColumns[0], baseColumns[1], statusCol, ...baseColumns.slice(2)] : [...baseColumns];
+        if (hasChitStatus(ledger?.rows)) cols.splice(peopleAccount ? 3 : 2, 0, chitCol);
+        return cols;
+    };
 
     // free text: description, the other side, kind, entry number (EX-000123) or id (#123)
     const textMatch = r => {
@@ -726,7 +843,7 @@ function metrics(a, debt, all = []) {
         const util = Number(a.utilizationPercent || 0);
         list.push(tile('percent', debt && a.accountType !== 'CREDIT_CARD' ? 'Repaid of sanctioned' : 'Credit used',
             percent(a.accountType === 'CREDIT_CARD' ? util : 100 - util, 0),
-            `${a.accountType === 'CREDIT_CARD' ? 'Available' : 'Sanctioned'} ${money(a.accountType === 'CREDIT_CARD' ? a.availableCredit : a.creditLimit)}`,
+            `${a.accountType === 'CREDIT_CARD' ? 'Available' : 'Sanctioned'} ${a.accountType === 'CREDIT_CARD' ? money(a.availableCredit, { decimals: 2 }) : money(a.creditLimit)}`,
             util > 70 ? 'alert' : '', bar(util, util > 70 ? 'todo' : '')));
     }
     if (a.interestRate) list.push(tile('percent', 'Interest rate', percent(a.interestRate, 2) + ' p.a.',
@@ -798,6 +915,8 @@ function dueText(c) {
 /** The buttons that make sense on this kind of account. */
 function quickActions(a) {
     if (!can('POST_TRANSACTIONS')) return [];
+    // what is owed on an EMI is paid, undone or paid off only with its plan
+    if (a.emiAccount) return [['emi', 'calendar', 'Manage the EMI', 'Pay, undo or pay off in Expenses › EMIs']];
     const t = a.accountType;
     if (['BANK', 'CASH', 'WALLET'].includes(t)) return [['spend', 'arrow-out', 'Spend', 'Expense paid from this account'],
         ['receive', 'arrow-in', 'Receive', 'Income into this account'], ['out', 'transfer', 'Transfer', 'Move money to another account']];
@@ -813,7 +932,11 @@ function quickActions(a) {
 
 // ===================================================================== create / edit form
 
-export function openAccountForm(account, onSaved) {
+/**
+ * The account form. opts.note: a message on top (e.g. why the bank details are needed); bank and wallet accounts carry
+ * the holder's name, IFSC and UPI ID, which go on chit members' payment links.
+ */
+export function openAccountForm(account, onSaved, opts = {}) {
     const types = state.options.accountTypes;
     // expense / income are categories and chits live on the Chits page: neither is a new account
     const classLabels = { ASSET: 'Assets', LIABILITY: 'Liabilities', EQUITY: 'Equity' };
@@ -849,23 +972,42 @@ export function openAccountForm(account, onSaved) {
         },
     });
 
+    // an existing account's number and bank details are for admins only (a new one's are entered by whoever adds it)
+    const private_ = !!account && !seesBankDetails();
     openModal({
         title: account ? `Edit ${account.name}` : 'New account', iconName: 'wallet', size: 'lg', actions,
-        body: `<form class="form-grid three">
+        body: `${opts.note ? `<p class="hc-note warn acc-form-note">${icon('alert')}<span>${esc(opts.note)}</span></p>` : ''}<form class="form-grid three">
             ${field({ label: 'Account name', name: 'name', value: a.name, required: true, span: 'span-2' })}
             ${field({ label: 'Type', name: 'accountType', type: 'select', options: typeOptions, required: true })}
             ${field({ label: 'Institution', name: 'institution', value: a.institution, placeholder: 'Bank, issuer, lender…' })}
-            ${field({ label: 'Account / card no.', name: 'accountNumber', value: a.accountNumber, placeholder: 'XXXX1234' })}
+            ${private_ ? '' : field({ label: 'Account / card no.', name: 'accountNumber', value: a.accountNumber, placeholder: 'XXXX1234' })}
             ${field({ label: 'Code', name: 'code', value: a.code, hint: 'Leave empty to auto-assign', attrs: account?.systemAccount ? 'readonly' : '' })}
             ${field({ label: 'Opening balance', name: 'openingBalance', type: 'number', value: a.openingBalance,
-                      hint: 'Amount you own (assets) or owe (loans, cards)' })}
-            ${field({ label: 'Opening date', name: 'openingDate', type: 'date', value: a.openingDate || isoDate() })}
+                      hint: account ? 'Set when the account was created; it cannot be changed (post an adjustment instead)' : 'Amount you own (assets) or owe (loans, cards); it cannot be changed later',
+                      attrs: account ? 'readonly tabindex="-1"' : '' })}
+            ${field({ label: 'Opening date', name: 'openingDate', type: 'date', value: a.openingDate || isoDate(), attrs: account ? 'readonly tabindex="-1"' : '' })}
             ${field({ label: 'Interest rate % p.a.', name: 'interestRate', type: 'number', value: a.interestRate })}
             ${field({ label: 'Credit limit / sanctioned', name: 'creditLimit', type: 'number', value: a.creditLimit })}
             ${field({ label: 'Maturity / end date', name: 'maturityDate', type: 'date', value: a.maturityDate })}
             ${field({ label: 'Quantity (g / units)', name: 'quantity', type: 'number', value: a.quantity, hint: 'For gold, silver, shares…' })}
             ${field({ label: 'Description', name: 'description', value: a.description, span: 'span-2' })}
             ${field({ label: 'Active', name: 'active', type: 'checkbox', value: a.active })}
+            ${private_ ? (['BANK', 'WALLET', 'CREDIT_CARD'].includes(account.accountType) ? `<p class="hc-note span-3">${icon('lock')}<span>The account number and bank details stay as they are: only an admin can see or change them.</span></p>` : '') : `<div class="acc-bank-head span-3" data-bank>${icon('bank')}<b>Bank details</b><small>for receiving money: chit members pay into these (UPI ID, or account number and IFSC)</small></div>
+            ${field({ label: 'Account holder name', name: 'holderName', value: a.holderName, placeholder: 'As printed on the passbook', attrs: 'maxlength="100" data-bank', span: 'acc-bank' })}
+            ${field({ label: 'IFSC', name: 'ifsc', value: a.ifsc, placeholder: 'e.g. ICIC0001234', attrs: 'maxlength="11" pattern="[A-Za-z]{4}0[A-Za-z0-9]{6}" title="4 letters, a zero, then 6 letters or digits" data-bank data-bank-only style="text-transform:uppercase"', span: 'acc-bank acc-bank-only' })}
+            ${field({ label: 'UPI ID', name: 'upiId', value: a.upiId, placeholder: 'name@okicici', attrs: 'maxlength="60" pattern="[\\w.\\-]{2,}@[A-Za-z][\\w.]{1,}" title="Like name@bank" data-bank', span: 'acc-bank' })}`}
         </form>`,
+        onOpen: m => {
+            const type = m.el.querySelector('[name=accountType]');
+            const sync = () => {
+                const t = type.value;
+                m.el.querySelectorAll('.acc-bank, [data-bank].acc-bank-head').forEach(x => {
+                    x.hidden = !(t === 'BANK' || t === 'WALLET') || (x.classList.contains('acc-bank-only') && t !== 'BANK');
+                });
+            };
+            type.addEventListener('change', sync);
+            sync();
+            if (opts.focusBank) setTimeout(() => m.el.querySelector(a.upiId ? '[name=ifsc]' : '[name=upiId]')?.focus(), 80);
+        },
     });
 }
