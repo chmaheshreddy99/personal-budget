@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#164466">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Personal Budget</title>
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+
+    <!-- Styles: tokens first, then layout, components and per-view rules -->
+    <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/evidence.css">
+    <link rel="stylesheet" href="css/widgets.css">
+    <link rel="stylesheet" href="css/views.css">
+    <!-- the light brand theme, then phone / tablet layouts (both only override, so desktop logic is untouched) -->
+    <link rel="stylesheet" href="css/lite.css">
+    <link rel="stylesheet" href="css/glacier.css">
+    <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+
+<!-- ============================================================ Sign-in screen -->
+<section id="login-screen" class="login-screen" hidden>
+    <div class="login-card glass">
+        <div class="login-brand">
+            <img src="img/logo.svg" alt="" class="login-logo">
+            <div>
+                <h1>Personal Budget</h1>
+                <p>Clear water for your money</p>
+            </div>
+        </div>
+
+        <div class="tabs" id="login-tabs">
+            <button class="tab active" data-tab="signin">Sign in</button>
+            <button class="tab" data-tab="register">Create household</button>
+        </div>
+
+        <form id="signin-form" class="form-grid one">
+            <label class="field"><span>Username</span>
+                <input name="username" autocomplete="username" required autocapitalize="none" spellcheck="false" data-plain></label>
+            <label class="field"><span>Password</span>
+                <span class="pw-box"><input name="password" type="password" autocomplete="current-password" required data-plain>
+                    <button type="button" class="pw-eye" data-eye title="Show the password" aria-label="Show the password"><i data-icon="eye"></i></button></span>
+                <small class="caps-warn" data-caps hidden><i data-icon="alert"></i>Caps Lock is on</small></label>
+            <button class="btn primary block" type="submit" data-submit>Sign in</button>
+        </form>
+
+        <!-- after signing in with the default password: a new one before anything else -->
+        <form id="password-form" class="form-grid one" hidden>
+            <div class="pw-intro"><i data-icon="shield"></i><div><b>Set your own password</b>
+                <p>You signed in with the default password. Choose a new one to continue; the default stops working.</p></div></div>
+            <label class="field" data-current-field hidden><span>Current (default) password</span>
+                <input name="currentPassword" type="password" autocomplete="current-password" data-plain></label>
+            <label class="field"><span>New password</span>
+                <span class="pw-box"><input name="newPassword" type="password" autocomplete="new-password" required minlength="8" data-plain>
+                    <button type="button" class="pw-eye" data-eye title="Show the password" aria-label="Show the password"><i data-icon="eye"></i></button></span>
+                <span class="pw-meter" data-meter><i></i></span>
+                <small class="caps-warn" data-caps hidden><i data-icon="alert"></i>Caps Lock is on</small></label>
+            <ul class="pw-rules" data-rules>
+                <li data-rule="len">At least 8 characters</li>
+                <li data-rule="mix">Letters and digits</li>
+                <li data-rule="new">Not the default password or your username</li>
+            </ul>
+            <label class="field"><span>Repeat it</span>
+                <input name="confirmPassword" type="password" autocomplete="new-password" required data-plain>
+                <small class="pw-match" data-match></small></label>
+            <button class="btn primary block" type="submit" data-submit>Save and continue</button>
+            <button class="btn ghost block" type="button" id="password-cancel">Sign out</button>
+        </form>
+
+        <form id="register-form" class="form-grid two" hidden>
+            <label class="field span-2"><span>Household / organisation name</span>
+                <input name="tenantName" required placeholder="Sharma Family"></label>
+            <label class="field"><span>Short code</span>
+                <input name="tenantCode" required pattern="[a-z0-9][a-z0-9-]{1,29}" placeholder="sharma-home"></label>
+            <label class="field"><span>Currency</span>
+                <input name="currency" value="INR" maxlength="3" pattern="[A-Z]{3}"></label>
+            <label class="field span-2"><span>Your full name</span>
+                <input name="fullName" required></label>
+            <label class="field"><span>Username</span>
+                <input name="username" required minlength="3"></label>
+            <label class="field"><span>Email</span>
+                <input name="email" type="email"></label>
+            <label class="field span-2"><span>Password</span>
+                <input name="password" type="password" required minlength="6"></label>
+            <button class="btn primary block span-2" type="submit">Create and sign in</button>
+        </form>
+        <p class="form-error" id="login-error"></p>
+        <a class="mobile-link" id="mobile-link" href="/m/" hidden><i data-icon="phone"></i>On a phone? Open the mobile version</a>
+    </div>
+</section>
+
+<!-- ============================================================ Application shell -->
+<div id="app" class="app" hidden>
+    <header class="topbar">
+        <button class="menu-toggle" id="menu-toggle" aria-label="Open the menu" aria-controls="main-menu" aria-expanded="false"><i data-icon="menu"></i></button>
+        <a class="brand" href="#/dashboard" title="Personal Budget">
+            <img src="img/logo.svg" alt="" class="brand-logo">
+            <span class="brand-text">
+                <strong>Personal<em>Budget</em></strong>
+                <small id="tenant-name"></small>
+            </span>
+        </a>
+
+        <nav class="menu" id="main-menu" aria-label="Main menu"><!-- filled by app.js --></nav>
+
+        <div class="topbar-actions">
+            <div class="user-menu" id="user-menu">
+                <button class="avatar-btn" id="user-btn" aria-haspopup="true">
+                    <span class="avatar" id="user-avatar"></span>
+                    <span class="user-text"><b id="user-name"></b><small id="user-role"></small></span>
+                    <i data-icon="chevron-down"></i>
+                </button>
+                <div class="dropdown glass" id="user-dropdown" hidden>
+                    <a href="#/admin/profile"><i data-icon="user"></i> My profile</a>
+                    <a href="#/admin/users"><i data-icon="shield"></i> Users &amp; roles</a>
+                    <a href="#/settings"><i data-icon="settings"></i> Settings</a>
+                    <button id="shortcuts-btn"><i data-icon="keyboard"></i> Keyboard shortcuts <span class="kbd">?</span></button>
+                    <hr>
+                    <button id="logout-btn"><i data-icon="log-out"></i> Sign out</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main id="view" class="view"><!-- the active page renders here --></main>
+
+    <!-- Live status bar: brand, today's money pulse, data store health (filled by components/footer.js) -->
+    <footer class="footer" id="app-footer">
+        <span class="foot-brand"><img src="img/logo.svg" alt="">Personal<em>Budget</em><span class="ver">v1.0</span></span>
+        <span class="foot-sep"></span>
+        <div class="foot-pulse" id="foot-pulse"></div>
+        <div class="foot-status" id="foot-status"></div>
+    </footer>
+</div>
+
+<div id="toast-host" class="toast-host" aria-live="polite"></div>
+<div id="tooltip" class="chart-tooltip" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

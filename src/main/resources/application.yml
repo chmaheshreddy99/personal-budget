@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: personal-budget
+  threads:
+    virtual:
+      enabled: true
+  servlet:
+    multipart:
+      # evidence uploads (see budget.attachments.max-file-mb)
+      max-file-size: 12MB
+      max-request-size: 13MB
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+
+budget:
+  # Folder (relative to the working directory) holding one .tbl file per table
+  data-dir: data
+  security:
+    # Roles are always enforced: see RolePolicy for who may do what. A viewer can only read.
+    session-hours: 12
+    # Role given to users created without an explicit role
+    default-user-role: ADMIN
+    # Sign-in is locked for lock-minutes after this many wrong passwords in a row
+    max-failed-logins: 5
+    lock-minutes: 10
+  interest:
+    # Interest on money lent / owed: MONTHLY = every month counts as one month (30-day months, 30/360),
+    # ACTUAL = actual days / 365
+    day-count: MONTHLY
+  attachments:
+    # Evidence (photos, scans, PDFs) attached to entries, stored under <data-dir>/attachments
+    max-file-mb: 10
+    max-per-entry: 12
+  seed:
+    # On first start (no tenants yet) create a default tenant and admin login
+    admin-username: admin
+    admin-password: admin@123
+    tenant-code: home
+    tenant-name: My Household
+    currency: INR
+    # Also generate six months of sample transactions, accounts and a chit
+    demo-data: false
+
+logging:
+  level:
+    com.aditya.personalbudget: INFO

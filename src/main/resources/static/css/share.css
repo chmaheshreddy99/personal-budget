@@ -1,0 +1,33 @@
+/* The public page behind a document share link (share.html). */
+* { box-sizing: border-box; }
+body.share-page { margin: 0; min-height: 100vh; font: 14px/1.45 var(--font); color: var(--text-primary);
+    background: radial-gradient(800px 420px at 0% -10%, #cfdeea 0%, transparent 60%), linear-gradient(180deg, #e2eaf1 0%, #d9e3ec 100%); background-attachment: fixed;
+    display: flex; flex-direction: column; }
+.sh-top { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--grad-ocean); color: #fff; }
+.sh-logo { width: 28px; height: 28px; }
+.sh-top b { font-size: 16px; } .sh-top em { font-style: normal; color: #7dd0f5; }
+.sh-top span { margin-left: auto; font-size: 12px; color: #bcd9ee; }
+.sh-main { flex: 1; width: 100%; max-width: 920px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; align-content: start; }
+.sh-card { padding: 16px 18px; border-radius: 16px; background: rgba(243, 248, 252, 0.95); border: 1px solid rgba(255, 255, 255, 0.8); box-shadow: 0 4px 18px rgba(12, 42, 68, 0.1); }
+.sh-head { display: flex; align-items: flex-start; gap: 12px; }
+.sh-head small { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.sh-head h1 { margin: 2px 0 0; font-size: 22px; color: var(--ocean-900); }
+.sh-badge { margin-left: auto; padding: 3px 10px; border-radius: 999px; background: #e2f0fb; color: #0b5c94; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.sh-meta { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
+.sh-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.sh-file { position: relative; margin: 0; border-radius: 14px; overflow: hidden; background: #fff; border: 1px solid var(--hairline); box-shadow: 0 2px 10px rgba(12, 42, 68, 0.08); }
+.sh-file img { display: block; width: 100%; max-height: 420px; object-fit: contain; background: #f4f7fa; cursor: zoom-in; }
+.sh-file.zoomed { grid-column: 1 / -1; }
+.sh-file.zoomed img { max-height: none; cursor: zoom-out; }
+.sh-file.protect img { user-select: none; -webkit-user-drag: none; }
+.sh-file figcaption { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12.5px; border-top: 1px solid var(--hairline); }
+.sh-file figcaption span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.sh-file figcaption a { color: var(--link); font-weight: 700; text-decoration: none; }
+.sh-mark { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%) rotate(-24deg); white-space: nowrap; font-size: 18px; font-weight: 800;
+    color: rgba(11, 63, 107, 0.16); pointer-events: none; letter-spacing: 0.04em; }
+.sh-pdf { display: grid; place-items: center; height: 180px; font-size: 28px; font-weight: 800; color: #c2363a; background: #fdf1f1; }
+.sh-empty h1 { margin: 0 0 6px; font-size: 20px; }
+.sh-foot { text-align: center; padding: 14px; font-size: 11.5px; color: var(--text-muted); }
+.sh-loading { display: grid; place-items: center; padding: 60px 0; }
+.sh-loading span { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(11, 106, 166, 0.2); border-top-color: var(--ocean-500); animation: sh-spin 0.8s linear infinite; }
+@keyframes sh-spin { to { transform: rotate(360deg); } }

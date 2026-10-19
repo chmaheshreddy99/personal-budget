@@ -1,0 +1,106 @@
+/* =====================================================================
+   Lite theme: a calmer, lighter take on "Glacier & Ocean".
+   - surfaces get a faint ocean tint instead of stark white
+   - the deep navy of banners and heroes becomes a softer ocean
+   - a selected card is highlighted lightly (tint, ocean edge, soft ring), never filled dark
+   - active chips and tabs are white pills with an ocean edge
+   Loaded after the other sheets; it only overrides colours, never layout.
+   ===================================================================== */
+
+:root {
+    --page-bg:
+        radial-gradient(1100px 520px at 0% -10%, #e2edf6 0%, transparent 62%),
+        radial-gradient(900px 480px at 105% 4%, #e3f0ee 0%, transparent 58%),
+        linear-gradient(180deg, #f1f5f9 0%, #ecf1f6 100%);
+    --surface: rgba(251, 253, 255, 0.86);
+    --surface-solid: #fbfcfe;
+    --surface-sunken: rgba(232, 240, 247, 0.75);
+    --surface-hover: rgba(11, 106, 166, 0.06);
+    --surface-selected: rgba(11, 106, 166, 0.1);
+    --glass-border: rgba(255, 255, 255, 0.9);
+    --hairline: rgba(16, 66, 104, 0.12);
+    --hairline-strong: rgba(16, 66, 104, 0.22);
+
+    /* softer ocean for banners and heroes (white text stays readable) */
+    --grad-navy: linear-gradient(135deg, #1a4466 0%, #1f557d 60%, #256791 100%);
+    --grad-ocean: linear-gradient(100deg, #133352 0%, #184769 45%, #1d5c87 100%);
+
+    /* cards in lists and the light selection */
+    --card-bg: linear-gradient(180deg, #f8fbfd 0%, #f2f7fb 100%);
+    --card-border: rgba(16, 66, 104, 0.13);
+    --select-bg: linear-gradient(180deg, #edf5fb 0%, #e3eff8 100%);
+    --select-border: rgba(11, 106, 166, 0.45);
+    --select-ring: 0 0 0 2px rgba(11, 106, 166, 0.13);
+}
+
+body { background-color: #eef3f7; }
+
+.panel, .glass { box-shadow: 0 1px 2px rgba(16, 52, 84, 0.05), 0 6px 20px rgba(16, 52, 84, 0.06); }
+
+/* ---------------------------------------------------------------- list cards: a hint of ocean, not bright white */
+.acct-item, .chit-row, .budget-card, .in-source, .set-item, .cat-row {
+    background: var(--card-bg);
+    border-color: var(--card-border);
+}
+.acct-item:hover, .chit-row:hover, .budget-card:hover { border-color: var(--hairline-strong); box-shadow: 0 2px 8px rgba(16, 52, 84, 0.08); }
+
+/* ---------------------------------------------------------------- selection: a light highlight, never a dark fill */
+.acct-item.selected, .chit-row.selected, .in-source.selected, .set-item.selected, .budget-card.selected, .chit-card.selected {
+    background: var(--select-bg);
+    color: var(--text-primary);
+    border-color: var(--select-border);
+    border-left-color: var(--ocean-600);
+    box-shadow: var(--select-ring);
+}
+.account-list:focus .acct-item.selected { box-shadow: 0 0 0 2px rgba(11, 106, 166, 0.28); }
+/* undo the light-on-dark colours the dark selection used */
+.acct-item.selected .acct-meta { color: var(--text-muted); }
+.acct-item.selected .fact { color: var(--text-secondary); background: rgba(10, 79, 128, 0.05); border-color: var(--hairline); }
+.acct-item.selected .fact.good { color: #0a6b0a; background: #eaf7ec; }
+.acct-item.selected .fact.warn { color: #8a5b00; background: #fff6dc; }
+.acct-item.selected .fact.bad { color: #a32626; background: #fdeaea; }
+.acct-item.selected .acct-bal { color: var(--ocean-800); }
+.acct-item.selected .acct-delta.pos { color: var(--positive); }
+.acct-item.selected .acct-delta.neg { color: var(--negative); }
+.acct-item.selected .chip-icon { box-shadow: none; }
+.acct-item.selected .lock svg { color: var(--text-muted); }
+.chit-row.selected .cr-line.sub { color: var(--text-muted); }
+.chit-row.selected .cr-value { color: var(--ocean-800); }
+.chit-row.selected .chit-mark { background: var(--grad-navy); box-shadow: none; }
+.chit-row.selected .cr-bar { background: rgba(10, 79, 128, 0.1); }
+.chit-row.selected .cr-bar em { background: linear-gradient(90deg, #2fb8a8, #2d8fd5); }
+.chit-row.selected .cr-rates .rate.c { background: #dff5f1; color: #0b7a6e; }
+.chit-row.selected .cr-rates .rate.s { background: #ece9fd; color: #4a3aa7; }
+.chit-row.selected .cr-rates .earned { color: var(--positive); }
+.in-source.selected small, .in-source.selected .tag { color: var(--text-muted); background: rgba(10, 79, 128, 0.05); }
+.in-source.selected .mono { color: var(--ocean-800); }
+.in-source.selected .in-bar { background: rgba(10, 79, 128, 0.1); }
+.set-item.selected small { color: var(--text-muted); }
+
+/* ---------------------------------------------------------------- active chips and tabs: white pill, ocean edge */
+.seg-chip.active, .cf-chip.active, .xp-mode.selected, .mode-tile.active {
+    background: #fff;
+    color: var(--ocean-700);
+    border-color: transparent;
+    box-shadow: 0 1px 3px rgba(16, 52, 84, 0.14), inset 0 0 0 1px rgba(11, 106, 166, 0.4);
+}
+.seg-chip.active .count { background: rgba(11, 106, 166, 0.1); color: var(--ocean-700); }
+.cf-chip.active i { color: var(--ocean-600); }
+.cat-tile.selected { background: var(--select-bg); color: var(--text-primary); border-color: var(--select-border); box-shadow: var(--select-ring); }
+.cat-tile.selected .cat-name { color: var(--ocean-800); }
+.cat-tile.selected .chip-icon { box-shadow: none; }
+.qa:hover { background: var(--select-bg); color: var(--ocean-800); }
+
+/* ---------------------------------------------------------------- accounts: calmer bars and chips */
+.class-head { background: #e7eff6 !important; color: var(--ocean-800) !important; border: 1px solid var(--hairline); }
+.class-head b { color: var(--ocean-800) !important; }
+.ov-chip:not(.ov-net) { background: var(--card-bg); border-color: var(--card-border); }
+.list-group-switch { margin-left: auto; font-size: var(--font-size-xs); }
+
+/* ---------------------------------------------------------------- forms and inputs */
+input, select, textarea { background-color: #fdfeff; }
+input:focus, select:focus, textarea:focus { box-shadow: var(--brand-ring); }
+
+/* ---------------------------------------------------------------- browser compatibility */
+.glass, .insight-card { -webkit-backdrop-filter: blur(16px) saturate(160%); }
+.modal-backdrop { -webkit-backdrop-filter: blur(3px); }

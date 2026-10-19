@@ -1,0 +1,258 @@
+/* =====================================================================
+   Phones and tablets.
+   Desktop keeps its fixed canvas (panels scroll inside it). Below 1100 px the page itself scrolls and the
+   multi-column page grids stack into one column; below 700 px figure strips go two-up, forms one-up,
+   dialogs become full-width sheets, the menu becomes a sheet behind a button and inputs use 16 px text
+   (no zoom on iOS). Touch screens always show the buttons that desktop reveals on hover.
+   Only overrides; nothing here applies above 1100 px except the browser-compatibility basics.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------- everywhere: browser basics */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.app { height: 100vh; height: 100dvh; }            /* mobile browsers: the visible height, not behind the toolbars */
+.login-screen { min-height: 100vh; min-height: 100dvh; height: auto; }
+.menu-toggle { display: none; }
+button, a, input, select, textarea, label { -webkit-tap-highlight-color: rgba(11, 106, 166, 0.12); touch-action: manipulation; }
+
+/* touch screens have no hover: show what hover would reveal */
+@media (hover: none) {
+    .timeline li .btn.icon, .cat-actions, .ev-tile-actions { opacity: 1 !important; }
+    .acct-item:hover, .chit-row:hover, .budget-card:hover { transform: none; }
+}
+
+/* ===================================================================== tablets and below */
+@media (max-width: 1100px) {
+    :root { --gap: 8px; }
+    .view { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 8px; }
+
+    /* every page-level grid stacks into one column and grows with its content */
+    .page, .accounts-page, .balance-page, .chits-page, .expenses-page, .income-page, .journal-page,
+    .planning-body, .planning-body.budgets, .reports-page, .settings-page, .planner, .report-area,
+    .report-content, .report-content.insights, .report-content.categories, .report-content.accounts,
+    .report-content.chits, .report-content.income, .report-content.charts-and-table,
+    .claim-body, .xp-grid, .pay-layout, .upi-dialog, .bs-columns, .insight-ribbon, .xp-donut, .profile-grid,
+    .post-grid, .set-cats, .budget-main, .account-detail {
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-rows: none !important;
+        height: auto !important;
+    }
+    .page > *, .report-content > *, .planning-body > * { grid-column: auto !important; grid-row: auto !important; min-height: 0; }
+    .dashboard { height: auto !important; }
+
+    /* panels size to their content; long lists keep their own scroll, at a comfortable height */
+    .panel { min-height: 0; }
+    .panel-body { flex: none; }
+    .account-list, .budget-cards.scroll, .in-sources, .cat-list, .chit-list, .claim-timeline .timeline { max-height: 60vh; }
+    .budget-side, .xp-side { overflow: visible; }
+
+    /* charts had their height from the grid; give them one */
+    .panel-body.chart { height: 280px; min-height: 0; }
+    .panel-body.chart .chart-wrap, .panel-body.chart .donut-wrap { height: 100%; }
+    .chart-wrap, .donut-wrap { min-height: 220px; }
+    .chart { min-height: 180px; }
+    .side-card .chart, .budget-trend { height: 200px; }
+    .sparkline { min-height: 0; }
+
+    /* the dashboard's customizable grid: one card per row */
+    .dash-grid { grid-template-columns: minmax(0, 1fr) !important; grid-auto-rows: auto !important; }
+    .dash-grid > * { grid-column: 1 / -1 !important; grid-row: auto !important; min-height: 0; max-height: 460px; }
+    .dash-grid > * .panel { max-height: 460px; }
+    .dash-grid > * .panel-body.scroll, .dash-grid > * .panel-body { overflow: auto; }
+
+    /* figure strips: three across */
+    .acct-overview, .chit-strip, .forecast-kpis, .report-stats, .report-content .report-stats, .stat-strip,
+    .insight-cards, .hc-parts, .hc-breakdown, .people-summary, .bs-header, .fc-chit-total {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+    .dashboard .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+    .insight-cards .insight-card:nth-child(4) { display: flex !important; }
+    .acct-overview .ov-net { grid-column: span 3; }
+
+    /* toolbars wrap and search boxes take the full width */
+    .page-toolbar { flex-wrap: wrap; row-gap: 6px; }
+    .page-toolbar .spacer { display: none; }
+    .page-toolbar .search-box { flex: 1 1 220px; min-width: 0; }
+    .page-toolbar .search-box input { width: 100%; }
+    .dash-bar { flex-wrap: wrap; row-gap: 6px; }
+    .dash-bar > * { max-width: 100%; }
+    .qa-row, .dash-actions { flex-wrap: wrap; }
+
+    /* tables: scroll sideways inside their panel rather than squeezing */
+    .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .report-content table.grid, .claim-schedule table, .journal-page table.grid { min-width: 640px; }
+
+    .footer .foot-keys, .footer .foot-hide-md { display: none !important; }
+}
+
+/* ===================================================================== phones */
+@media (max-width: 700px) {
+    :root { --topbar-height: 50px; --footer-height: 30px; --font-size: 13px; --font-size-sm: 12px; }
+
+    /* ---- top bar: brand mark, menu button, user; the menu opens as a sheet */
+    .topbar { gap: 8px; padding: 0 10px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+    .menu-toggle {
+        display: grid; place-items: center; flex-shrink: 0; z-index: 2;
+        width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.1); color: #fff; cursor: pointer; padding: 0;
+    }
+    .menu-toggle svg { width: 20px; height: 20px; }
+    .brand { flex: 1; }
+    .brand-text { display: flex !important; }
+    .brand-text small { display: none; }
+    .menu {
+        position: fixed; z-index: 40;
+        top: var(--topbar-height); left: 0; right: 0;
+        display: none; flex-direction: column; align-items: stretch; gap: 2px;
+        padding: 8px 10px 14px; max-height: calc(100dvh - var(--topbar-height));
+        overflow-y: auto; background: var(--grad-ocean); box-shadow: 0 16px 30px rgba(6, 32, 56, 0.35);
+    }
+    body.menu-open .menu { display: flex; animation: fade-in 0.15s ease-out; }
+    .menu a { height: 42px; padding: 0 14px; border-radius: 10px; font-size: 14px; }
+    .menu a span { display: inline !important; }
+    .menu a svg { width: 18px; height: 18px; }
+    .avatar-btn { padding: 2px; }
+    .avatar-btn > svg { display: none; }
+
+    /* ---- footer: the money pulse only, swipeable */
+    .footer { padding: 0 8px; padding-bottom: env(safe-area-inset-bottom); }
+    .foot-brand, .foot-status, .foot-sep { display: none !important; }
+    .foot-pulse { overflow-x: auto; scrollbar-width: none; }
+    .foot-pulse::-webkit-scrollbar { display: none; }
+    .foot-item { flex-shrink: 0; }
+
+    .view { padding: 6px; }
+    .panel-head { flex-wrap: wrap; row-gap: 4px; }
+    .page-title { font-size: 15px; }
+
+    /* ---- figure strips: two across */
+    .acct-overview, .chit-strip, .forecast-kpis, .report-stats, .report-content .report-stats, .stat-strip,
+    .insight-cards, .metric-strip, .claim-figures, .chit-stats, .chit-details, .fc-chit-figs, .fc-chit-total,
+    .hc-parts, .hc-breakdown, .bh-figs, .bt-figs, .cg-figs, .payable-card, .bs-metrics, .chit-card-figures,
+    .mode-tiles, .pay-grid, .role-notes, .shortcut-map, .people-summary, .bs-header, .planner-kpis,
+    .dashboard .kpi-row, .insight-grid, .donut-legend, .bs-equation, .xs-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+    .acct-overview .ov-net, .chit-strip .cs-brand, .people-summary .ps-main { grid-column: 1 / -1; }
+    .chit-strip .cs-switch { grid-column: 1 / -1; justify-self: start; }
+    .payable-card .pc-main { grid-column: 1 / -1; }
+
+    /* ---- banners (account, chit, budget hero): stack their parts */
+    .acct-banner, .chit-banner, .claim-head { grid-template-columns: auto minmax(0, 1fr) !important; row-gap: 8px; }
+    .acct-banner .ab-bal, .chit-banner .ab-bal { grid-column: 1 / -1; align-items: flex-start; }
+    .acct-banner .ab-actions, .chit-banner .ab-actions, .chit-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; }
+    .claim-head .claim-progress { grid-column: 1 / -1; }
+    .acct-banner > *, .chit-banner > * { min-width: 0; }
+    .ab-name, .ab-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chit-row .cr-line b.ellipsis, .acct-name { min-width: 0; }
+    .tx-table, .day-book table.grid, #tx-table table { min-width: 620px; }
+
+    /* ---- forms: one column */
+    .form-grid.two, .form-grid.three, .form-grid.four { grid-template-columns: minmax(0, 1fr) !important; }
+    .form-grid > .span-2, .form-grid > .span-3, .form-grid > .span-4 { grid-column: 1 / -1 !important; }
+    input, select, textarea { font-size: 16px !important; }            /* iOS: no zoom on focus */
+    .rate-type select { width: auto; }
+
+    /* ---- dialogs: full-width sheets from the bottom */
+    .modal-backdrop { padding: 0; place-items: end center; }
+    .modal, .modal.lg, .modal.xl {
+        width: 100% !important; max-width: 100%;
+        max-height: 94dvh; border-radius: 16px 16px 0 0;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .modal-foot { flex-wrap: wrap; }
+    .modal-foot .btn { flex: 1 1 auto; justify-content: center; }
+    .modal-foot .btn.left { flex-basis: 100%; order: 2; }
+    .xp-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .xp-mode span { font-size: 11.5px; }
+    .cat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+    .pay-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .xp-amount input { font-size: 26px !important; }
+
+    /* ---- lists and tables */
+    .xp-table .c-pay, .xp-table .c-caret { display: none; }
+    .xp-table .c-date { width: 78px; }
+    .xp-party { max-width: 40%; }
+    .xp-detail { grid-template-columns: minmax(0, 1fr) !important; padding: 8px !important; }
+    .xp-detail .xp-actions { flex-direction: row !important; flex-wrap: wrap; }
+    .ce-main { flex-wrap: wrap; }
+    .ce-main .row { flex-wrap: wrap; }
+    table.grid td, table.grid th { padding-left: 6px; padding-right: 6px; }
+    .timeline li .tl-body .row { flex-wrap: wrap; }
+
+    /* ---- small things */
+    .toast-host { left: 8px; right: 8px; bottom: calc(var(--footer-height) + 8px); }
+    .toast { max-width: none; }
+    .dropdown { position: fixed; top: calc(var(--topbar-height) + 6px); right: 8px; left: auto; }
+    .seg-chips { flex-wrap: wrap; }
+    .tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+    .budget-empty { padding: 20px; }
+    .evv-top { flex-wrap: wrap; }
+    .evx-tools .btn { padding: 4px 8px; }
+}
+
+/* very narrow phones */
+@media (max-width: 380px) {
+    .acct-overview, .stat-strip, .report-stats, .dashboard .kpi-row, .metric-strip, .claim-figures { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* ===================================================================== this round's components */
+@media (max-width: 1100px) {
+    .budget-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .budget-overview .bo-hero { grid-column: 1 / -1; }
+    .journal-page td.c-move { width: 30%; }
+}
+@media (max-width: 700px) {
+    .budget-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .bp-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .bp-tx-head { flex-wrap: wrap; }
+    /* journal / statement rows: date, entry and amount; the movement shows when expanded */
+    .journal-page table.grid { min-width: 0 !important; }
+    .journal-page th.c-move, .journal-page td.c-move, .journal-page th:nth-child(3) { display: none; }
+    .journal-page .c-date, .p-ledger .c-date { width: 74px; }
+    /* account statements: fit the screen, the description takes what is left and wraps instead of overlapping */
+    .p-ledger table.grid { min-width: 0 !important; width: 100%; table-layout: fixed; }
+    .p-ledger .c-date { width: 62px !important; font-size: 11px; white-space: normal; }
+    .p-ledger th:nth-child(n+3), .p-ledger td:nth-child(n+3) { width: 78px !important; font-size: 11.5px; padding-left: 4px; padding-right: 4px; }
+    .p-ledger th:last-child, .p-ledger td:last-child { width: 20px !important; padding: 0 2px; }
+    .p-ledger th.c-lstatus, .p-ledger td.c-lstatus { display: none; }
+    .p-ledger td.c-entry { overflow: hidden; }
+    .p-ledger .entry-cell { align-items: flex-start; gap: 6px; }
+    .p-ledger .entry-cell > .chip-icon, .p-ledger .entry-cell > .kind-chip { display: none; }
+    .p-ledger .entry-text { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+    .p-ledger .entry-text > b.ellipsis { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+    .p-ledger .entry-text .entry-party, .p-ledger .entry-text .ls-person { max-width: 100% !important; margin-left: 0; font-size: 10.5px; }
+    .p-ledger .dr-amt, .p-ledger .cr-amt, .p-ledger td b { white-space: nowrap; }
+    .entry-party { max-width: 38%; }
+    .ledger-search { width: 100%; order: 9; }
+    .xp-meta { gap: 6px; }
+    .xp-meta .xp-payer span { max-width: 90px; }
+}
+@media (max-width: 1100px) {
+    .chit-key { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .chit-details.rich { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+    .chit-details.rich { grid-template-columns: minmax(0, 1fr) !important; }
+    .chit-statline { gap: 4px 10px; }
+    .chit-inst .paid-on small { display: none; }
+}
+@media (max-width: 1100px) {
+    .cs-hero { grid-template-columns: minmax(0, 1fr); }
+    .cs-hero-figs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cs-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+    .cs-hero-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1100px) {
+    .co-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .co-charts, .co-bottom { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+    .co-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .co-axis { margin-left: 0; margin-right: 0; }
+    .co-lane { grid-template-columns: minmax(0, 1fr) auto; }
+    .co-lane .co-track { grid-column: 1 / -1; grid-row: 2; }
+    .co-cards { grid-template-columns: minmax(0, 1fr); }
+    .co-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

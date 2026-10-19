@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5fd3f5"/>
+      <stop offset="0.55" stop-color="#0b8bd0"/>
+      <stop offset="1" stop-color="#0a4f80"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff6c9"/>
+      <stop offset="1" stop-color="#f2b705"/>
+    </linearGradient>
+  </defs>
+  <!-- glacier droplet -->
+  <path d="M32 3 C32 3 9 27 9 41 a23 23 0 0 0 46 0 C55 27 32 3 32 3 Z" fill="url(#sea)"/>
+  <!-- waves -->
+  <path d="M12 44 q5 -4 10 0 t10 0 t10 0 t10 0" fill="none" stroke="#e8fbff" stroke-width="2.6" stroke-linecap="round" opacity="0.9"/>
+  <path d="M15 51 q4.3 -3.4 8.6 0 t8.6 0 t8.6 0 t8.6 0" fill="none" stroke="#bfefff" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <!-- coin -->
+  <circle cx="32" cy="27" r="9.5" fill="url(#coin)" stroke="#b07d00" stroke-width="1.2"/>
+  <path d="M28.5 23.5 h7 M28.5 26.5 h7 M30 23.5 c4 0 4 6 0 6 l5 4.5" fill="none" stroke="#7a5400" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- gloss -->
+  <path d="M32 7 C27 13 15 27 14 37 c6 -9 14 -13 25 -15 C36 16 34 11 32 7 Z" fill="url(#gloss)" opacity="0.55"/>
+</svg>

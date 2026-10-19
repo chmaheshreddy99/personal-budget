@@ -1,0 +1,97 @@
+/* =====================================================================
+   Personal Budget - design tokens ("Glacier & Ocean")
+   Every color, radius, shadow and size used by the app is defined here.
+   ===================================================================== */
+
+:root {
+    color-scheme: light;
+
+    /* ---- Brand: ocean blues and glacier ice */
+    --ocean-950: #062038;
+    --ocean-900: #0a2e4f;
+    --ocean-800: #0b3f6b;
+    --ocean-700: #0a4f80;
+    --ocean-600: #0b6aa6;
+    --ocean-500: #0b8bd0;
+    --ocean-400: #33aee8;
+    --ocean-300: #7dd0f5;
+    --glacier-200: #c9ecfb;
+    --glacier-100: #e3f5fd;
+    --glacier-50: #f3fbff;
+    --aqua-500: #12b5a6;
+    --aqua-100: #d4f5f1;
+
+    /* ---- Surfaces */
+    --page-bg:
+        radial-gradient(1200px 520px at 0% -8%, #dcecf8 0%, transparent 62%),
+        radial-gradient(900px 480px at 104% 6%, #e1f1ef 0%, transparent 58%),
+        linear-gradient(180deg, #f2f6fa 0%, #edf2f7 100%);
+    --surface: rgba(255, 255, 255, 0.74);
+    --surface-solid: #fbfdff;
+    --surface-sunken: rgba(232, 244, 252, 0.7);
+    --surface-hover: rgba(11, 139, 208, 0.07);
+    --surface-selected: rgba(11, 139, 208, 0.12);
+    --glass-border: rgba(255, 255, 255, 0.85);
+    --hairline: rgba(10, 79, 128, 0.12);
+    --hairline-strong: rgba(10, 79, 128, 0.22);
+
+    /* ---- Ink */
+    --text-primary: #0d1f33;
+    --text-secondary: #43586e;
+    --text-muted: #7a8b9d;
+    --text-inverse: #ffffff;
+    --link: #0b6aa6;
+
+    /* ---- Semantic */
+    --positive: #0b7a3b;        /* money in / good (text) */
+    --negative: #c2363a;        /* money out / bad (text) */
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical: #d03b3b;
+    --info: #0b8bd0;
+
+    /* ---- Chart palette (validated categorical order, light surface) */
+    --series-1: #2a78d6;   /* blue */
+    --series-2: #eb6834;   /* orange */
+    --series-3: #1baf7a;   /* aqua */
+    --series-4: #eda100;   /* yellow */
+    --series-5: #e87ba4;   /* magenta */
+    --series-6: #008300;   /* green */
+    --series-7: #4a3aa7;   /* violet */
+    --series-8: #e34948;   /* red */
+    --chart-grid: #e1e6ec;
+    --chart-axis: #b9c6d3;
+
+    /* ---- Shape & depth */
+    --radius-xs: 6px;
+    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-lg: 14px;
+    --shadow-sm: 0 1px 2px rgba(10, 46, 79, 0.06), 0 2px 8px rgba(10, 46, 79, 0.05);
+    --shadow: 0 2px 6px rgba(10, 46, 79, 0.06), 0 10px 28px rgba(10, 46, 79, 0.08);
+    --shadow-lg: 0 20px 60px rgba(6, 32, 56, 0.25);
+    --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(255, 255, 255, 0) 52%);
+
+    /* ---- Brand gradients */
+    --grad-ocean: linear-gradient(100deg, #0a1d33 0%, #0c3051 42%, #0b4a7a 78%, #0b5b8f 100%);
+    --grad-button: linear-gradient(180deg, #1a96d8 0%, #0a72b5 100%);
+    --grad-aqua: linear-gradient(180deg, #2fd0bf 0%, #10a596 100%);
+    --grad-brand: linear-gradient(135deg, #0a4f80 0%, #0b7cbd 50%, #13a89a 100%);
+    --grad-navy: linear-gradient(135deg, #0b2038 0%, #0e3456 60%, #0d4c78 100%);
+    --brand-accent: #13a89a;       /* teal accent used sparingly for highlights */
+    --brand-gold: #c99a3b;         /* premium accent: footer mark, hero rings */
+    --grad-brand-soft: linear-gradient(135deg, rgba(11, 139, 208, 0.10), rgba(18, 181, 166, 0.10));
+    --brand-ring: 0 0 0 3px rgba(51, 174, 232, 0.22);
+
+    /* ---- Type & spacing */
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-size: 12.5px;
+    --font-size-sm: 11.5px;
+    --font-size-xs: 10.5px;
+    --gap: 10px;
+    --gap-sm: 6px;
+    --topbar-height: 50px;
+    --footer-height: 28px;
+    --control-height: 29px;
+}
