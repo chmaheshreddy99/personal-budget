@@ -86,6 +86,9 @@ public class AppUser implements TenantOwned {
     /** Maker-checker for this user: empty follows the household setting, true always, false never (exempt). */
     private Boolean approval;
 
+    /** Their role in Brick Management (BrickRole): empty takes the one their app role points to. */
+    private String brickRole;
+
     /** Signed in with the default (or an admin-given) password: a new one must be set before anything else. */
     private Boolean mustChangePassword;
 
