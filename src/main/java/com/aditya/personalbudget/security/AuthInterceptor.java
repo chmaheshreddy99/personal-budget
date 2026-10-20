@@ -88,6 +88,11 @@ public class AuthInterceptor implements HandlerInterceptor {
             throw new ForbiddenException(user.mobile() ? "This section is not shared with you on mobile"
                     : "This section is not shared with you. Ask your admin.");
         }
+        // an entry with a request open on it is not changed meanwhile, by anyone
+        if (!user.viaLink()) {
+            String approving = request.getHeader("X-Approved-Change");
+            changes.refuseWhileOpen(request.getMethod(), request.getRequestURI(), approving != null && approving.matches("[0-9]+") ? Long.valueOf(approving) : null);
+        }
         // maker-checker: who needs approval does not change what is recorded; the change waits for a checker instead
         if (changes.holds(user, request.getMethod(), request.getRequestURI())) {
             try {

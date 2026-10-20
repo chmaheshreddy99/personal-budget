@@ -70,6 +70,28 @@ public class ChangeGate {
         };
     }
 
+    /**
+     * Refuses a change to an entry that has a request open on it (whoever makes it): it is answered first, by approving
+     * or turning it down (or the maker withdraws it). Recording new entries and the delivery life cycle are not held up.
+     */
+    public void refuseWhileOpen(String method, String uri, Long approving) {
+        boolean change = switch (method) {
+            case "PUT", "PATCH", "DELETE" -> true;
+            case "POST" -> CHANGING_POST.matcher(uri).matches() || uri.matches(".*/waive$");
+            default -> false;
+        };
+        if (!change || uri.startsWith("/api/approvals/") || uri.startsWith("/api/bricks/approvals/") || uri.startsWith("/api/auth/")
+                || uri.startsWith("/api/attachments") || uri.startsWith("/api/bricks/notices/")) return;
+        String target = PendingService.targetOf(uri);
+        // the approved change itself, being made by its checker, is the one let through
+        pending.openTargets().stream().filter(t -> t.target().equals(target) && !t.id().equals(approving)).findFirst().ifPresent(t -> {
+            throw new com.aditya.personalbudget.exception.BusinessException(t.number() + " is open on this (" + (PendingEntry_PENDING.equals(t.status())
+                    ? "waiting for approval" : "turned down, waiting for an answer") + "): it is answered first, then it can be changed");
+        });
+    }
+
+    private static final String PendingEntry_PENDING = "PENDING";
+
     /** Keeps the call as a change request and answers 202 with it. */
     public void hold(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String body = new String(request.getInputStream().readNBytes(BODY_MAX + 1), StandardCharsets.UTF_8);

@@ -9,7 +9,8 @@ import { api, session, setUnauthorizedHandler, setConflictHandler, lastOwnMutati
 import { state, loadOptions, can, readOnly, invalidateAccounts, hasFeature } from './core/store.js';
 import { setCurrency } from './core/format.js';
 import { icon, hydrateIcons } from './core/icons.js';
-import { esc, toast } from './core/ui.js';
+import { esc, toast, openModal } from './core/ui.js';
+import { loadOpen } from './core/pending.js';
 import { openQuickEntry, openJournalEditor } from './components/transaction-forms.js';
 import { openExpenseDialog } from './components/expense-dialog.js';
 import { openDebtDialog } from './components/debt-dialog.js';
@@ -64,12 +65,16 @@ const ROUTES = [
     // what the check of the books found: admins and super admins only
     { path: 'integrity', label: 'Data integrity', iconName: 'shield', view: integrity, permission: 'DATA_INTEGRITY' },
     // users, roles and tenants: opened from Settings and the user menu, not the top menu
-    { path: 'admin', label: 'Users & roles', iconName: 'shield', view: admin, hidden: true },
-    { path: 'settings', label: 'Settings', iconName: 'settings', view: settings, hidden: true },
+    { path: 'admin', label: 'Users & roles', iconName: 'shield', view: admin, hidden: true, allow: () => can('MANAGE_USERS') },
+    // the household's settings: for who may change them (categories, users), never for a business's staff
+    { path: 'settings', label: 'Settings', iconName: 'settings', view: settings, hidden: true, allow: () => !bricksStaff() && (can('MANAGE_ACCOUNTS') || can('MANAGE_USERS')) },
 ];
 
-/** Pages of the sections shared with the user (admin pages and settings are always there). */
-const allowedRoutes = () => ROUTES.filter(r => (!r.feature || hasFeature(r.feature)) && (!r.permission || can(r.permission)));
+/** Staff of the brick business (a role chosen there): Brick Management is the only section shared with them. */
+const bricksStaff = () => Array.isArray(state.user?.features) && state.user.features.length === 1 && state.user.features[0] === 'BRICKS' && !can('MANAGE_USERS');
+
+/** Pages of the sections shared with the user, and the pages their role opens (settings, users). */
+const allowedRoutes = () => ROUTES.filter(r => (!r.feature || hasFeature(r.feature)) && (!r.permission || can(r.permission)) && (!r.allow || r.allow()));
 
 /** Entries waiting for approval, as a badge on the Activity menu item (refreshed with live updates). */
 async function refreshApprovalBadge() {
@@ -283,7 +288,12 @@ let pendingRefresh = null;
 
 window.addEventListener('approvals-changed', () => refreshApprovalBadge());
 // a change held for a checker (the user needs approval): said once, wherever it was made
-window.addEventListener('change-held', e => toast(e.detail?.message || 'Sent for approval', 'info'));
+window.addEventListener('change-held', e => {
+    toast(e.detail?.message || 'Sent for approval', 'info');
+    // the entry now shows it waits, with no edit on it
+    if (!document.querySelector('.modal-backdrop')) route({ silent: true });
+    else pendingRefresh = pendingRefresh || 'You';
+});
 
 function startLiveUpdates() {
     stopLiveUpdates();
@@ -336,6 +346,43 @@ new MutationObserver(() => {
 
 // ===================================================================== app shell
 
+/** The signed-in user's own password: open to every role, whatever else it may do. */
+function openPasswordDialog() {
+    openModal({
+        title: 'Change password', iconName: 'lock', sub: `${state.user.fullName} · ${state.user.username}`,
+        body: `<form class="form-grid one" autocomplete="off">
+            <label class="field"><span>Current password *</span><input type="password" name="currentPassword" required autocomplete="current-password"></label>
+            <label class="field"><span>New password *</span><input type="password" name="newPassword" required minlength="6" autocomplete="new-password"></label>
+            <label class="field"><span>New password again *</span><input type="password" name="again" required minlength="6" autocomplete="new-password"></label>
+            <label class="check-line"><input type="checkbox" data-show> Show the passwords</label>
+            <p class="hint" data-pw-hint>At least 6 characters; a mix of letters, numbers and signs is stronger.</p></form>`,
+        onOpen: m => {
+            const f = m.el.querySelector('form');
+            f.querySelector('[data-show]').addEventListener('change', e => f.querySelectorAll('input[type=password], input[data-pw]').forEach(i => {
+                i.dataset.pw = '1';
+                i.type = e.target.checked ? 'text' : 'password';
+            }));
+            f.addEventListener('input', () => {
+                const v = f.newPassword.value;
+                const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter(r => r.test(v)).length;
+                f.querySelector('[data-pw-hint]').textContent = !v ? 'At least 6 characters; a mix of letters, numbers and signs is stronger.'
+                    : v.length < 6 ? `${6 - v.length} more character${6 - v.length === 1 ? '' : 's'}`
+                    : f.again.value && f.again.value !== v ? 'The two new passwords are not the same'
+                    : kinds >= 3 && v.length >= 10 ? 'Strong' : kinds >= 2 ? 'Good' : 'Weak: add numbers or signs';
+            });
+            setTimeout(() => f.currentPassword.focus(), 50);
+        },
+        actions: [{ label: 'Cancel' }, { label: 'Change password', kind: 'primary', iconName: 'check', onClick: async m => {
+            const f = m.el.querySelector('form');
+            if (!f.reportValidity()) return true;
+            if (f.newPassword.value !== f.again.value) throw new Error('The two new passwords are not the same');
+            if (f.newPassword.value === f.currentPassword.value) throw new Error('The new password is the same as the current one');
+            await api.post('/auth/password', { currentPassword: f.currentPassword.value, newPassword: f.newPassword.value });
+            toast('Password changed');
+        } }],
+    });
+}
+
 async function enterApp() {
     state.user = await api.get('/auth/me');
     if (state.user.mustChangePassword) { showPasswordStep(); return; }
@@ -353,7 +400,12 @@ async function enterApp() {
     const viaLink = !!state.user.linkId;
     document.body.classList.toggle('via-link', viaLink);
     if (viaLink) $('user-role').textContent = `Shared link · until ${new Date(state.user.linkExpiresAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
-    $('user-dropdown').querySelectorAll('a[href^="#/admin"], a[href="#/settings"]').forEach(a => { a.hidden = viaLink; });
+    $('user-dropdown').querySelectorAll('a[href^="#/admin"], a[href="#/settings"]').forEach(a => {
+        const path = a.getAttribute('href').replace('#/', '').split('/')[0];
+        a.hidden = viaLink || !allowedRoutes().some(r => r.path === path);
+    });
+    // every signed-in user changes their own password (a shared link has none)
+    $('password-btn').hidden = viaLink;
 
     const keyOf = path => Object.entries(JUMP).find(([, p]) => p === path)?.[0];
     $('main-menu').innerHTML = allowedRoutes().filter(r => !r.hidden).map(r =>
@@ -376,6 +428,7 @@ function bindShell() {
     document.addEventListener('click', () => { dropdown.hidden = true; });
 
     $('shortcuts-btn').addEventListener('click', openShortcutMap);
+    $('password-btn').addEventListener('click', openPasswordDialog);
 
     // phones: the menu is a sheet opened from the top-left button; any choice (or a tap outside) closes it
     const toggleMenu = open => {
@@ -442,6 +495,9 @@ async function route({ silent = false } = {}) {
 
     const container = $('view');
     const token = ++renderToken;
+    // what has an approval request open on it: the page tags it and offers no edit on it
+    await loadOpen();
+    if (token !== renderToken) return;
     clearPageKeys();
     // a silent refresh (live update) keeps the page on screen while it redraws, then restores scrolling
     const scrolls = silent ? [...container.querySelectorAll('*')].filter(el => el.scrollTop > 0)

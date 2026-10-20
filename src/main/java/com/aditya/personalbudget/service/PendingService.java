@@ -282,6 +282,36 @@ public class PendingService {
         return toView(p);
     }
 
+    /** An entry with a request open on it (waiting, or turned down and not answered yet): its changes wait for that. */
+    public record OpenTarget(String target, Long id, String number, String status, String kind, String label, String submittedBy) {
+    }
+
+    /** What has a request open on it: "bricks/batches/12", "expenses/40", "bricks/orders/4" (an order's own request). */
+    public List<OpenTarget> openTargets() {
+        List<OpenTarget> out = new ArrayList<>();
+        for (PendingEntry p : pending.findByTenantId(UserContext.tenantId())) {
+            if (!PendingEntry.PENDING.equals(p.getStatus()) && !PendingEntry.REJECTED.equals(p.getStatus())) continue;
+            String target = null;
+            if (CHANGE.equals(p.getKind())) {
+                ChangePayload c = change(p);
+                target = c.uri() == null ? null : targetOf(c.uri());
+            } else if (BrickApprovalService.isBrick(p.getKind()) && !BrickApprovalService.NEW.equals(p.getKind())) {
+                Long order = bricks.payload(p).orderId();
+                target = order == null ? null : "bricks/orders/" + order;
+            }
+            if (target != null) {
+                out.add(new OpenTarget(target, p.getId(), BrickApprovalService.numberOf(p), p.getStatus(), p.getKind(), p.getSummary(), p.getSubmittedBy()));
+            }
+        }
+        return out;
+    }
+
+    /** What a call changes: its address without /api/, the query, or the action at its end ("…/7/reverse" → "…/7"). */
+    public static String targetOf(String uri) {
+        String t = uri.replaceFirst("^/api/", "").replaceFirst("\\?.*$", "");
+        return t.replaceFirst("/(reverse|cancel|waive|write-off|undo|close|reopen|foreclose)$", "");
+    }
+
     public boolean isChange(Long id) {
         return pending.findByIdAndTenantId(id, UserContext.tenantId()).map(p -> CHANGE.equals(p.getKind())).orElse(false);
     }

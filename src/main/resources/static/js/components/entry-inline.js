@@ -20,6 +20,7 @@ import { money, date, dateTime } from '../core/format.js';
 import { chitTrailChips, chitTrailHtml } from '../core/chit-trail.js';
 import { openJournalEditor, openQuickEntry } from './transaction-forms.js';
 import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim-panel.js';
+import { openOn, heldTag } from '../core/pending.js';
 
 const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
     construction: 'Open Construction', 'expenses/emi': 'Open EMIs', bricks: 'Open Brick Management' };
@@ -152,6 +153,8 @@ function balancesHtml(lines) {
 
 function detailHtml(e) {
     const manageJournals = can('MANAGE_JOURNALS');
+    // a change waiting for approval on it: tagged, nothing more to change meanwhile
+    const held = openOn(`transactions/${e.id}`, `transactions/quick/${e.id}`, `expenses/${e.id}`);
     const pill = (l, side) => `
         <span class="ed-pill ${side}" ${l.memo ? `title="${esc(l.memo)}"` : ''}>
             <small>${side === 'dr' ? 'Dr' : 'Cr'}</small><b class="ellipsis">${esc(l.accountName)}</b>
@@ -182,12 +185,13 @@ function detailHtml(e) {
             ${e.reversalOf ? fact('undo', `reverses ${esc(e.reversalOf)}`) : ''}
             ${memos.length ? fact('info', memos.join(' · '), 'memo') : ''}
             <span class="spacer"></span>
-            ${manageJournals && e.editable ? `<button class="btn sm" data-entry-action="edit">${icon('edit')}Edit</button>` : ''}
-            ${e.quickEdit && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="quick-edit" title="Change the date, amount, accounts, details or note">${icon('edit')}Edit</button>` : ''}
+            ${heldTag(held)}
+            ${manageJournals && !held && e.editable ? `<button class="btn sm" data-entry-action="edit">${icon('edit')}Edit</button>` : ''}
+            ${e.quickEdit && !held && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="quick-edit" title="Change the date, amount, accounts, details or note">${icon('edit')}Edit</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon" data-entry-action="copy" title="Duplicate">${icon('copy')}</button>` : ''}
-            ${manageJournals && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
+            ${manageJournals && !held && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
             ${(e.manageAt || e.brick) && manageTarget(e) && !e.claimId && location.hash !== `#/${manageTarget(e)}` ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : e.brick ? BRICK_LABEL[e.brick.what] || 'Open in Brick Management' : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
-            ${e.reversible && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="reverse">${icon('undo')}Reverse</button>` : ''}
+            ${e.reversible && !held && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="reverse">${icon('undo')}Reverse</button>` : ''}
             <button class="btn sm ghost icon" data-entry-action="close" title="Close">${icon('x')}</button>
         </div>
         <div data-ev-entry="${e.id}" data-ev-count="${e.attachmentCount || 0}"></div>

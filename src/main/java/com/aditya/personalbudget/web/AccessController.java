@@ -136,6 +136,13 @@ public class AccessController {
         return pending.approve(id, request);
     }
 
+    /** What has a request open on it (its changes wait): every screen tags it and offers no edit meanwhile. */
+    @GetMapping("/api/approvals/open")
+    @RequiresPermission(Permission.VIEW)
+    public List<PendingService.OpenTarget> openTargets() {
+        return pending.openTargets();
+    }
+
     /** The maker answers a rejected change request with a comment (evidence attached to it) and sends it again. */
     @PostMapping("/api/approvals/{id}/answer")
     @RequiresPermission(Permission.VIEW)

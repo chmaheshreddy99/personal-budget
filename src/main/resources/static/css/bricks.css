@@ -1780,3 +1780,13 @@ table.bk-payall-table tr.off td { opacity: 0.45; }
 .bk-bell-empty { display: flex; align-items: center; gap: 6px; }
 .bk-bell-empty svg { width: 14px; height: 14px; color: var(--positive); }
 @media (max-width: 560px) { .bk-alert-facts { grid-template-columns: minmax(0, 1fr); } }
+
+/* the batch: add a type or a material back; take one off */
+.bkb-pick { margin-left: auto; height: 26px; padding: 0 8px; border-radius: 8px; border: 1px dashed var(--hairline-strong); background: #fff; font-size: 11.5px; color: var(--ocean-700); cursor: pointer; }
+.bko-sec-h .bkb-pick + * { margin-left: 6px; }
+.bkb-table [data-rm-type], .bkb-table [data-rm-mat] { opacity: .55; }
+.bkb-table tr:hover [data-rm-type], .bkb-table tr:hover [data-rm-mat] { opacity: 1; }
+.bkb-none { margin: 6px 2px; }
+/* an entry with a request open on it */
+.held-tag { white-space: nowrap; gap: 3px; }
+.held-tag svg { width: 11px; height: 11px; }

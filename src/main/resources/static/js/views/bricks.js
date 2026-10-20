@@ -27,6 +27,7 @@ import { loadMeta, setMeta, manage, num, count, qty, plural, roleName, orderBadg
     rowsHtml, bindRows, initials, roleLook, categoryOf, guard, moneyAccounts, moneyOptions, suggest, headIcon, factsHtml, journalPeek, loadAccess, getAccess, bcan, setWrites, seesMoney } from '../components/brick-common.js';
 import { approvals, bellHtml, bindBell } from '../components/brick-approvals.js';
 import { markSeen } from '../components/brick-alerts.js';
+import { openOn, heldTag, loadOpen } from '../core/pending.js';
 import { openType, openMaterial, openModel, openVehicle, openSettings, openBatch, openPurchase, openExpense, openResource, openBookAccount, openTransfer } from '../components/brick-forms.js';
 import { openOrder, orderHtml, bindOrder, patchOrder, setOrderTab } from '../components/brick-orders.js';
 import { openSlip, openAdvance, showSlip } from '../components/brick-pay.js';
@@ -358,7 +359,8 @@ async function production({ body, tools, params, reload, meta }) {
                         <span class="r ${b.total && b.damaged / b.total > 0.03 ? 'warn' : 'muted'}">${b.total ? percent((b.damaged / b.total) * 100) : '—'}</span>
                         ${seesMoney() ? `<span class="r">${b.earningId ? money(b.labour) : '<span class="muted">—</span>'}</span>
                         <span>${b.paidOn ? `<span class="badge good sm">${icon('check')}Paid</span>` : b.earningId ? '<span class="badge warning sm">Due</span>' : ''}</span>` : ''}
-                        ${b.open ? actions([manage() && iconBtn(`data-edit="${b.batch.id}"`, 'edit', 'Edit'), manage() && !b.paidOn && iconBtn(`data-del="${b.batch.id}"`, 'trash', 'Delete', 'danger')])
+                        ${openOn(`bricks/batches/${b.batch.id}`) ? `<span class="bk-acts">${heldTag(openOn(`bricks/batches/${b.batch.id}`), { short: true })}</span>`
+                            : b.open ? actions([manage() && iconBtn(`data-edit="${b.batch.id}"`, 'edit', 'Edit'), manage() && !b.paidOn && iconBtn(`data-del="${b.batch.id}"`, 'trash', 'Delete', 'danger')])
                             : `<span class="bk-acts"><span class="muted" title="Closed: only the last batch can be changed">${icon('lock')}</span></span>`}`,
                     detail: batchDetail })}</div>`,
                 foot: list.length ? `<div class="bk-list-foot"><span>Good <b>${count(made - dmg)}</b></span><span>Damaged <b>${count(dmg)}</b></span>${seesMoney() ? `<span>Team earns <b>${money(labour)}</b></span>` : ''}</div>` : '' })}
@@ -470,7 +472,8 @@ function batchDetail(b) {
                     <div class="wide"><dt>Recorded</dt><dd><small>${esc(b.batch.createdBy || '')} · ${dateTime(b.batch.createdAt)}</small></dd></div>
                     ${b.batch.note ? `<div class="wide"><dt>Note</dt><dd>“${esc(b.batch.note)}”</dd></div>` : ''}
                 </dl>
-                ${manage() ? `<div class="row wrap bk-trip-acts">${b.open ? `<button class="btn sm" data-edit="${b.batch.id}">${icon('edit')}${b.paidOn ? 'Count & note' : 'Edit'}</button>`
+                ${manage() ? `<div class="row wrap bk-trip-acts">${openOn(`bricks/batches/${b.batch.id}`) ? heldTag(openOn(`bricks/batches/${b.batch.id}`))
+                    : b.open ? `<button class="btn sm" data-edit="${b.batch.id}">${icon('edit')}${b.paidOn ? 'Count & note' : 'Edit'}</button>`
                     : `<span class="badge gray sm" title="Its raw material was counted against the stock of that day and is kept as it was">${icon('lock')}Closed · only the last batch can change</span>`}
                     ${bcan('PURCHASES') ? `<button class="btn sm ghost" data-batch-expense="${b.batch.id}">${icon('receipt')}Add an expense</button>` : ''}</div>` : ''}
             </section>
@@ -567,7 +570,7 @@ async function materials({ body, tools, params, reload, meta }) {
                     empty: 'Nothing recorded yet: record a purchase, and count what is left when recording a batch',
                     line: x => `<span class="muted">${dayLabel(x.on)}</span>
                         <span class="bk-who"><span class="chip-icon sm ${x.kind === 'in' ? 'aqua' : 'gold'}">${icon(x.kind === 'in' ? 'arrow-in' : 'factory')}</span>
-                            <b class="ellipsis">${x.kind === 'in' ? 'Bought' : `Used · ${esc(x.b.batch.batchNo)}`}</b></span>
+                            <b class="ellipsis">${x.kind === 'in' ? 'Bought' : `Used · ${esc(x.b.batch.batchNo)}`}</b>${x.kind === 'in' ? heldTag(openOn(`bricks/purchases/${x.x.purchase.id}`), { short: true }) : ''}</span>
                         ${sel ? '' : `<span class="ellipsis">${esc(x.kind === 'in' ? x.x.material : x.f.name)}</span>`}
                         <span class="r ${x.kind === 'in' ? 'pos' : 'neg'}"><b>${x.kind === 'in' ? '+' : '−'}${qty(x.qty)}</b> <small class="inline">${esc(x.kind === 'in' ? x.x.unit : x.f.unit)}</small></span>
                         <span class="r">${x.kind === 'in' ? `<b>${money(x.x.purchase.amount)}</b>` : '<span class="muted">—</span>'}</span>
@@ -586,7 +589,8 @@ async function materials({ body, tools, params, reload, meta }) {
                             ['Stock after', m ? `${qty(Math.round(x.after * 1000) / 1000)} <small>${esc(x.x.unit)}</small>` : ''],
                             ['Recorded', `<small>${esc(x.x.purchase.createdBy || '')} · ${dateTime(x.x.purchase.createdAt)}</small>`],
                             ['Note', x.x.purchase.note ? `<span class="bk-quote">“${esc(x.x.purchase.note)}”</span>` : '', 'wide']])}
-                        ${manage() ? `<div class="bk-peek-acts"><button class="btn sm ghost danger" data-reverse="${x.x.purchase.id}" title="Takes it out of the stock and the books; record it again if it was wrong">${icon('undo')}Reverse</button></div>` : ''}</div>`
+                        ${openOn(`bricks/purchases/${x.x.purchase.id}`) ? `<div class="bk-peek-acts">${heldTag(openOn(`bricks/purchases/${x.x.purchase.id}`))}</div>`
+                            : manage() ? `<div class="bk-peek-acts"><button class="btn sm ghost danger" data-reverse="${x.x.purchase.id}" title="Takes it out of the stock and the books; record it again if it was wrong">${icon('undo')}Reverse</button></div>` : ''}</div>`
                         : `<div class="bk-peek"><div class="bk-peek-h">${icon('factory')}<b>Used in ${esc(x.b.batch.batchNo)}</b><span class="muted">${date(x.b.batch.producedOn)}</span>
                             <span class="spacer"></span><b class="neg">−${qty(x.f.consumed)} ${esc(x.f.unit)}</b></div>
                         ${factsHtml([
@@ -738,7 +742,8 @@ async function expenses({ body, tools, params = [], reload, meta }) {
                         <span class="min-0 bkx-what"><span class="ellipsis">${esc(x.expense.description || '—')}</span>${x.expense.vendor ? `<small class="ellipsis muted">${esc(x.expense.vendor)}${x.expense.billNo ? ` · #${esc(x.expense.billNo)}` : ''}</small>` : ''}</span>
                         <span class="min-0 bkx-tags">${x.batchNo ? `<span class="badge sm">${icon('factory')}${esc(x.batchNo)}</span>` : ''}<small class="ellipsis muted">${esc(x.account || '')}</small></span>
                         <span class="r"><b>${money(x.expense.amount)}</b></span>
-                        ${actions([manage() && iconBtn(`data-repeat="${x.expense.id}"`, 'repeat', 'Record it again'), manage() && iconBtn(`data-edit="${x.expense.id}"`, 'edit', 'Change'),
+                        ${openOn(`bricks/expenses/${x.expense.id}`) ? `<span class="bk-acts">${heldTag(openOn(`bricks/expenses/${x.expense.id}`), { short: true })}</span>`
+                            : actions([manage() && iconBtn(`data-repeat="${x.expense.id}"`, 'repeat', 'Record it again'), manage() && iconBtn(`data-edit="${x.expense.id}"`, 'edit', 'Change'),
                             manage() && iconBtn(`data-del="${x.expense.id}"`, 'trash', 'Delete', 'danger')])}`,
                     detail: x => `<div class="bk-peek"><div class="bk-peek-h">${headCell(x.expense.head)}<span class="muted">${date(x.expense.spentOn)}</span>
                             <span class="spacer"></span><b>${money(x.expense.amount)}</b></div>
@@ -750,7 +755,7 @@ async function expenses({ body, tools, params = [], reload, meta }) {
                             ['Paid from', esc(x.account || '')],
                             ['Recorded', `<small>${esc(x.expense.createdBy || '')} · ${dateTime(x.expense.createdAt)}</small>`]])}
                         ${manage() ? `<div class="bk-peek-acts"><button class="btn sm ghost" data-repeat="${x.expense.id}">${icon('repeat')}Record it again</button>
-                            <button class="btn sm ghost" data-edit="${x.expense.id}">${icon('edit')}Change</button></div>` : ''}</div>` })
+                            ${openOn(`bricks/expenses/${x.expense.id}`) ? heldTag(openOn(`bricks/expenses/${x.expense.id}`)) : `<button class="btn sm ghost" data-edit="${x.expense.id}">${icon('edit')}Change</button>`}</div>` : ''}</div>` })
                     : `<div class="empty bk-empty">${icon('receipt')}<div>${q || view.head ? 'No bills match.' : 'No expenses in this period.'}</div>
                         ${manage() && !q ? `<button class="btn sm primary" data-new>${icon('plus')}Record an expense</button>` : ''}</div>`}</div>` })}
             ${seesMoney() ? `<aside class="bk-side-stats">${expenseStats(p, inPeriod, heads, total)}</aside>` : ''}
@@ -908,7 +913,7 @@ async function sales({ body, params, reload }) {
                 <div class="bk-sr-line"><b class="ellipsis">${esc(o.customerName)}</b><b>${moneyShort(o.total)}</b></div>
                 <div class="bk-sr-line sub"><small class="ellipsis">${esc(o.orderNo)} · ${count(o.quantity)} bricks${o.vehicle ? ` · ${esc(o.vehicle)}` : ''}</small>
                     ${o.claimed ? `<span class="badge warning sm">${icon('bell')}paid?</span>` : num(o.balance) > 0 && o.delivered > 0 && o.status !== 'CANCELLED' ? `<small class="neg nowrap">${moneyShort(o.balance)} due</small>` : ''}</div>
-                <div class="bk-sr-line sub">${orderBadge(o.status)}<small class="${late ? 'neg' : 'muted'} nowrap">${o.status === 'DELIVERED' && o.lastDelivered ? `delivered ${shortDate(o.lastDelivered)}`
+                <div class="bk-sr-line sub">${openOn(`bricks/orders/${o.id}`) ? heldTag(openOn(`bricks/orders/${o.id}`), { short: true }) : orderBadge(o.status)}<small class="${late ? 'neg' : 'muted'} nowrap">${o.status === 'DELIVERED' && o.lastDelivered ? `delivered ${shortDate(o.lastDelivered)}`
                     : o.nextTrip ? `${o.tripsDone}/${o.trips} trips · next ${shortDate(o.nextTrip)}` : late ? `due ${shortDate(o.requiredBy)}` : `${o.tripsDone}/${o.trips} trips`}</small></div>
                 <i class="bk-mini-bar"><em style="width:${pct}%"></em></i>
             </div></a>`;
@@ -975,6 +980,7 @@ async function sales({ body, params, reload }) {
             const foot = side.querySelector('.bk-side-foot');
             if (foot) foot.querySelector('b').textContent = openNow.length;
             if (!selId || !currentV || document.querySelector('.modal-backdrop')) return;
+            await loadOpen();
             const nv = await api.get(`/bricks/orders/${selId}`);
             if (!body.isConnected || nv.order.id !== selId || JSON.stringify(nv) === JSON.stringify(currentV)) return;
             const old = currentV;

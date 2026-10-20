@@ -227,7 +227,14 @@ export async function openBatch(batch, after) {
         <td><div class="bkb-made"><input type="number" min="0" step="1" inputmode="numeric" class="num" data-qty value="${had[t.id]?.quantity ?? ''}" placeholder="0" ${paid ? 'disabled' : ''}>
             ${paid ? '' : `<span class="bkb-quick">${[500, 1000].map(n => `<button type="button" data-add="${n}" title="Add ${n.toLocaleString('en-IN')}">+${n >= 1000 ? `${n / 1000}k` : n}</button>`).join('')}</span>`}</div></td>
         <td><input type="number" min="0" step="1" inputmode="numeric" class="num" data-damaged value="${had[t.id]?.damaged || ''}" placeholder="0" ${paid ? 'disabled' : ''}></td>
-        <td class="r" data-good>—</td><td class="r" data-amount>—</td></tr>`;
+        <td class="r" data-good>—</td><td class="r" data-amount>—</td>
+        <td>${paid ? '' : `<button type="button" class="btn sm ghost icon danger" data-rm-type title="Take ${esc(t.name)} off this batch">${icon('x')}</button>`}</td></tr>`;
+    // which types and materials the batch lists: a new one starts with all of them (take off what was not made or not
+    // counted); a batch opened lists what it has, and more can be added
+    const typesAll = meta.types.filter(t => t.active || had[t.id]);
+    const typesShown = batch ? typesAll.filter(t => had[t.id]) : typesAll;
+    const pickHtml = (attr, label, list, extra = '') => `<select class="bkb-pick" ${attr} data-plain>
+        <option value="">${esc(label)}</option>${list.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}${extra}</select>`;
     openModal({
         title: batch ? `Batch ${b.batchNo}` : 'New production batch', iconName: 'factory', size: 'xl bk-batch-modal bk-tinted',
         sub: paid ? `The team was paid for it on slip ${batch.paidOn}${batch.paidDate ? ` (${batch.paidDate})` : ''}: only the raw material count and the note can change` : 'The bricks a team made, and the raw material left after it',
@@ -247,10 +254,12 @@ export async function openBatch(batch, after) {
                 <label class="field bko-span3"><span>Note</span><input name="note" maxlength="300" value="${esc(b.note || '')}" placeholder="Shift, weather, machine…"></label>
             </div></section>
             <section class="bko-sec s-bricks"><div class="bko-sec-h">${icon('brick')}<b>Bricks made</b><small>type the count or add 500 / 1,000 at a time</small>
-                ${paid ? '' : `<button type="button" class="link-btn" data-add-type>${icon('plus')}Another type</button>`}</div>
-            <table class="grid compact bkb-table bkb-types-t"><thead><tr><th>Type</th><th>Made</th><th>Damaged</th><th class="r">Good</th><th class="r">Earns</th></tr></thead>
-                <tbody data-types>${meta.types.filter(t => t.active || had[t.id]).map(typeRow).join('')}</tbody></table></section>
-            <section class="bko-sec s-delivery"><div class="bko-sec-h">${icon('box')}<b>Raw material left</b><small>count what is left after the batch; leave it empty when not counted</small></div>
+                ${paid ? '' : '<span data-type-pick></span>'}</div>
+            <table class="grid compact bkb-table bkb-types-t"><thead><tr><th>Type</th><th>Made</th><th>Damaged</th><th class="r">Good</th><th class="r">Earns</th><th></th></tr></thead>
+                <tbody data-types>${typesShown.map(typeRow).join('')}</tbody></table>
+            <p class="small muted bkb-none" data-no-types ${typesShown.length ? 'hidden' : ''}>No brick type on this batch: add the ones made.</p></section>
+            <section class="bko-sec s-delivery"><div class="bko-sec-h">${icon('box')}<b>Raw material left</b><small>count what is left after the batch; take off what was not counted</small>
+                <span data-mat-pick></span></div>
             <div data-mats><div class="loading"><div class="spinner"></div></div></div></section>
         </div>
         <aside class="bkb-right">
@@ -265,6 +274,23 @@ export async function openBatch(batch, after) {
             const f = m.el.querySelector('form');
             noAutofill(f);
             let flows = [];
+            // the materials listed (a batch opened: those it counted; a new one: every material)
+            let matsShown = batch ? new Set(Object.keys(counted).map(Number)) : null;
+            const typed = {};
+            const keepTyped = () => f.querySelectorAll('[data-close]').forEach(i => { typed[i.dataset.close] = i.value; });
+            const drawTypePick = () => {
+                const host = f.querySelector('[data-type-pick]');
+                if (!host) return;
+                const shown = new Set([...f.querySelectorAll('.bkb-row[data-type]')].map(x => x.dataset.type));
+                host.innerHTML = pickHtml('data-add-type-pick', '+ Add a type…', typesAll.filter(t => !shown.has(String(t.id))), '<option value="__new">+ New brick type…</option>');
+                f.querySelector('[data-no-types]').hidden = shown.size > 0;
+            };
+            const drawMatPick = () => {
+                const host = f.querySelector('[data-mat-pick]');
+                if (!host || !flows.length) { if (host) host.innerHTML = ''; return; }
+                const left = flows.filter(x => !matsShown.has(x.materialId));
+                host.innerHTML = left.length ? pickHtml('data-add-mat', '+ Add a material…', left.map(x => ({ id: x.materialId, name: x.name }))) : '';
+            };
             const model = () => meta.models.find(x => String(x.model.id) === String(f.pricingModelId.value)) || defaultModel;
             const recalc = () => {
                 const rates = model()?.rates || {};
@@ -298,20 +324,26 @@ export async function openBatch(batch, after) {
                         <small class="muted">On a ${team.salaryType === 'WEEKLY' ? 'weekly wage' : 'salary'}: the batch adds nothing to their pay.</small>`;
             };
             const drawMats = () => {
-                f.querySelector('[data-mats]').innerHTML = flows.length ? `<table class="grid compact bkb-table mats"><thead><tr><th>Material</th><th class="r">Opening</th><th class="r">Received</th>
-                    <th class="r">Available</th><th>Left now</th><th>Used</th></tr></thead><tbody>${flows.map(x => {
+                if (!matsShown) matsShown = new Set(flows.map(x => x.materialId));
+                const listed = flows.filter(x => matsShown.has(x.materialId));
+                f.querySelector('[data-mats]').innerHTML = !flows.length ? '<p class="small muted">No raw materials set up.</p>'
+                    : !listed.length ? '<p class="small muted bkb-none">No raw material counted after this batch: add the ones counted.</p>'
+                    : `<table class="grid compact bkb-table mats"><thead><tr><th>Material</th><th class="r">Opening</th><th class="r">Received</th>
+                    <th class="r">Available</th><th>Left now</th><th>Used</th><th></th></tr></thead><tbody>${listed.map(x => {
                     const avail = num(x.opening) + num(x.received);
                     return `<tr class="bkb-mat" data-mat="${x.materialId}"><td><b>${esc(x.name)}</b><small>${esc(x.unit)}</small></td>
                         <td class="r">${qty(x.opening)}</td><td class="r ${num(x.received) ? 'pos' : 'muted'}">${num(x.received) ? '+' + qty(x.received) : '—'}</td><td class="r"><b>${qty(avail)}</b></td>
-                        <td><input type="number" step="any" min="0" class="num" data-close="${x.materialId}" value="${esc(counted[x.materialId] ?? '')}" placeholder="${esc(qty(avail))}"></td>
-                        <td><div class="bkb-use"><i><em data-used-bar="${x.materialId}"></em></i><span data-used="${x.materialId}"></span></div></td></tr>`;
+                        <td><input type="number" step="any" min="0" class="num" data-close="${x.materialId}" value="${esc(typed[x.materialId] ?? counted[x.materialId] ?? '')}" placeholder="${esc(qty(avail))}"></td>
+                        <td><div class="bkb-use"><i><em data-used-bar="${x.materialId}"></em></i><span data-used="${x.materialId}"></span></div></td>
+                        <td><button type="button" class="btn sm ghost icon danger" data-rm-mat="${x.materialId}" title="Not counted: take ${esc(x.name)} off">${icon('x')}</button></td></tr>`;
                 }).join('')}</tbody></table>
-                    <p class="bk-hint small muted">Available is the stock as it stands now. What is used is worked out from it and kept with the batch; purchases recorded later add to the stock, not to this batch. Once the next batch is made, this one is closed.</p>` : '<p class="small muted">No raw materials set up.</p>';
+                    <p class="bk-hint small muted">Available is the stock as it stands now. What is used is worked out from it and kept with the batch; purchases recorded later add to the stock, not to this batch. Once the next batch is made, this one is closed.</p>`;
+                drawMatPick();
                 usage();
             };
             const usage = () => {
                 const used = [];
-                flows.forEach(x => {
+                flows.filter(x => matsShown?.has(x.materialId)).forEach(x => {
                     const v = f.querySelector(`[data-close="${x.materialId}"]`).value;
                     const avail = num(x.opening) + num(x.received);
                     const cell = f.querySelector(`[data-used="${x.materialId}"]`), bar = f.querySelector(`[data-used-bar="${x.materialId}"]`);
@@ -327,11 +359,36 @@ export async function openBatch(batch, after) {
                 f.querySelector('[data-s-used]').innerHTML = used.length ? used.join('') : '<small class="muted">Count what is left to see it.</small>';
             };
             const preview = async () => {
+                keepTyped();
                 try { flows = await api.post(`/bricks/batches/preview?date=${f.producedOn.value}${batch ? `&batchId=${b.id}` : ''}`, {}); } catch { flows = []; }
                 drawMats();
             };
             f.addEventListener('input', e => { if (e.target.dataset.close !== undefined) usage(); else recalc(); });
-            f.addEventListener('change', e => { if (e.target.name === 'producedOn') preview(); recalc(); });
+            f.addEventListener('change', e => {
+                const tp = e.target.closest('[data-add-type-pick]');
+                if (tp) {
+                    const v = tp.value;
+                    if (v === '__new') return openType(null, fresh => {
+                        meta = fresh;
+                        const known = new Set(typesAll.map(x => String(x.id)));
+                        const t = fresh.types.filter(x => !known.has(String(x.id))).at(-1);
+                        if (t) { typesAll.push(t); f.querySelector('[data-types]').insertAdjacentHTML('beforeend', typeRow(t)); }
+                        toast('Brick type added; set its rate in the pricing model', 'info');
+                        drawTypePick(); recalc();
+                    });
+                    const t = typesAll.find(x => String(x.id) === v);
+                    if (t) { f.querySelector('[data-types]').insertAdjacentHTML('beforeend', typeRow(t)); f.querySelector(`.bkb-row[data-type="${t.id}"] [data-qty]`)?.focus(); }
+                    drawTypePick(); recalc();
+                    return;
+                }
+                const mp = e.target.closest('[data-add-mat]');
+                if (mp) {
+                    if (mp.value) { keepTyped(); matsShown.add(Number(mp.value)); const id = mp.value; drawMats(); f.querySelector(`[data-close="${id}"]`)?.focus(); }
+                    return;
+                }
+                if (e.target.name === 'producedOn') preview();
+                recalc();
+            });
             f.addEventListener('click', e => {
                 const add = e.target.closest('[data-add]');
                 if (add) {
@@ -339,15 +396,12 @@ export async function openBatch(batch, after) {
                     input.value = num(input.value) + Number(add.dataset.add);
                     recalc();
                 }
-                if (e.target.closest('[data-add-type]')) openType(null, fresh => {
-                    meta = fresh;
-                    const known = new Set([...f.querySelectorAll('.bkb-row[data-type]')].map(x => x.dataset.type));
-                    const t = fresh.types.filter(x => !known.has(String(x.id))).at(-1);
-                    if (t) f.querySelector('[data-types]').insertAdjacentHTML('beforeend', typeRow(t));
-                    toast('Brick type added; set its rate in the pricing model', 'info');
-                    recalc();
-                });
+                const rt = e.target.closest('[data-rm-type]');
+                if (rt) { rt.closest('tr').remove(); drawTypePick(); recalc(); return; }
+                const rm = e.target.closest('[data-rm-mat]');
+                if (rm) { keepTyped(); delete typed[rm.dataset.rmMat]; matsShown.delete(Number(rm.dataset.rmMat)); drawMats(); return; }
             });
+            drawTypePick();
             recalc();
             preview();
             setTimeout(() => f.querySelector('[data-qty]:not([disabled])')?.focus(), 60);

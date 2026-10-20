@@ -613,8 +613,16 @@ class BrickTests {
         assertThat(answered.status()).isEqualTo("PENDING");
         assertThat(answered.history()).extracting(com.aditya.personalbudget.service.PendingService.Step::action).containsExactly("SUBMITTED", "REJECTED", "RESUBMITTED");
         signIn();
-        assertThat(pendingEntries.changeToMake(held.id()).uri()).isEqualTo("/api/bricks/expenses/7");
+        // while it is open, the expense is tagged and nobody changes it (the checker's own approval goes through)
+        assertThat(pendingEntries.openTargets()).anyMatch(t -> t.target().equals("bricks/expenses/7") && t.id().equals(held.id()));
+        assertThatThrownBy(() -> gate.refuseWhileOpen("PUT", "/api/bricks/expenses/7", null)).isInstanceOf(BusinessException.class).hasMessageContaining("is open on this");
+        assertThatThrownBy(() -> gate.refuseWhileOpen("DELETE", "/api/bricks/expenses/7", null)).isInstanceOf(BusinessException.class);
+        gate.refuseWhileOpen("PUT", "/api/bricks/expenses/7", held.id());
+        gate.refuseWhileOpen("PUT", "/api/bricks/expenses/8", null);
+        gate.refuseWhileOpen("POST", "/api/bricks/expenses", null);
+                assertThat(pendingEntries.changeToMake(held.id()).uri()).isEqualTo("/api/bricks/expenses/7");
         assertThat(pendingEntries.changeMade(held.id(), "ok").status()).isEqualTo("APPROVED");
+        gate.refuseWhileOpen("PUT", "/api/bricks/expenses/7", null);   // answered: it can be changed again
 
         // a staff role chosen for them limits the whole application to Brick Management (screens and API)
         Organization tenant = tenants.findById(acct.getTenantId()).orElseThrow();

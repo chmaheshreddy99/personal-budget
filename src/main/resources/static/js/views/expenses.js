@@ -28,6 +28,7 @@ import { icon, categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, percent, date, dateTime, shortDate, isoDate } from '../core/format.js';
 import { barChart, donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
+import { openOn, heldTag } from '../core/pending.js';
 import { claimPanelHtml, bindClaimPanel, claimBadge } from '../components/claim-panel.js';
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -754,6 +755,8 @@ async function expenseDetail(r, ctx = {}) {
     const limit = line && line.monthlyLimit !== null ? Number(line.monthlyLimit) : null;
     const used = limit && inBudgetMonth ? Number(line.spent) / limit * 100 : null;
     const fact = (ico, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ico)}${text}</span>`;
+    // a change waiting for approval on it: tagged, nothing more to change meanwhile
+    const heldOn = openOn(`expenses/${e.entryId}`, `transactions/${e.entryId}`, `transactions/quick/${e.entryId}`);
     return `
     <div class="xp-detail2">
         <div class="xd-top">
@@ -764,13 +767,14 @@ async function expenseDetail(r, ctx = {}) {
             ${fact('history', `${dateTime(entry.createdAt)} · ${esc(e.createdBy)}`, 'Recorded')}
             ${e.viaJournal ? fact('layers', `part of a ${entry.lines.length}-line voucher`) : ''}
             <span class="spacer"></span>
+            ${heldTag(heldOn)}
             <span class="xd-actions">
-                ${manage && (e.editable || e.viaJournal) ? `<button class="btn xs primary" data-xp-action="edit" data-key="${r.key}">${icon('edit')}Edit</button>` : ''}
+                ${manage && !heldOn && (e.editable || e.viaJournal) ? `<button class="btn xs primary" data-xp-action="edit" data-key="${r.key}">${icon('edit')}Edit</button>` : ''}
                 ${r.emiOf ? `<button class="btn xs primary" data-xp-action="emi-plan" data-plan="${r.emiOf.plan.id}" data-key="${r.key}" title="Pay, undo or pay off this EMI">${icon('calendar')}EMI plan</button>` : ''}
                 ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
-                ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
+                ${manage && !heldOn && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
                     <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
-                ${manage && e.editable ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
+                ${manage && !heldOn && e.editable ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
             </span>
         </div>
         <div class="xd-cards">

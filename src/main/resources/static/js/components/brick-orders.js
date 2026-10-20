@@ -6,6 +6,7 @@
  */
 import { api, session } from '../core/api.js';
 import { invalidateAccounts } from '../core/store.js';
+import { openOn, heldTag } from '../core/pending.js';
 import { esc, field, readForm, openModal, toast, confirmDialog, loadingDialog } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime, shortDate } from '../core/format.js';
@@ -530,7 +531,8 @@ function paymentsHtml(v) {
                         <span class="ellipsis small">${esc(p.account || (claimed ? 'reported on the link' : '—'))}</span>
                         <span class="r"><b class="${claimed ? 'warn' : 'pos'}">${money(p.payment.amount)}</b></span>
                         <span class="bk-acts">${manage() ? `${claimed ? `<button class="btn sm primary" data-confirm="${p.payment.id}">${icon('check')}Confirm</button>` : ''}
-                            ${claimed || bcan('FINANCE', 'APPROVE') ? `<button class="btn sm ghost icon danger" data-del-pay="${p.payment.id}" title="${claimed ? 'Not received' : 'Delete'}">${icon('trash')}</button>` : ''}` : ''}</span>`;
+                            ${openOn(`bricks/orders/${v.order.id}/payments/${p.payment.id}`) ? heldTag(openOn(`bricks/orders/${v.order.id}/payments/${p.payment.id}`), { short: true })
+                                : claimed || bcan('FINANCE', 'APPROVE') ? `<button class="btn sm ghost icon danger" data-del-pay="${p.payment.id}" title="${claimed ? 'Not received' : 'Delete'}">${icon('trash')}</button>` : ''}` : ''}</span>`;
                 },
                 detail: p => {
                     const x = p.payment, claimed = x.status === 'CLAIMED';
@@ -594,11 +596,12 @@ export function orderHtml(v) {
     const loc = o.deliveryLocation ? o.deliveryLocation.split(',').slice(0, 2).join(',') : null;
     const activeLinks = v.links.filter(l => l.status === 'ACTIVE').length;
     const tab = (key, label, ic, badge = '') => `<button class="${orderTab === key ? 'active' : ''}" data-tab="${key}">${icon(ic)}${label}${badge}</button>`;
+    const held = openOn(`bricks/orders/${v.order.id}`);
     return `<div class="bk-order">
         <header class="bk-oh">
             <span class="bk-oh-av">${esc(initials(o.customerName))}</span>
             <div class="grow min-0">
-                <div class="bk-oh-title"><h2 class="ellipsis">${esc(o.customerName)}</h2><span class="bk-oh-no">${esc(o.orderNo)}</span>${orderBadge(o.status)}</div>
+                <div class="bk-oh-title"><h2 class="ellipsis">${esc(o.customerName)}</h2><span class="bk-oh-no">${esc(o.orderNo)}</span>${orderBadge(o.status)}${heldTag(openOn(`bricks/orders/${o.id}`))}</div>
                 <div class="bk-meta">${phone ? `<a href="tel:${phone}">${icon('phone')}${esc(o.customerPhone)}</a><a href="https://wa.me/91${phone}" target="_blank" rel="noopener">${icon('send')}WhatsApp</a>` : ''}
                     <span class="ellipsis">${icon('map-pin')}${esc(o.address || 'no address')}${o.landmark ? ` (${esc(o.landmark)})` : ''}</span>
                     ${loc ? `<a class="bk-loc" href="https://maps.google.com/?q=${esc(loc)}" target="_blank" rel="noopener" title="Shared by the customer from their phone${o.deliveryLocationAt ? ` on ${dateTime(o.deliveryLocationAt)}` : ''}">${icon('map-pin')}Location on the map</a>` : ''}
@@ -612,10 +615,11 @@ export function orderHtml(v) {
             <button class="btn sm" data-act="pay">${icon('arrow-in')}Payment</button>` : ''}
             <button class="btn sm" data-act="bill">${icon('receipt')}View ${v.invoice ? 'invoice' : 'bill'}</button>
             ${o.status !== 'CANCELLED' ? `<button class="btn sm" data-act="share-bill">${icon('send')}Send bill</button>` : ''}
-            ${manage() && open ? `<button class="btn sm" data-act="edit">${icon('edit')}Edit</button>` : ''}
+            ${manage() && open && !held ? `<button class="btn sm" data-act="edit">${icon('edit')}Edit</button>` : ''}
             <span class="spacer"></span>
-            ${manage() && o.status !== 'CANCELLED' && !(o.hired && o.hiredPaidBy !== 'US') ? `<button class="btn sm ghost" data-act="waive">${icon(bcan('APPROVE') ? 'tag' : 'shield')}${o.deliveryWaived ? 'Charge delivery' : bcan('APPROVE') ? 'Free delivery' : 'Ask for free delivery'}</button>` : ''}
-            ${manage() && open ? `<button class="btn sm ghost danger" data-act="cancel">${icon('x')}${bcan('APPROVE') ? 'Cancel order' : 'Ask to cancel'}</button>` : ''}</div>
+            ${held ? `<span class="small muted">${icon('lock')}Changes wait for ${esc(held.number)}</span>` : ''}
+            ${manage() && !held && o.status !== 'CANCELLED' && !(o.hired && o.hiredPaidBy !== 'US') ? `<button class="btn sm ghost" data-act="waive">${icon(bcan('APPROVE') ? 'tag' : 'shield')}${o.deliveryWaived ? 'Charge delivery' : bcan('APPROVE') ? 'Free delivery' : 'Ask for free delivery'}</button>` : ''}
+            ${manage() && open && !held ? `<button class="btn sm ghost danger" data-act="cancel">${icon('x')}${bcan('APPROVE') ? 'Cancel order' : 'Ask to cancel'}</button>` : ''}</div>
         ${claimed.length ? `<div class="bk-claim">${icon('bell')}<div><b>${claimed.length === 1 ? 'A payment' : `${claimed.length} payments`} reported by the customer</b>
             <small>Check the bank, then confirm: ${claimed.map(p => `${money(p.payment.amount)} · ref ${esc(p.payment.reference || '')}`).join(', ')}</small></div>
             <button class="btn sm" data-tab="payments">Open payments</button></div>` : ''}

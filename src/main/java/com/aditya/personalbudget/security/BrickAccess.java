@@ -51,7 +51,8 @@ public class BrickAccess {
      */
     public static boolean staffMay(String uri) {
         String p = uri.startsWith("/api/") ? uri.substring(4) : uri;
-        return p.startsWith("/bricks/") || p.startsWith("/auth/") || p.startsWith("/meta/") || p.equals("/events") || p.startsWith("/attachments");
+        return p.startsWith("/bricks/") || p.startsWith("/auth/") || p.startsWith("/meta/") || p.equals("/events") || p.startsWith("/attachments")
+                || p.equals("/approvals/open");
     }
 
     /** May the current user do this? (Nobody signed in: yes.) */
