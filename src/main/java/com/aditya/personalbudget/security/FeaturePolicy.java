@@ -115,6 +115,8 @@ public final class FeaturePolicy {
         if (path.startsWith("/construction")) {
             return read ? EnumSet.of(Feature.CONSTRUCTION, BALANCE_SHEET, REPORTS) : EnumSet.of(Feature.CONSTRUCTION);
         }
+        // a business's figures (its dashboard panels and reports too) only for those who have the business
+        if (path.startsWith("/bricks")) return EnumSet.of(Feature.BRICKS);
         if (path.startsWith("/documents")) return EnumSet.of(DOCUMENTS);
         if (path.startsWith("/hosted-chits")) {
             return read ? EnumSet.of(Feature.HOST_CHITS, DASHBOARD, BALANCE_SHEET, REPORTS) : EnumSet.of(Feature.HOST_CHITS);

@@ -54,7 +54,8 @@ public class TransactionService {
      * Searches the journal register.
      *
      * @param search free text matched against entry number or id, narration, reference and party; "construction" (or
-     *               is:construction) finds every construction entry, and a project's name or code its entries
+     *               is:construction) finds every construction entry, and a project's name or code its entries; "bricks"
+     *               (or is:bricks) every Brick Management entry
      */
     public List<EntryView> search(LocalDate from, LocalDate to, VoucherType voucherType, Long accountId,
                                   String search, int limit) {
@@ -68,11 +69,19 @@ public class TransactionService {
                 .filter(e -> touching == null || touching.contains(e.getId())).toList();
         Map<Long, ConstructionTagService.ProjectTag> tags = text.isEmpty() ? Map.of() : projectTags.forEntries(inRange);
         boolean onlyConstruction = text.equals("construction") || text.equals("is:construction");
+        // "bricks" (or is:bricks) finds every Brick Management entry; an order or slip number its entries
+        Map<Long, BrickTagService.BrickTag> brickTags = text.isEmpty() ? Map.of() : ledger.brickTags().forEntries(inRange);
+        boolean onlyBricks = text.equals("bricks") || text.equals("is:bricks") || text.equals("brick");
         Stream<JournalEntry> stream = inRange.stream()
-                .filter(e -> text.isEmpty() || (onlyConstruction ? tags.containsKey(e.getId()) : matches(e, text) || projectMatches(tags.get(e.getId()), text)))
+                .filter(e -> text.isEmpty() || (onlyConstruction ? tags.containsKey(e.getId()) : onlyBricks ? brickTags.containsKey(e.getId())
+                        : matches(e, text) || projectMatches(tags.get(e.getId()), text) || brickMatches(brickTags.get(e.getId()), text)))
                 .sorted(JournalEntryRepository.NEWEST_FIRST)
                 .limit(limit > 0 ? limit : 500);
         return ledger.toViews(stream.toList());
+    }
+
+    private static boolean brickMatches(BrickTagService.BrickTag t, String text) {
+        return t != null && t.ref() != null && t.ref().toLowerCase(Locale.ROOT).contains(text);
     }
 
     private static boolean projectMatches(ConstructionTagService.ProjectTag t, String text) {

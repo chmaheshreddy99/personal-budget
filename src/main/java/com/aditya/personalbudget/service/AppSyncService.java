@@ -127,8 +127,8 @@ public class AppSyncService {
         List<AppAccount> list = new ArrayList<>();
         for (AccountView a : accounts.list()) {
             if (!a.active() || !shown.contains(a.accountClass())) continue;
-            String group = a.emiAccount() ? "EMI" : a.projectBook() ? "CONSTRUCTION" : a.chitBook() ? "HOSTED_CHIT" : "OWN";
-            String groupName = a.projectBook() ? (a.projectId() == null ? "Common business accounts" : projectName.getOrDefault(a.projectId(), "Construction"))
+            String group = a.emiAccount() ? "EMI" : a.projectBook() ? "CONSTRUCTION" : a.brickBook() ? "BRICKS" : a.chitBook() ? "HOSTED_CHIT" : "OWN";
+            String groupName = a.brickBook() ? "Brick business" : a.projectBook() ? (a.projectId() == null ? "Common business accounts" : projectName.getOrDefault(a.projectId(), "Construction"))
                     : a.chitBook() ? (a.hostedChitId() == null ? "Common chit accounts" : chitName.getOrDefault(a.hostedChitId(), "Host a Chit")) : null;
             String number = a.accountNumber();
             list.add(new AppAccount(a.id(), a.name(), a.accountType().name(), a.typeLabel(), a.accountClass().name(), group, groupName, a.institution(),

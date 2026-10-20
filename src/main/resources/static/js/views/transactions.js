@@ -7,7 +7,7 @@
 import { api } from '../core/api.js';
 import { loadAccounts, can, state } from '../core/store.js';
 import { panel, table, esc, field, accountOptions, readForm, emptyState, loading, stat } from '../core/ui.js';
-import { kindChip, movementHtml, entryKind, projectTag } from '../core/entry-kind.js';
+import { kindChip, movementHtml, entryKind, projectTag, brickTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon } from '../core/icons.js';
 import { money, date, firstOfMonth, isoDate } from '../core/format.js';
@@ -41,7 +41,7 @@ export async function render(container, _params, isCurrent) {
                     ${field({ label: 'To', name: 'to', type: 'date', value: filters.to })}
                     ${field({ label: 'Type', name: 'voucherType', type: 'select', value: filters.voucherType, options: voucherOptions })}
                     ${field({ label: 'Account', name: 'accountId', type: 'select', options: accountOptions(accounts, () => true, filters.accountId, 'All accounts', { chitBook: true }) })}
-                    ${field({ label: 'Search', name: 'q', value: filters.q, placeholder: 'Description, party, ref, entry no., #id or construction' })}
+                    ${field({ label: 'Search', name: 'q', value: filters.q, placeholder: 'Description, party, ref, entry no., #id, construction or bricks' })}
                     <button class="btn primary" type="submit">${icon('search')}Apply</button>
                     <button class="btn ghost" type="button" id="clear-filters" ${isFiltered() ? '' : 'hidden'} title="Back to the last 3 months, every type and account">${icon('x')}Clear</button>
                    </form>
@@ -187,6 +187,6 @@ export function entryCell(e) {
     const shown = shortNarration(e.narration, e.chitTrail, e.party);
     const party = partyAdds(e.party, shown, e.chitTrail) ? e.party : '';
     return `<div class="entry-cell">${kindChip(e.voucherType, 'sm', e.voucherLabel)}
-        <span class="entry-text">${projectTag(e.construction)}<b class="ellipsis" title="${esc(e.narration)}">${esc(shown)}</b>${e.notes ? `<span class="note-mark" title="${esc(e.notes)}">${icon('file-text')}</span>` : ''}${party ? `<span class="entry-party ellipsis">${esc(party)}</span>` : ''}</span>
+        <span class="entry-text">${projectTag(e.construction)}${brickTag(e.brick)}<b class="ellipsis" title="${esc(e.narration)}">${esc(shown)}</b>${e.notes ? `<span class="note-mark" title="${esc(e.notes)}">${icon('file-text')}</span>` : ''}${party ? `<span class="entry-party ellipsis">${esc(party)}</span>` : ''}</span>
         ${evidenceBadge(e.attachmentCount)}${e.reversedBy ? `<span class="mini-flag" title="Reversed">${icon('undo')}</span>` : ''}</div>`;
 }

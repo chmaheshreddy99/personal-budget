@@ -44,8 +44,10 @@ public class ReportService {
     private final LedgerService ledger;
     private final ChitTrailService trails;
     private final ConstructionTagService projectTags;
+    private final BrickTagService brickTags;
 
-    public ReportService(LedgerService ledger, ChitTrailService trails, ConstructionTagService projectTags) {
+    public ReportService(LedgerService ledger, ChitTrailService trails, ConstructionTagService projectTags, BrickTagService brickTags) {
+        this.brickTags = brickTags;
         this.projectTags = projectTags;
         this.trails = trails;
         this.ledger = ledger;
@@ -135,6 +137,7 @@ public class ReportService {
         Set<Long> projectBook = books.accounts().values().stream().filter(Account::isProjectBook).map(Account::getId)
                 .collect(Collectors.toSet());
         PROJECT_BOOK.set(projectBook);
+        BRICK_BOOK.set(books.accounts().values().stream().filter(Account::isBrickBook).map(Account::getId).collect(Collectors.toSet()));
         SheetSection assets = section("Assets", assetRows, chitBook);
         SheetSection liabilities = section("Liabilities", liabilityRows, chitBook);
         SheetSection equity = new SheetSection("Equity", total(equityRows), previousTotal(equityRows),
@@ -210,7 +213,7 @@ public class ReportService {
 
     /** The bucket of an account: its type's, or "Hosted chits" / "Construction business" for those books. */
     public static String bucket(Account a) {
-        return a.isChitBook() ? HOSTED_CHITS : a.isProjectBook() ? CONSTRUCTION : bucket(a.getAccountType());
+        return a.isChitBook() ? HOSTED_CHITS : a.isProjectBook() ? CONSTRUCTION : a.isBrickBook() ? BRICKS : bucket(a.getAccountType());
     }
 
     /** The asset / liability group of the construction book on the balance sheet. */
@@ -219,11 +222,18 @@ public class ReportService {
     /** The construction book's accounts while a balance sheet is made (one request at a time per thread). */
     private static final ThreadLocal<Set<Long>> PROJECT_BOOK = ThreadLocal.withInitial(Set::of);
 
+    /** The asset / liability group of the brick business's book on the balance sheet. */
+    public static final String BRICKS = "Brick business";
+
+    /** The brick book's accounts while a balance sheet is made. */
+    private static final ThreadLocal<Set<Long>> BRICK_BOOK = ThreadLocal.withInitial(Set::of);
+
     /** The asset / liability group of the hosted-chit book on the balance sheet. */
     public static final String HOSTED_CHITS = "Hosted chits";
 
     private static String bucket(AccountAmount r, Set<Long> chitBook) {
         if (r.accountId() != null && PROJECT_BOOK.get().contains(r.accountId())) return CONSTRUCTION;
+        if (r.accountId() != null && BRICK_BOOK.get().contains(r.accountId())) return BRICKS;
         return r.accountId() != null && chitBook.contains(r.accountId()) ? HOSTED_CHITS : bucket(r.accountType());
     }
 
@@ -291,6 +301,7 @@ public class ReportService {
         List<LedgerRow> rows = new ArrayList<>();
         Map<Long, ChitTrailService.Trail> chitTrails = trails.forEntryIds(own.stream().map(PostedLine::entryId).toList());
         Map<Long, ConstructionTagService.ProjectTag> projects = projectTags.forEntryIds(own.stream().map(PostedLine::entryId).toList());
+        Map<Long, BrickTagService.BrickTag> bricks = brickTags.forEntryIds(own.stream().map(PostedLine::entryId).toList());
         for (PostedLine l : own) {
             running = running.add(books.natural(accountId, l.net()));
             totalDebit = totalDebit.add(l.debit());
@@ -301,7 +312,7 @@ public class ReportService {
                     .distinct()
                     .collect(Collectors.joining(", "));
             rows.add(new LedgerRow(l.entryId(), l.entryNo(), l.date(), l.voucherType(), l.voucherType().getLabel(), l.narration(),
-                    counter, l.debit(), l.credit(), running, chitTrails.get(l.entryId()), projects.get(l.entryId())));
+                    counter, l.debit(), l.credit(), running, chitTrails.get(l.entryId()), projects.get(l.entryId()), bricks.get(l.entryId())));
         }
         return new AccountLedger(accountId, account.getCode(), account.getName(), account.getAccountClass(), from, to,
                 opening, totalDebit, totalCredit, running, rows);
@@ -319,7 +330,8 @@ public class ReportService {
         Map<Long, Map<YearMonth, BigDecimal>> perAccount = new LinkedHashMap<>();
         for (PostedLine l : books.lines()) {
             Account a = books.account(l.accountId());
-            if (a.getAccountClass() == AccountClass.EXPENSE && !l.date().isBefore(from) && !l.date().isAfter(to)) {
+            // personal spending: the brick business's costs have their own report
+            if (a.getAccountClass() == AccountClass.EXPENSE && !a.isBrickBook() && !l.date().isBefore(from) && !l.date().isAfter(to)) {
                 // keyed by category; 0 collects anything posted without one
                 perAccount.computeIfAbsent(l.categoryId() == null ? 0L : l.categoryId(), k -> new LinkedHashMap<>())
                         .merge(YearMonth.from(l.date()), l.net(), BigDecimal::add);
@@ -404,8 +416,8 @@ public class ReportService {
         for (int i = count - 1; i >= 0; i--) {
             YearMonth m = last.minusMonths(i);
             Map<Long, BigDecimal> moves = books.movementsBetween(m.atDay(1), m.atEndOfMonth());
-            BigDecimal income = books.totalOfClass(moves, AccountClass.INCOME);
-            BigDecimal expense = books.totalOfClass(moves, AccountClass.EXPENSE);
+            BigDecimal income = books.personalTotalOfClass(moves, AccountClass.INCOME);
+            BigDecimal expense = books.personalTotalOfClass(moves, AccountClass.EXPENSE);
             points.add(new MonthPoint(m.toString(), income, expense, income.subtract(expense)));
         }
         return points;
@@ -475,20 +487,27 @@ public class ReportService {
      */
     private static SheetSection section(String label, List<AccountAmount> rows, Set<Long> chitBook) {
         Set<Long> projectBook = PROJECT_BOOK.get();
+        Set<Long> brickBook = BRICK_BOOK.get();
         java.util.function.Predicate<AccountAmount> inProjects = r -> r.accountId() != null && projectBook.contains(r.accountId());
-        java.util.function.Predicate<AccountAmount> inBook = r -> r.accountId() != null && (chitBook.contains(r.accountId()) || projectBook.contains(r.accountId()));
+        java.util.function.Predicate<AccountAmount> inBricks = r -> r.accountId() != null && brickBook.contains(r.accountId());
+        java.util.function.Predicate<AccountAmount> inBook = r -> r.accountId() != null && (chitBook.contains(r.accountId()) || projectBook.contains(r.accountId())
+                || brickBook.contains(r.accountId()));
         Map<AccountType, List<AccountAmount>> byType = rows.stream().filter(inBook.negate())
                 .collect(Collectors.groupingBy(AccountAmount::accountType, () -> new java.util.TreeMap<>(), Collectors.toList()));
         List<SheetGroup> groups = new ArrayList<>(byType.entrySet().stream()
                 .map(e -> new SheetGroup(e.getKey().getLabel(), total(e.getValue()), previousTotal(e.getValue()), e.getValue()))
                 .toList());
-        List<AccountAmount> book = rows.stream().filter(inBook).filter(inProjects.negate()).toList();
+        List<AccountAmount> book = rows.stream().filter(inBook).filter(inProjects.negate()).filter(inBricks.negate()).toList();
         if (!book.isEmpty()) {
             groups.add(new SheetGroup(HOSTED_CHITS, total(book), previousTotal(book), book));
         }
         List<AccountAmount> projects = rows.stream().filter(inProjects).toList();
         if (!projects.isEmpty()) {
             groups.add(new SheetGroup(CONSTRUCTION, total(projects), previousTotal(projects), projects));
+        }
+        List<AccountAmount> bricks = rows.stream().filter(inBricks).toList();
+        if (!bricks.isEmpty()) {
+            groups.add(new SheetGroup(BRICKS, total(bricks), previousTotal(bricks), bricks));
         }
         return new SheetSection(label, total(rows), previousTotal(rows), groups);
     }

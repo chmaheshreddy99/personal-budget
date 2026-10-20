@@ -88,9 +88,10 @@ public class DashboardService {
         BigDecimal assets = books.totalOfClass(balances, AccountClass.ASSET).add(chitDues);
         BigDecimal liabilities = books.totalOfClass(balances, AccountClass.LIABILITY).add(chitDues);
         BigDecimal netWorth = assets.subtract(liabilities);
-        BigDecimal income = books.totalOfClass(thisMonth, AccountClass.INCOME);
-        BigDecimal expense = books.totalOfClass(thisMonth, AccountClass.EXPENSE);
-        BigDecimal prevExpense = books.totalOfClass(lastMonth, AccountClass.EXPENSE);
+        // personal income and spending: the brick business's sales and costs show in its own figures
+        BigDecimal income = books.personalTotalOfClass(thisMonth, AccountClass.INCOME);
+        BigDecimal expense = books.personalTotalOfClass(thisMonth, AccountClass.EXPENSE);
+        BigDecimal prevExpense = books.personalTotalOfClass(lastMonth, AccountClass.EXPENSE);
         BigDecimal expenseChange = prevExpense.signum() == 0 ? BigDecimal.ZERO
                 : Money.percent(expense.subtract(prevExpense), prevExpense);
 
@@ -195,7 +196,7 @@ public class DashboardService {
     private List<AccountTile> accountTiles(LedgerSnapshot books, Map<Long, BigDecimal> balances) {
         return books.accounts().values().stream()
                 .filter(a -> Boolean.TRUE.equals(a.getActive()))
-                .filter(a -> !a.isChitBook() && !a.isProjectBook() && (a.getAccountType().isLiquid() || a.getAccountType() == AccountType.CREDIT_CARD))
+                .filter(a -> !a.isChitBook() && !a.isProjectBook() && !a.isBrickBook() && (a.getAccountType().isLiquid() || a.getAccountType() == AccountType.CREDIT_CARD))
                 .sorted(Comparator.comparing(Account::getCode))
                 .map(a -> {
                     BigDecimal balance = balances.getOrDefault(a.getId(), Money.ZERO);

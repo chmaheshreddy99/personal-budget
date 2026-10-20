@@ -22,7 +22,7 @@ import { openJournalEditor, openQuickEntry } from './transaction-forms.js';
 import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim-panel.js';
 
 const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
-    construction: 'Open Construction', 'expenses/emi': 'Open EMIs' };
+    construction: 'Open Construction', 'expenses/emi': 'Open EMIs', bricks: 'Open Brick Management' };
 /** Where an entry is managed: a construction entry opens its own project. */
 const manageTarget = e => e.manageAt === 'construction' && e.construction?.projectId ? `construction/${e.construction.projectId}` : e.manageAt;
 
@@ -166,6 +166,7 @@ function detailHtml(e) {
         ${chitTrailHtml(e.chitTrail)}
         <div class="ed-bar">
             ${fact('journal', `<b>${esc(e.entryNo)}</b> ${esc(e.voucherLabel)}`)}
+            ${e.brick ? fact('brick', `Brick Management · <b>${esc(e.brick.what)}</b>${e.brick.ref ? ` · ${esc(e.brick.ref)}` : ''}`, 'bk-fact') : ''}
             ${e.construction ? fact('hard-hat', `Construction · <b>${esc(e.construction.project)}</b>${e.construction.what ? ` · ${esc(e.construction.what)}` : ''}`, 'cn-fact') : ''}
             ${fact('calendar', date(e.entryDate))}
             ${e.party ? fact('user', esc(e.party)) : ''}

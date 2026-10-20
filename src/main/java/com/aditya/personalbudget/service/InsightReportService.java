@@ -85,8 +85,8 @@ public class InsightReportService {
             LocalDate start = m.atDay(1).isBefore(from) ? from : m.atDay(1);
             LocalDate end = m.atEndOfMonth().isAfter(to) ? to : m.atEndOfMonth();
             Map<Long, BigDecimal> moves = books.movementsBetween(start, end);
-            BigDecimal in = books.totalOfClass(moves, AccountClass.INCOME);
-            BigDecimal out = books.totalOfClass(moves, AccountClass.EXPENSE);
+            BigDecimal in = books.personalTotalOfClass(moves, AccountClass.INCOME);
+            BigDecimal out = books.personalTotalOfClass(moves, AccountClass.EXPENSE);
             return new MonthPoint(m.toString(), in, out, in.subtract(out));
         }).toList();
 
@@ -112,10 +112,10 @@ public class InsightReportService {
                             LocalDate prevFrom, LocalDate prevTo, int days) {
         Map<Long, BigDecimal> now = books.movementsBetween(from, to);
         Map<Long, BigDecimal> before = books.movementsBetween(prevFrom, prevTo);
-        BigDecimal income = books.totalOfClass(now, AccountClass.INCOME);
-        BigDecimal expense = books.totalOfClass(now, AccountClass.EXPENSE);
-        BigDecimal prevIncome = books.totalOfClass(before, AccountClass.INCOME);
-        BigDecimal prevExpense = books.totalOfClass(before, AccountClass.EXPENSE);
+        BigDecimal income = books.personalTotalOfClass(now, AccountClass.INCOME);
+        BigDecimal expense = books.personalTotalOfClass(now, AccountClass.EXPENSE);
+        BigDecimal prevIncome = books.personalTotalOfClass(before, AccountClass.INCOME);
+        BigDecimal prevExpense = books.personalTotalOfClass(before, AccountClass.EXPENSE);
         BigDecimal netWorth = books.netWorthAsOf(to);
         // fixed: spending posted by a recurring schedule (subscriptions, fees, rent ...)
         BigDecimal fixed = books.lines().stream()
@@ -405,7 +405,7 @@ public class InsightReportService {
 
     private static boolean isExpense(LedgerSnapshot books, PostedLine l) {
         Account a = books.account(l.accountId());
-        return a != null && a.getAccountClass() == AccountClass.EXPENSE;
+        return a != null && a.getAccountClass() == AccountClass.EXPENSE && !a.isBrickBook();
     }
 
     private static boolean inRange(LocalDate d, LocalDate from, LocalDate to) {

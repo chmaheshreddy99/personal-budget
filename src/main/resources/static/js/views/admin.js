@@ -5,7 +5,7 @@
  * a user gets some or all of their organization's), then the items that go by role.
  */
 import { api } from '../core/api.js';
-import { state, can, FEATURES, ROLE_SECTIONS } from '../core/store.js';
+import { state, can, FEATURES, ROLE_SECTIONS, BUSINESSES } from '../core/store.js';
 import { panel, table, esc, field, readForm, openModal, toast, confirmDialog, stat } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { date } from '../core/format.js';
@@ -45,6 +45,20 @@ export async function render(container, params, isCurrent) {
 function accessChip(group, f, on, { disabled = false, off = false, note = '' } = {}) {
     return `<label class="access-chip ${on ? 'on' : ''} ${off ? 'unavailable' : ''}" ${note ? `title="${esc(note)}"` : ''}>
         <input type="checkbox" data-${group}="${f.key}" ${on ? 'checked' : ''} ${disabled || off ? 'disabled' : ''}>${icon(f.iconName)}${esc(f.label)}${note ? `<small>${esc(note)}</small>` : ''}</label>`;
+}
+
+/** A business the organization runs, as a card: its icon, name and what it brings; ticked when the organization has it. */
+function businessCard(f, on, { disabled = false, off = false } = {}) {
+    return `<label class="biz-card ${on ? 'on' : ''} ${off ? 'unavailable' : ''}">
+        <input type="checkbox" data-feature="${f.key}" ${on ? 'checked' : ''} ${disabled || off ? 'disabled' : ''}>
+        <span class="biz-ico">${icon(f.iconName)}</span><span class="biz-text"><b>${esc(f.label)}</b><small>${esc(off ? 'not in this organization' : f.note || '')}</small></span>
+        <span class="biz-tick">${icon('check')}</span></label>`;
+}
+
+/** The businesses block of an access box: the cards, then a line on what picking one does. */
+function businessesHtml(cards, sub) {
+    return `<div class="access-head"><b>${icon('briefcase')} Businesses</b><span class="small muted">${esc(sub)}</span></div>
+        <div class="biz-grid">${cards}</div>`;
 }
 
 /** The menu items that go by role: shown so every menu item is accounted for, never ticked. */
@@ -122,7 +136,10 @@ async function openUserForm(user, reload) {
             <div class="span-2 access-box">
                 <div class="access-head"><b>${icon('eye')} Menu items shared</b><span class="small muted">${self ? 'your own access cannot be limited' : 'what this user sees on the full site'}</span>
                     ${self ? '' : '<span class="spacer"></span><button type="button" class="link-btn" data-access-all>All</button><button type="button" class="link-btn" data-access-none>None</button>'}</div>
-                <div class="access-grid">${FEATURES.map(f => box('feature', f, u.features.includes(f.key), self)).join('')}</div>
+                ${businessesHtml(BUSINESSES.map(f => businessCard(f, u.features.includes(f.key) && available.has(f.key), { disabled: self, off: !available.has(f.key) })).join(''),
+                    'the businesses of the organization this user works in')}
+                <div class="access-head sub"><b>${icon('list')} Menu items</b></div>
+                <div class="access-grid">${FEATURES.filter(f => !f.business).map(f => box('feature', f, u.features.includes(f.key), self)).join('')}</div>
                 ${roleSectionsHtml()}
                 <div class="access-head"><label class="switch"><input type="checkbox" name="mobileAccessToggle" ${u.mobileAccess ? 'checked' : ''} ${self ? 'disabled' : ''}><span></span>${icon('phone')} Mobile version</label>
                     <span class="small muted">a lighter app for phones, at the address set in Settings</span></div>
@@ -133,7 +150,7 @@ async function openUserForm(user, reload) {
         onOpen: m => {
             const form = m.el.querySelector('form');
             const sync = () => {
-                form.querySelectorAll('.access-chip').forEach(c => c.classList.toggle('on', c.querySelector('input').checked));
+                form.querySelectorAll('.access-chip, .biz-card').forEach(c => c.classList.toggle('on', c.querySelector('input').checked));
                 // a section that is not shared cannot be on the phone either
                 form.querySelectorAll('[data-mobile]').forEach(i => {
                     const shared = form.querySelector(`[data-feature="${i.dataset.mobile}"]`).checked;
@@ -183,6 +200,8 @@ async function drawTenants(body, actions, reload) {
             { label: 'Organization', render: t => `<b>${esc(t.name)}</b><div class="small muted mono">${esc(t.code)}</div>` },
             { label: 'Menu', render: t => `<span class="access-cell" title="${esc(FEATURES.filter(f => t.features.includes(f.key)).map(f => f.label).join(', '))}">
                 ${t.limited ? `<span class="badge">${icon('eye')}${t.features.length} of ${FEATURES.length}</span>` : `<span class="badge gray">${icon('eye')}Everything</span>`}</span>` },
+            { label: 'Businesses', render: t => `<span class="biz-badges">${BUSINESSES.filter(f => t.features.includes(f.key)).map(f =>
+                `<span class="badge biz" title="${esc(f.label)}">${icon(f.iconName)}${esc(f.label)}</span>`).join('') || '<span class="muted small">Personal books only</span>'}</span>` },
             { label: 'Currency', render: t => esc(t.currency) },
             { label: 'Users', align: 'r', render: t => t.userCount },
             { label: 'Accounts', align: 'r', render: t => t.accountCount },
@@ -212,17 +231,20 @@ function openTenantForm(tenant, reload) {
                 ${field({ label: 'Admin full name', name: 'adminFullName' })}
                 ${field({ label: 'Admin password', name: 'adminPassword', type: 'password', required: true, span: 'span-2' })}`}
             <div class="span-2 access-box">
-                <div class="access-head"><b>${icon('eye')} Menu items of the organization</b><span class="small muted">its users get at most these</span>
+                ${businessesHtml(BUSINESSES.map(f => businessCard(f, t.features.includes(f.key))).join(''),
+                    'pick what this organization runs: only those show in its menu, dashboard and reports')}
+                <div class="access-head sub"><b>${icon('eye')} Menu items of the organization</b><span class="small muted">its users get at most these</span>
                     <span class="spacer"></span><button type="button" class="link-btn" data-access-all>All</button><button type="button" class="link-btn" data-access-none>None</button></div>
-                <div class="access-grid">${FEATURES.map(f => accessChip('feature', f, t.features.includes(f.key),
+                <div class="access-grid">${FEATURES.filter(f => !f.business).map(f => accessChip('feature', f, t.features.includes(f.key),
                     { note: f.needs === 'APPROVE_ENTRIES' ? 'also needs a role that approves' : '' })).join('')}</div>
                 ${roleSectionsHtml()}
             </div>
         </form>`,
         onOpen: m => {
             const form = m.el.querySelector('form');
-            const sync = () => form.querySelectorAll('.access-chip').forEach(c => c.classList.toggle('on', c.querySelector('input').checked));
-            const setAll = on => { form.querySelectorAll('[data-feature]').forEach(i => { i.checked = on; }); sync(); };
+            const sync = () => form.querySelectorAll('.access-chip, .biz-card').forEach(c => c.classList.toggle('on', c.querySelector('input').checked));
+            // All / None are for the menu items; the businesses are picked one by one
+            const setAll = on => { form.querySelectorAll('.access-grid [data-feature]').forEach(i => { i.checked = on; }); sync(); };
             form.addEventListener('change', sync);
             form.querySelector('[data-access-all]').addEventListener('click', () => setAll(true));
             form.querySelector('[data-access-none]').addEventListener('click', () => setAll(false));
@@ -235,7 +257,7 @@ function openTenantForm(tenant, reload) {
                 const data = readForm(form);
                 Object.keys(data).filter(k => k.startsWith('feature')).forEach(k => delete data[k]);
                 const features = [...form.querySelectorAll('[data-feature]')].filter(i => i.checked).map(i => i.dataset.feature);
-                if (!features.length) throw new Error('Give the organization at least one menu item');
+                if (!features.some(k => !BUSINESSES.some(b => b.key === k))) throw new Error('Give the organization at least one menu item');
                 data.features = features.length === FEATURES.length ? FEATURES.map(f => f.key) : features;
                 if (tenant) await api.put(`/admin/tenants/${tenant.id}`, data);
                 else await api.post('/admin/tenants', data);

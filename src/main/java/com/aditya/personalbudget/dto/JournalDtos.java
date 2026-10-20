@@ -48,6 +48,8 @@ public final class JournalDtos {
                             com.aditya.personalbudget.service.ChitTrailService.Trail chitTrail,
                             /* a construction project's entry: which project, and what it was */
                             com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction,
+                            /* a Brick Management entry: what it was and its document (order, slip ...) */
+                            com.aditya.personalbudget.service.BrickTagService.BrickTag brick,
                             /* the optional note recorded with the entry */
                             String notes,
                             /* INCOME or TRANSFER: a quick entry that is edited with the quick form; null otherwise */

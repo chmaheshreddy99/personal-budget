@@ -36,6 +36,7 @@ import * as activity from './views/activity.js';
 import * as gifts from './views/gifts.js';
 import * as documents from './views/documents.js';
 import * as construction from './views/construction.js';
+import * as bricks from './views/bricks.js';
 import * as integrity from './views/integrity.js';
 
 /** Top menu, in display order. */
@@ -50,6 +51,8 @@ const ROUTES = [
     { path: 'host-chits', label: 'Host a Chit', iconName: 'hand-coins', view: hostChits, feature: 'HOST_CHITS' },
     // the construction business: contract works and developments, their books, sales and agreements
     { path: 'construction', label: 'Construction', iconName: 'hard-hat', view: construction, feature: 'CONSTRUCTION' },
+    // the brick business: production, raw material, orders and deliveries, the team's pay and its own books
+    { path: 'bricks', label: 'Bricks', iconName: 'brick', view: bricks, feature: 'BRICKS' },
     { path: 'planning', label: 'Budgets', iconName: 'target', view: planning, feature: 'BUDGETS' },
     { path: 'balance-sheet', label: 'Balance Sheet', iconName: 'scale', view: balanceSheet, feature: 'BALANCE_SHEET' },
     { path: 'reports', label: 'Reports', iconName: 'report', view: reports, feature: 'REPORTS' },

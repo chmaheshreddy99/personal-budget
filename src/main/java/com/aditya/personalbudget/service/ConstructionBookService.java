@@ -141,7 +141,7 @@ public class ConstructionBookService {
             dr = dr.add(r.debit());
             cr = cr.add(r.credit());
             rows.add(new LedgerRow(r.entryId(), r.entryNo(), r.date(), r.voucherType(), r.voucherLabel(), r.narration(), r.counterAccounts(),
-                    r.debit(), r.credit(), running, r.chitTrail(), r.construction()));
+                    r.debit(), r.credit(), running, r.chitTrail(), r.construction(), r.brick()));
         }
         return new AccountLedger(full.accountId(), full.code(), full.name(), full.accountClass(), from, to, Money.ZERO, dr, cr, running, rows);
     }

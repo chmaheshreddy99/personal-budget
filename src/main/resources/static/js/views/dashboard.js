@@ -7,7 +7,7 @@
 import { api } from '../core/api.js';
 import { state, can } from '../core/store.js';
 import { panel, kpi, esc, statusBadge, emptyState, openModal } from '../core/ui.js';
-import { kindChip, movementHtml, projectTag } from '../core/entry-kind.js';
+import { kindChip, movementHtml, projectTag, brickTag } from '../core/entry-kind.js';
 import { shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, shortDate, daysFromToday, isoDate } from '../core/format.js';
@@ -17,14 +17,22 @@ import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openDebtDialog } from '../components/debt-dialog.js';
 import { openCustomizer } from '../components/dashboard-customizer.js';
 import { DASHBOARD_WIDGETS, dashboardLayout } from '../core/prefs.js';
+import { hasFeature } from '../core/store.js';
+import { loadBusinesses, businessBandHtml, BRICK_PANELS, drawBrickCharts, brickInsights } from '../components/brick-dash.js';
+
+/** A panel shows only when its section is shared with the user (Chits, Budgets, Brick Management ...). */
+const WIDGET_FEATURE = Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, w.feature]));
+const allowed = id => !WIDGET_FEATURE[id] || hasFeature(WIDGET_FEATURE[id]);
 
 export async function render(container, _params, isCurrent) {
-    const shownIds = (() => { const l = dashboardLayout(); return l.order.filter(id => !l.hidden.includes(id)); })();
+    const shownIds = (() => { const l = dashboardLayout(); return l.order.filter(id => !l.hidden.includes(id) && allowed(id)); })();
     // the EMI book and the category history only when their panels are shown (each section may not be shared)
-    const [d, chits, hosted, emiBook, analysis] = await Promise.all([api.get('/dashboard'), api.get('/chits').catch(() => []),
-        api.get('/hosted-chits/summary').catch(() => null),
+    const [d, chits, hosted, emiBook, analysis, business] = await Promise.all([api.get('/dashboard'),
+        hasFeature('CHITS') ? api.get('/chits').catch(() => []) : [],
+        hasFeature('HOST_CHITS') ? api.get('/hosted-chits/summary').catch(() => null) : null,
         shownIds.includes('emis') ? api.get('/expenses/emis').catch(() => null) : null,
-        shownIds.includes('cattrend') ? api.get('/reports/expense-analysis').catch(() => null) : null]);
+        shownIds.includes('cattrend') ? api.get('/reports/expense-analysis').catch(() => null) : null,
+        loadBusinesses()]);
     if (!isCurrent()) return;
     const reload = () => render(container, [], isCurrent);
     const k = d.kpis;
@@ -41,7 +49,7 @@ export async function render(container, _params, isCurrent) {
     const cover = avgSpend ? Number(k.liquidBalance) / avgSpend : null;
     const dayOfMonth = new Date().getDate();
     const totalExpense = d.expenseBreakdown.reduce((s, p) => s + Number(p.value), 0);
-    const widgets = layout.order.filter(id => !layout.hidden.includes(id));
+    const widgets = layout.order.filter(id => !layout.hidden.includes(id) && allowed(id));
     const label = Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, w.label]));
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -77,6 +85,7 @@ export async function render(container, _params, isCurrent) {
         cattrend: () => panel({ title: label.cattrend, iconName: 'trending', sub: 'top categories, month by month', cls: 'p-dcattrend', bodyClass: 'chart',
             actions: `<a class="btn sm ghost icon" href="#/reports" title="Reports">${icon('chevron-right')}</a>`, body: catTrendHtml(analysis) }),
         debt: () => panel({ title: label.debt, iconName: 'scale', sub: 'what you owe', cls: 'p-ddebt', body: debtHtml(d) }),
+        ...Object.fromEntries(Object.entries(BRICK_PANELS).map(([id, draw]) => [id, () => draw(business.bricks, label[id])])),
     };
 
     container.innerHTML = `
@@ -108,15 +117,21 @@ export async function render(container, _params, isCurrent) {
                     sub: `<span class="${expenseChange <= 0 ? 'pos' : 'neg'}">${expenseChange > 0 ? '▲' : '▼'} ${percent(Math.abs(expenseChange))}</span> vs last month · ${moneyShort(Number(k.monthExpense) / dayOfMonth)}/day${avgSpend ? ` · usual ${moneyShort(avgSpend)}` : ''}` })}
             ${kpi({ label: 'Savings rate', value: percent(k.savingsRate), iconName: 'piggy', tone: 'violet',
                     sub: `Share of income kept${done.length ? ` · 12-mo avg <b>${percent(keptYear, 0)}</b>` : ''}` })}
-            ${kpi({ label: 'Chits', value: money(k.chitInvested), iconName: 'chit', tone: 'gold', sub: `${k.activeChits} running · accrued ${moneyShort(k.chitAccruedInterest)}` })}
+            ${hasFeature('CHITS') ? kpi({ label: 'Chits', value: money(k.chitInvested), iconName: 'chit', tone: 'gold', sub: `${k.activeChits} running · accrued ${moneyShort(k.chitAccruedInterest)}` }) : ''}
         </div>` : ''}
-        ${hosted?.running ? hostedDuesHtml(hosted) : ''}
+        ${layout.bands.business ? businessBandHtml(business, hosted) : hosted?.running ? hostedDuesHtml(hosted) : ''}
         ${layout.bands.insights ? '<div class="insight-ribbon" id="insight-ribbon"></div>' : ''}
         <div class="dash-grid">${widgets.map(id => `<div class="dash-cell" style="grid-column: span ${layout.spans[id]}">${bodies[id]()}</div>`).join('')
             || emptyState('Every panel is switched off. Use Customize to add some.', 'dashboard')}</div>
     </div>`;
 
-    if (layout.bands.insights) drawRibbon(container.querySelector('#insight-ribbon'), analyse(d));
+    if (layout.bands.insights) {
+        const health = analyse(d);
+        // the brick business's most pressing points join the personal ones
+        health.insights = [...brickInsights(business.bricks).map(i => ({ tone: i.tone === 'critical' ? 'bad' : i.tone === 'warning' ? 'warn' : i.tone === 'good' ? 'good' : 'info',
+            iconName: i.icon, title: i.title, value: 'Bricks', text: esc(i.text), link: '#/bricks' })), ...health.insights];
+        drawRibbon(container.querySelector('#insight-ribbon'), health);
+    }
 
     // ---- charts (months before the first transaction are dropped, keeping at least six)
     const firstActive = Math.min(d.monthlyTrend.length - 6,
@@ -144,6 +159,7 @@ export async function render(container, _params, isCurrent) {
     }
 
     drawExtraCharts(container, { d, chits, emiBook, analysis });
+    drawBrickCharts(container, business.bricks);
 
     container.querySelector('.p-recent')?.addEventListener('click', e => {
         const row = e.target.closest('[data-entry]');
@@ -416,7 +432,7 @@ function recentHtml(entries) {
         const sign = e.voucherType === 'EXPENSE' ? 'neg' : e.voucherType === 'INCOME' ? 'pos' : '';
         return `<div class="list-item clickable" data-entry="${e.id}">
             ${kindChip(e.voucherType, 'sm', e.voucherLabel)}
-            <div class="grow min-0"><div class="title ellipsis" title="${esc(e.narration)}">${projectTag(e.construction)}${esc(shortNarration(e.narration, e.chitTrail, e.party))}${partyAdds(e.party, shortNarration(e.narration, e.chitTrail, e.party), e.chitTrail) ? ` <span class="ls-person">· ${esc(e.party)}</span>` : ''}</div><div class="meta ellipsis">${shortDate(e.entryDate)} · ${movementHtml(e.lines, chitCodeOf(e.chitTrail))}</div></div>
+            <div class="grow min-0"><div class="title ellipsis" title="${esc(e.narration)}">${projectTag(e.construction)}${brickTag(e.brick)}${esc(shortNarration(e.narration, e.chitTrail, e.party))}${partyAdds(e.party, shortNarration(e.narration, e.chitTrail, e.party), e.chitTrail) ? ` <span class="ls-person">· ${esc(e.party)}</span>` : ''}</div><div class="meta ellipsis">${shortDate(e.entryDate)} · ${movementHtml(e.lines, chitCodeOf(e.chitTrail))}</div></div>
             <b class="mono ${sign}">${money(e.amount)}</b>
         </div>`;
     }).join('')}</div>`;

@@ -151,6 +151,16 @@ public class Account implements TenantOwned {
     private Boolean emiAccount;
 
     /**
+     * Part of the brick business's book (the Brick Management section): kept off the personal Accounts page, pickers
+     * and liquid-money figures like the construction book.
+     */
+    private Boolean brickBook;
+
+    /** Brick-book accounts: CASH, BANK, SALES, DELIVERY, HANDLING, CUSTOMERS, MATERIALS, PRODUCTION, WAGES, HANDLING_COST, SALARIES or ADVANCES. */
+    @Column(length = 15)
+    private String brickRole;
+
+    /**
      * The current balance in the account's natural sign (a positive asset is money you own, a positive liability
      * money you owe): the sum of all its journal lines, kept up to date by the ledger on every debit and credit.
      * Saves of the account itself never change it.
@@ -182,8 +192,12 @@ public class Account implements TenantOwned {
         return Boolean.TRUE.equals(projectBook);
     }
 
-    /** Money the user can spend: cash, bank or wallet, and not the chit book's (members' money). */
+    public boolean isBrickBook() {
+        return Boolean.TRUE.equals(brickBook);
+    }
+
+    /** Money the user can spend: cash, bank or wallet, and not the chit book's (members' money) or a business's. */
     public boolean isLiquid() {
-        return accountType.isLiquid() && !isChitBook() && !isProjectBook();
+        return accountType.isLiquid() && !isChitBook() && !isProjectBook() && !isBrickBook();
     }
 }

@@ -6,6 +6,11 @@
  */
 
 const PATHS = {
+    brick: '<rect x="2" y="5" width="20" height="14" rx="1.5"/><path d="M2 12h20M8 5v7M16 5v7M12 12v7"/>',
+    truck: '<path d="M1 4h13v12H1zM14 8h4l4 4v4h-8"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="17.5" cy="18.5" r="2"/>',
+    factory: '<path d="M2 20V9l6 4V9l6 4V4h4l2 16z"/><path d="M6 17h2M11 17h2M16 17h2"/>',
+    box: '<path d="m21 8-9-5-9 5v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    'map-pin': '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
     camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/>',

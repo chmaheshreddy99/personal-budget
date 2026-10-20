@@ -58,7 +58,7 @@ public class ExpenseFormService {
                 .map(c -> new Option(c.getId(), c.getName(), null, null, c.getSystemKey() != null))
                 .toList();
         List<Option> payers = accounts.findByTenantId(tenantId).stream()
-                .filter(a -> Boolean.TRUE.equals(a.getActive()) && !a.isChitBook() && !a.isProjectBook() && PAYERS.contains(a.getAccountType().name()))
+                .filter(a -> Boolean.TRUE.equals(a.getActive()) && !a.isChitBook() && !a.isProjectBook() && !a.isBrickBook() && PAYERS.contains(a.getAccountType().name()))
                 .sorted(Comparator.comparing(a -> -payerUse.getOrDefault(a.getId(), 0)))
                 .map(a -> new Option(a.getId(), a.getName(), a.getAccountType().name(), a.getAccountType().getLabel(), false))
                 .toList();

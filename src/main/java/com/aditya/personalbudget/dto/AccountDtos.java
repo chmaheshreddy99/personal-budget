@@ -98,6 +98,9 @@ public final class AccountDtos {
             Long projectId,
             String projectRole,
             /* what is owed on an EMI (Expenses › EMIs): listed only when asked for */
-            boolean emiAccount) {
+            boolean emiAccount,
+            /* part of the brick business's book (Brick Management), not a personal account */
+            boolean brickBook,
+            String brickRole) {
     }
 }

@@ -164,7 +164,7 @@ export function accountOptions(accounts, filter = () => true, selected = null, p
     const groups = { ASSET: 'Assets', LIABILITY: 'Liabilities', INCOME: 'Income', EXPENSE: 'Expenses', EQUITY: 'Equity' };
     let html = `<option value="">${esc(placeholder)}</option>`;
     // the hosted-chit book (Host a Chit, Chit accounts) is the members' money: off personal pickers unless asked for
-    const shown = a => (chitBook || !a.chitBook) && (projectBook || !a.projectBook) || String(a.id) === String(selected);
+    const shown = a => (chitBook || !a.chitBook) && (projectBook || !a.projectBook) && (projectBook || !a.brickBook) || String(a.id) === String(selected);
     for (const [cls, label] of Object.entries(groups)) {
         const list = accounts.filter(a => a.accountClass === cls && a.active && filter(a) && shown(a));
         if (!list.length) continue;

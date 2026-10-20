@@ -82,12 +82,15 @@ public class LedgerService {
     private final HostedChitRepository hostedChits;
     private final ChitTrailService trails;
     private final ConstructionTagService projectTags;
+    private final BrickTagService brickTags;
 
     public LedgerService(AccountRepository accounts, JournalEntryRepository entries, JournalLineRepository lines,
                          ClaimRepaymentRepository repayments, CategoryRepository categories, ChitRepository chits,
                          com.aditya.personalbudget.repository.ClaimInterestPostingRepository interestPostings,
                          com.aditya.personalbudget.repository.AttachmentRepository attachments, AttachmentService attachmentService,
-                         HostedChitRepository hostedChits, ChitTrailService trails, ConstructionTagService projectTags) {
+                         HostedChitRepository hostedChits, ChitTrailService trails, ConstructionTagService projectTags,
+                         BrickTagService brickTags) {
+        this.brickTags = brickTags;
         this.trails = trails;
         this.projectTags = projectTags;
         this.hostedChits = hostedChits;
@@ -100,6 +103,11 @@ public class LedgerService {
         this.repayments = repayments;
         this.categories = categories;
         this.chits = chits;
+    }
+
+    /** Which entries are the brick business's (Brick Management). */
+    public BrickTagService brickTags() {
+        return brickTags;
     }
 
     /** A well-known system account (see {@link DefaultChartOfAccounts}). */
@@ -264,6 +272,7 @@ public class LedgerService {
         Map<Long, Integer> evidence = attachments.countsByEntry(UserContext.tenantId());
         Map<Long, ChitTrailService.Trail> chitTrails = trails.forEntries(list);
         Map<Long, ConstructionTagService.ProjectTag> projects = projectTags.forEntries(list);
+        Map<Long, BrickTagService.BrickTag> bricks = brickTags.forEntries(list);
 
         return list.stream().map(e -> {
             List<LineView> lineViews = linesByEntry.getOrDefault(e.getId(), List.of()).stream()
@@ -284,7 +293,7 @@ public class LedgerService {
                     e.getSourceType(), e.getSourceId(), isManual(e), e.getCreatedBy(), e.getCreatedAt(), lineViews,
                     lock.reason(), lock.manageAt(), lock.reversible(), lock.reversedBy(), lock.reversalOf(),
                     claimIdOf(e), e.getVersion(), evidence.getOrDefault(e.getId(), 0), chitTrails.get(e.getId()), projects.get(e.getId()),
-                    e.getNotes(), isQuickEditable(e, lineViews.size(), reversals) ? e.getVoucherType().name() : null);
+                    bricks.get(e.getId()), e.getNotes(), isQuickEditable(e, lineViews.size(), reversals) ? e.getVoucherType().name() : null);
         }).toList();
     }
 
@@ -310,6 +319,9 @@ public class LedgerService {
         }
         if (source.startsWith("EMI_")) {
             return new Lock("Bought on EMI. Pay, undo or pay it off in Expenses, EMIs.", "expenses/emi", false, reversedBy, null);
+        }
+        if (source.startsWith("BRICK_")) {
+            return new Lock("Posted from Brick Management. Change or undo it there.", "bricks", false, reversedBy, null);
         }
         if (source.startsWith("CONSTRUCTION_")) {
             return new Lock("Posted from a construction project. Change or undo it on Construction.", "construction", false, reversedBy, null);
@@ -421,7 +433,8 @@ public class LedgerService {
             }
             Long categoryId = null;
             Long chitId = null;
-            CategoryKind kind = CategoryKind.of(account.getAccountClass());
+            // the brick business's income and costs are its own accounts (sales, raw materials, wages ...), not personal categories
+            CategoryKind kind = account.isBrickBook() ? null : CategoryKind.of(account.getAccountClass());
             if (kind != null) {
                 Category category = line.categoryId() != null
                         ? categories.findByIdAndTenantId(line.categoryId(), tenantId)

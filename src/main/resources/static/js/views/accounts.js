@@ -8,7 +8,7 @@
 import { api } from '../core/api.js';
 import { loadAccounts, can, state, hasFeature } from '../core/store.js';
 import { panel, esc, field, readForm, openModal, toast, confirmDialog, accountChip, emptyState, loading, table } from '../core/ui.js';
-import { kindChip, entryKind, projectTag } from '../core/entry-kind.js';
+import { kindChip, entryKind, projectTag, brickTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMonth, isoDate, number, daysFromToday } from '../core/format.js';
@@ -69,7 +69,7 @@ export async function render(container, _params, isCurrent) {
     if (!isCurrent()) return;
     // the hosted-chit book (members' money, Host a Chit) has its own page: only its net counts here, in net worth
     // the hosted-chit book and the construction book have their own pages
-    const accounts = everything.filter(a => !a.chitBook && !a.projectBook);
+    const accounts = everything.filter(a => !a.chitBook && !a.projectBook && !a.brickBook);
     const chitBook = everything.filter(a => a.chitBook);
     const bookNet = chitBook.reduce((s, a) => s + (a.accountClass === 'ASSET' ? 1 : a.accountClass === 'LIABILITY' ? -1 : 0) * Number(a.balance), 0);
     Object.assign(prefs, getPref('statement', { grouped: false, groupBy: 'month' }));
@@ -621,7 +621,7 @@ async function drawDetail(target, account, reload, all = []) {
     const baseColumns = [
         { label: 'Date', render: r => date(r.date), cls: 'nowrap c-date' },
         { label: 'Entry', cls: 'c-entry', render: r => `<div class="entry-cell">${kindChip(r.voucherType, 'sm', r.voucherLabel)}
-            <span class="entry-text">${projectTag(r.construction)}<b class="ellipsis" title="${esc(r.narration)}">${esc(shortNarration(r.narration, r.chitTrail))}</b>${personOf(r)}${peopleAccount ? '' : inlineStatus(r)}${r.counterAccounts ? `<span class="entry-party ellipsis" title="${esc(`The other side: ${r.counterAccounts}`)}">${icon(isIn(r) ? 'arrow-in' : 'arrow-out')}${esc(shortCounter(r))}</span>` : ''}</span></div>` },
+            <span class="entry-text">${projectTag(r.construction)}${brickTag(r.brick)}<b class="ellipsis" title="${esc(r.narration)}">${esc(shortNarration(r.narration, r.chitTrail))}</b>${personOf(r)}${peopleAccount ? '' : inlineStatus(r)}${r.counterAccounts ? `<span class="entry-party ellipsis" title="${esc(`The other side: ${r.counterAccounts}`)}">${icon(isIn(r) ? 'arrow-in' : 'arrow-out')}${esc(shortCounter(r))}</span>` : ''}</span></div>` },
         { label: debitNormal ? 'In (Dr)' : 'Out (Dr)', align: 'r', render: r => Number(r.debit) ? `<span class="dr-amt">${money(r.debit)}</span>` : '' },
         { label: debitNormal ? 'Out (Cr)' : 'In (Cr)', align: 'r', render: r => Number(r.credit) ? `<span class="cr-amt">${money(r.credit)}</span>` : '' },
         { label: 'Balance', align: 'r', render: r => `<b>${money(r.balance)}</b>` },

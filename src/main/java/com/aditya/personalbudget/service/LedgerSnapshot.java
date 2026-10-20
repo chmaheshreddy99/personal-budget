@@ -135,6 +135,18 @@ public final class LedgerSnapshot {
                 .reduce(Money.ZERO, BigDecimal::add);
     }
 
+    /**
+     * Like {@link #totalOfClass}, without the brick business's book: personal income and spending (the business's
+     * sales and costs have their own figures in Brick Management).
+     */
+    public BigDecimal personalTotalOfClass(Map<Long, BigDecimal> balances, AccountClass accountClass) {
+        return balances.entrySet().stream()
+                .filter(e -> accounts.containsKey(e.getKey()) && accounts.get(e.getKey()).getAccountClass() == accountClass
+                        && !accounts.get(e.getKey()).isBrickBook())
+                .map(Map.Entry::getValue)
+                .reduce(Money.ZERO, BigDecimal::add);
+    }
+
     /** Assets minus liabilities as of a date. */
     public BigDecimal netWorthAsOf(LocalDate asOf) {
         Map<Long, BigDecimal> balances = balancesAsOf(asOf);

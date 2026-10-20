@@ -30,6 +30,8 @@ public enum Feature {
     DOCUMENTS("Documents", true),
     /** The construction business: projects, their money, sales and agreements (desktop only). */
     CONSTRUCTION("Construction", false),
+    /** The brick business: production batches, raw material, the team's pay, orders, deliveries and its books (desktop only). */
+    BRICKS("Brick Management", false),
     /** Who changed what, approvals and access links (also needs a role that approves entries). */
     ACTIVITY("Activity", false);
 
@@ -48,6 +50,13 @@ public enum Feature {
     /** Available in the mobile version. */
     public boolean isMobile() {
         return mobile;
+    }
+
+    /** The businesses an organization can run (picked for it as a whole; each brings its own section, reports and dashboard figures). */
+    public static final Set<Feature> BUSINESSES = Collections.unmodifiableSet(EnumSet.of(HOST_CHITS, CONSTRUCTION, BRICKS));
+
+    public boolean isBusiness() {
+        return BUSINESSES.contains(this);
     }
 
     public static Set<Feature> all() {

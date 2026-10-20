@@ -5,6 +5,7 @@
  *   kindChip(voucherType, size)     the chip markup ('xs' | 'sm')
  *   movementHtml(lines)             "Groceries → HDFC Card" style debit → credit summary
  *   projectTag(tag)                 the construction project an entry belongs to, as a small tag
+ *   brickTag(tag)                   a Brick Management entry (what it was, its order or slip), as a small tag
  */
 import { icon } from './icons.js';
 import { esc } from './ui.js';
@@ -22,6 +23,12 @@ const KINDS = {
     PROJECT_COST: { iconName: 'hard-hat', tone: 'coral', label: 'Project cost' },
     PROJECT_CAPITAL: { iconName: 'users', tone: 'violet', label: 'Partner capital' },
     PROJECT_LOAN: { iconName: 'bank', tone: 'gold', label: 'Project loan' },
+    BRICK_SALE: { iconName: 'truck', tone: 'aqua', label: 'Bricks delivered' },
+    BRICK_RECEIPT: { iconName: 'arrow-in', tone: 'aqua', label: 'Brick customer payment' },
+    BRICK_MATERIAL: { iconName: 'box', tone: 'coral', label: 'Raw material' },
+    BRICK_EXPENSE: { iconName: 'factory', tone: 'coral', label: 'Production expense' },
+    BRICK_WAGES: { iconName: 'users', tone: 'violet', label: 'Wages paid' },
+    BRICK_ADVANCE: { iconName: 'hand', tone: 'violet', label: 'Staff advance' },
     EMI_PAYMENT: { iconName: 'calendar', tone: 'coral', label: 'EMI payment' },
     OPENING: { iconName: 'flag', tone: 'gray', label: 'Opening balance' },
     LENDING: { iconName: 'hand', tone: 'violet', label: 'Money lent' },
@@ -66,4 +73,13 @@ export function movementHtml(lines, code = null) {
 export function projectTag(tag) {
     if (!tag) return '';
     return `<span class="cn-tag" title="${esc(`Construction · ${tag.project}${tag.what ? ` · ${tag.what}` : ''}`)}">${icon('hard-hat')}${esc(tag.code || 'Business')}</span>`;
+}
+
+/**
+ * A Brick Management entry (EntryView.brick / LedgerRow.brick), wherever it shows outside the section: a small brick-red
+ * tag "BRICKS", what it was and its order or slip in the tooltip (Brick Management · Sale · SO-0003 · trip 1).
+ */
+export function brickTag(tag) {
+    if (!tag) return '';
+    return `<span class="bk-tag" title="${esc(`Brick Management · ${tag.what}${tag.ref ? ` · ${tag.ref}` : ''}`)}">${icon('brick')}Bricks</span>`;
 }

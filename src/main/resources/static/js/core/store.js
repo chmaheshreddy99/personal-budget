@@ -25,7 +25,7 @@ export async function loadOptions() {
  */
 export async function loadAccounts(force = false, { all = false } = {}) {
     if (!state.accounts || force) state.accounts = await api.get('/accounts');
-    return all ? state.accounts : state.accounts.filter(a => !a.chitBook && !a.projectBook);
+    return all ? state.accounts : state.accounts.filter(a => !a.chitBook && !a.projectBook && !a.brickBook);
 }
 
 /** Expense and income categories with this / last month's figures. */
@@ -72,14 +72,18 @@ export const FEATURES = [
     { key: 'JOURNAL', label: 'Journal', path: 'transactions', iconName: 'journal', mobile: true },
     { key: 'ACCOUNTS', label: 'Accounts', path: 'accounts', iconName: 'wallet', mobile: true },
     { key: 'CHITS', label: 'Chits', path: 'chits', iconName: 'chit', mobile: true },
-    { key: 'HOST_CHITS', label: 'Host a Chit', path: 'host-chits', iconName: 'hand-coins', mobile: false },
+    { key: 'HOST_CHITS', label: 'Host a Chit', path: 'host-chits', iconName: 'hand-coins', mobile: false, business: true,
+      note: 'Run chits as the organiser: members, auctions, collections, payouts' },
     { key: 'BUDGETS', label: 'Budgets', path: 'planning', iconName: 'target', mobile: true },
     { key: 'BALANCE_SHEET', label: 'Balance sheet', path: 'balance-sheet', iconName: 'scale', mobile: true },
     { key: 'REPORTS', label: 'Reports', path: 'reports', iconName: 'report', mobile: true },
     { key: 'FORECAST', label: 'Forecast', path: 'forecast', iconName: 'trending', mobile: true },
     { key: 'GIFTS', label: 'Gifts', path: 'gifts', iconName: 'gift', mobile: true },
     { key: 'DOCUMENTS', label: 'Documents', path: 'documents', iconName: 'file-text', mobile: true },
-    { key: 'CONSTRUCTION', label: 'Construction', path: 'construction', iconName: 'hard-hat', mobile: false },
+    { key: 'CONSTRUCTION', label: 'Construction', path: 'construction', iconName: 'hard-hat', mobile: false, business: true,
+      note: 'Contract works and developments: their books, flats, sales and agreements' },
+    { key: 'BRICKS', label: 'Brick Management', path: 'bricks', iconName: 'brick', mobile: false, business: true,
+      note: 'Production batches, raw material, orders and deliveries, the team’s pay' },
     { key: 'ACTIVITY', label: 'Activity', path: 'activity', iconName: 'history', mobile: false, needs: 'APPROVE_ENTRIES' },
 ];
 
@@ -89,6 +93,9 @@ export const ROLE_SECTIONS = [
     { label: 'Users & roles', iconName: 'users', who: 'Admins (manage users); everyone sees their profile' },
     { label: 'Settings', iconName: 'settings', who: 'Everyone (what they may change goes by role)' },
 ];
+
+/** The businesses an organization can run (Host a Chit, Construction, Brick Management): picked for it as a whole. */
+export const BUSINESSES = FEATURES.filter(f => f.business);
 
 /** True when the section is shared with the signed-in user. */
 export function hasFeature(key) {

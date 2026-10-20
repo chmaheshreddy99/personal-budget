@@ -16,6 +16,8 @@ import { exportButton, bindExport } from '../core/export.js';
 import { chitSummaryReport } from './chit-summary.js';
 import { hostedChitReport } from './hosted-chit-report.js';
 import { emiReport } from './emi-report.js';
+import { brickBusinessReport, brickProductionReport, brickSalesReport, brickPayrollReport } from './brick-report.js';
+import { hasFeature } from '../core/store.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, sparkline } from '../core/charts.js';
@@ -26,10 +28,14 @@ const REPORTS = [
     { key: 'insights', label: 'Insights', iconName: 'sparkles', note: 'What changed and what to act on' },
     { key: 'categories', label: 'Categories', iconName: 'tag', note: 'Spending and income by category' },
     { key: 'accounts', label: 'Accounts', iconName: 'wallet', note: 'Money in and out of every account' },
-    { key: 'chits', label: 'Chits', iconName: 'chit', note: 'Contributions, value and returns' },
-    { key: 'chit-summary', label: 'Chit summary', iconName: 'layers', note: 'Selected chits together, printable' },
-    { key: 'hosted-chits', label: 'Hosted chits', iconName: 'hand-coins', note: 'Chits I run: collections, dues, earnings' },
-    { key: 'emi', label: 'EMI analysis', iconName: 'calendar', note: 'Is buying on EMI worth it: cost against savings interest' },
+    { key: 'chits', label: 'Chits', iconName: 'chit', note: 'Contributions, value and returns', feature: 'CHITS' },
+    { key: 'chit-summary', label: 'Chit summary', iconName: 'layers', note: 'Selected chits together, printable', feature: 'CHITS' },
+    { key: 'emi', label: 'EMI analysis', iconName: 'calendar', note: 'Is buying on EMI worth it: cost against savings interest', feature: 'EXPENSES' },
+    { key: 'hosted-chits', label: 'Hosted chits', iconName: 'hand-coins', note: 'Chits I run: collections, dues, earnings', feature: 'HOST_CHITS', group: 'Businesses' },
+    { key: 'bricks', label: 'Brick business', iconName: 'brick', note: 'Profit and loss, cost and price a brick', feature: 'BRICKS', group: 'Businesses' },
+    { key: 'brick-production', label: 'Brick production', iconName: 'factory', note: 'Bricks made, damage, raw material per 1,000', feature: 'BRICKS' },
+    { key: 'brick-sales', label: 'Brick sales', iconName: 'truck', note: 'By type, customer and vehicle; discounts', feature: 'BRICKS' },
+    { key: 'brick-payroll', label: 'Brick team pay', iconName: 'users', note: 'Wages paid, advances, work not paid yet', feature: 'BRICKS' },
     { key: 'income-statement', label: 'Income statement', iconName: 'report', note: 'Income, expenses and surplus' },
     { key: 'trial-balance', label: 'Trial balance', iconName: 'scale', note: 'Debit and credit balances' },
     { key: 'cash-flow', label: 'Cash flow', iconName: 'droplet', note: 'Money in and out of cash & bank' },
@@ -57,12 +63,16 @@ async function insights() {
 }
 
 export async function render(container, params, isCurrent) {
-    const active = REPORTS.find(r => r.key === params[0]) || REPORTS[0];
+    // only the reports of the sections (and businesses) shared with the user
+    const shown = REPORTS.filter(r => !r.feature || hasFeature(r.feature));
+    const firstOfGroup = new Set(['Businesses'].map(g => shown.find(r => r.group === g)?.key).filter(Boolean));
+    const active = shown.find(r => r.key === params[0]) || shown[0];
     container.innerHTML = `
     <div class="page reports-page">
         ${panel({
             title: 'Reports', iconName: 'report', cls: 'p-report-nav',
-            body: `<div class="list">${REPORTS.map((r, i) => `
+            body: `<div class="list">${shown.map((r, i) => `
+                ${firstOfGroup.has(r.key) ? '<div class="section-title report-nav-sep">Businesses</div>' : ''}
                 ${r.key === 'income-statement' ? '<div class="section-title report-nav-sep">Statements</div>' : ''}
                 <a class="list-item clickable ${r.key === active.key ? 'selected' : ''}" href="#/reports/${r.key}" title="${r.label} · ↑ ↓ to move between reports">
                     <span class="chip-icon sm">${icon(r.iconName)}</span>
@@ -112,7 +122,8 @@ export async function render(container, params, isCurrent) {
         content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
         const drawer = { insights: insightsReport, categories: categoriesReport, accounts: accountsReport, chits: chitsReport,
                          'chit-summary': chitSummaryReport, 'hosted-chits': hostedChitReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
-                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport }[active.key];
+                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport, bricks: brickBusinessReport,
+                         'brick-production': brickProductionReport, 'brick-sales': brickSalesReport, 'brick-payroll': brickPayrollReport }[active.key];
         exportRows = await drawer(content, toolbar, period);
     };
 

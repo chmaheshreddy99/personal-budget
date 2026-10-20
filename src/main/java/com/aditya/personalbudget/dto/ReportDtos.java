@@ -77,7 +77,9 @@ public final class ReportDtos {
                             /* a hosted chit's money: where it stands */
                             com.aditya.personalbudget.service.ChitTrailService.Trail chitTrail,
                             /* a construction project's entry */
-                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction) {
+                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction,
+                            /* a Brick Management entry */
+                            com.aditya.personalbudget.service.BrickTagService.BrickTag brick) {
     }
 
     public record AccountLedger(Long accountId, String code, String name, AccountClass accountClass,

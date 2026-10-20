@@ -62,9 +62,9 @@ public class PulseService {
         BigDecimal liquid = sum(snapshot, balances, Account::isLiquid);
         BigDecimal dues = sum(snapshot, balances,
                 a -> a.getAccountType() == AccountType.CREDIT_CARD || a.getAccountType() == AccountType.PAYABLE);
-        BigDecimal spentToday = sum(snapshot, day, a -> a.getAccountClass() == AccountClass.EXPENSE);
-        BigDecimal spentMonth = sum(snapshot, month, a -> a.getAccountClass() == AccountClass.EXPENSE);
-        BigDecimal incomeMonth = sum(snapshot, month, a -> a.getAccountClass() == AccountClass.INCOME);
+        BigDecimal spentToday = sum(snapshot, day, a -> a.getAccountClass() == AccountClass.EXPENSE && !a.isBrickBook());
+        BigDecimal spentMonth = sum(snapshot, month, a -> a.getAccountClass() == AccountClass.EXPENSE && !a.isBrickBook());
+        BigDecimal incomeMonth = sum(snapshot, month, a -> a.getAccountClass() == AccountClass.INCOME && !a.isBrickBook());
 
         BudgetSummary budget = budgets.summary(YearMonth.from(today));
         ClaimSummary collect = claims.summary(claims.list());
