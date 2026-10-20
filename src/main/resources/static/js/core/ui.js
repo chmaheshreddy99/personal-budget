@@ -197,6 +197,7 @@ export function delegate(root, type, selector, handler) {
 // ===================================================================== toasts
 
 export function toast(message, kind = 'success') {
+    if (!message) return;   // nothing to say (a change sent for approval says so itself)
     const host = document.getElementById('toast-host');
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
@@ -215,6 +216,8 @@ export function toast(message, kind = 'success') {
  * Returns { el, close, setError }.
  */
 export function openModal({ title, sub = '', iconName = 'droplet', body, size = '', actions = [], onOpen }) {
+    // a "getting it ready" placeholder (pendingDialog) gives way to the dialog itself
+    document.querySelectorAll('.modal-backdrop.pending').forEach(x => x.remove());
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
@@ -239,16 +242,28 @@ export function openModal({ title, sub = '', iconName = 'droplet', body, size = 
         setError(message) { backdrop.querySelector('[data-error]').textContent = message || ''; },
     };
 
+    /** Runs an action: while it works its button spins and every action is locked, so a slow save cannot be sent twice. */
+    let running = false;
     async function run(action, button) {
+        if (running) return;
+        running = true;
         modal.setError('');
-        button.disabled = true;
+        const buttons = [...backdrop.querySelectorAll('[data-action-index]')];
+        buttons.forEach(b => { b.disabled = true; });
+        button.classList.add('busy');
+        backdrop.querySelector('.modal').classList.add('working');
         try {
             const keepOpen = await action.onClick?.(modal);
             if (!keepOpen) modal.close();
         } catch (error) {
-            modal.setError(error.message);
+            // sent for approval instead of made: the dialog's work is done
+            if (error.pendingApproval) modal.close();
+            else modal.setError(error.message);
         } finally {
-            button.disabled = false;
+            running = false;
+            buttons.forEach(b => { b.disabled = false; });
+            button.classList.remove('busy');
+            backdrop.querySelector('.modal')?.classList.remove('working');
         }
     }
 
@@ -301,6 +316,31 @@ export function openModal({ title, sub = '', iconName = 'droplet', body, size = 
         (first || backdrop.querySelector(`[data-action-index="${primaryIndex}"]`))?.focus();
     }, 30);
     return modal;
+}
+
+/**
+ * A placeholder dialog with a spinner while a dialog's data loads (shown only when it takes longer than a moment); the next
+ * openModal replaces it. Returns a function that takes it away (on a failure).
+ */
+export function pendingDialog(message = 'Getting it ready…') {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop pending';
+    backdrop.innerHTML = `<div class="modal pending-modal" role="status"><span class="spinner"></span><span>${esc(message)}</span></div>`;
+    const timer = setTimeout(() => document.body.appendChild(backdrop), 120);
+    return () => { clearTimeout(timer); backdrop.remove(); };
+}
+
+/** Awaits what a dialog needs behind pendingDialog. On a failure the placeholder goes, the error shows and it gives null. */
+export async function loadingDialog(message, work) {
+    const stop = pendingDialog(message);
+    try {
+        return await (typeof work === 'function' ? work() : work);
+    } catch (error) {
+        toast(error.message, 'error');
+        return null;
+    } finally {
+        stop();   // the data is in (or failed): the placeholder goes, or never shows when it was quick
+    }
 }
 
 /** Yes/no confirmation. Resolves true when confirmed. */

@@ -68,7 +68,9 @@ public class BrickInsightService {
 
     public record Dashboard(Kpis kpis, List<TypeStock> stock, List<MaterialStock> materials, List<WeekPoint> weeks, List<MonthPoint> months,
                             Map<String, Integer> pipeline, List<UpcomingTrip> upcoming, List<Insight> insights,
-                            List<BrickSalesService.Customer> topCustomers) {
+                            List<BrickSalesService.Customer> topCustomers,
+                            /* customers who owe for bricks, the most first */
+                            List<BrickSalesService.Customer> dues) {
     }
 
     public record Named(String name, BigDecimal amount, int count, BigDecimal quantity) {
@@ -179,8 +181,11 @@ public class BrickInsightService {
         for (int i = 5; i >= 0; i--) months.add(month(snap, book, ym.minusMonths(i), made, delivered));
 
         List<Insight> insights = insights(k, stock, mats, open, upcoming, months, today);
-        List<BrickSalesService.Customer> top = sales.customers().stream().sorted(Comparator.comparing(BrickSalesService.Customer::value).reversed()).limit(5).toList();
-        return new Dashboard(k, stock, mats, weeks, months, pipeline, upcoming.stream().limit(8).toList(), insights, top);
+        List<BrickSalesService.Customer> all = sales.customers();
+        List<BrickSalesService.Customer> top = all.stream().sorted(Comparator.comparing(BrickSalesService.Customer::value).reversed()).limit(6).toList();
+        List<BrickSalesService.Customer> dues = all.stream().filter(c -> c.balance().signum() > 0)
+                .sorted(Comparator.comparing(BrickSalesService.Customer::balance).reversed()).limit(8).toList();
+        return new Dashboard(k, stock, mats, weeks, months, pipeline, upcoming.stream().limit(12).toList(), insights, top, dues);
     }
 
     private List<UpcomingTrip> upcoming() {

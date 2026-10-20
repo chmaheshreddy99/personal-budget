@@ -65,6 +65,16 @@ public class PendingService {
     public record RejectRequest(@Size(max = 255) String note) {
     }
 
+    /**
+     * A change to what is already recorded, asked by a user who needs approval (kind {@link #CHANGE}): the call they made,
+     * kept as it was made (method, address, body), what it is in words, and the values it sets. Carried out as it was
+     * made when a checker approves it (see ChangeReplayer).
+     */
+    public record ChangePayload(String method, String uri, String body, String label, List<String> fields) {
+    }
+
+    public static final String CHANGE = "CHANGE";
+
     private final PendingEntryRepository pending;
     private final CategoryRepository categories;
     private final AccountRepository accounts;
@@ -74,9 +84,14 @@ public class PendingService {
     private final AttachmentService attachmentService;
     private final AttachmentRepository attachmentRepository;
 
+    /** Brick Management's order requests wait in the same queue: approved and turned down by it (see BrickApprovalService). */
+    private final BrickApprovalService bricks;
+
     public PendingService(PendingEntryRepository pending, CategoryRepository categories, AccountRepository accounts,
                           ExpenseService expenses, ActivityService activity, ObjectMapper json,
-                          AttachmentService attachmentService, AttachmentRepository attachmentRepository) {
+                          AttachmentService attachmentService, AttachmentRepository attachmentRepository,
+                          @org.springframework.context.annotation.Lazy BrickApprovalService bricks) {
+        this.bricks = bricks;
         this.attachmentService = attachmentService;
         this.attachmentRepository = attachmentRepository;
         this.pending = pending;
@@ -124,6 +139,10 @@ public class PendingService {
     @Transactional
     public PendingView resubmit(Long id, ExpenseRequest r) {
         PendingEntry p = requireOwn(id);
+        if (CHANGE.equals(p.getKind())) throw new BusinessException("Answer a change request with a comment (and evidence), not a new expense");
+        if (BrickApprovalService.isBrick(p.getKind())) {
+            throw new BusinessException("Answer an order request in Brick Management → Approvals, with a comment and any evidence");
+        }
         if (!PendingEntry.REJECTED.equals(p.getStatus()) && !PendingEntry.PENDING.equals(p.getStatus())) {
             throw new BusinessException("Already " + p.getStatus().toLowerCase() + (p.getReviewedBy() != null ? " by " + p.getReviewedBy() : ""));
         }
@@ -176,6 +195,7 @@ public class PendingService {
         CurrentUser me = UserContext.get();
         return pending.findByTenantId(UserContext.tenantId()).stream()
                 .filter(p -> isMine(p, me))
+                .filter(p -> !BrickApprovalService.isBrick(p.getKind()))
                 .filter(p -> !PendingEntry.WITHDRAWN.equals(p.getStatus()))
                 .sorted(Comparator.comparing((PendingEntry p) -> !PendingEntry.REJECTED.equals(p.getStatus()))
                         .thenComparing(PendingEntry::getSubmittedAt, Comparator.reverseOrder()))
@@ -187,6 +207,11 @@ public class PendingService {
     @Transactional
     public PendingView approve(Long id, ApproveRequest c) {
         PendingEntry p = requirePending(id);
+        if (CHANGE.equals(p.getKind())) throw new BusinessException("A change request is approved by carrying it out (ChangeReplayer)");
+        if (BrickApprovalService.isBrick(p.getKind())) {
+            bricks.approve(id, new BrickApprovalService.DecideRequest(c == null ? null : c.note()));
+            return toView(pending.findById(id).orElseThrow());
+        }
         ExpenseRequest r = request(p);
         ApproveRequest fix = c == null ? new ApproveRequest(null, null, null, null, null, null) : c;
         String notes = r.notes() == null || r.notes().isBlank() ? "Recorded by " + p.getSubmittedBy() : r.notes() + " · recorded by " + p.getSubmittedBy();
@@ -215,6 +240,13 @@ public class PendingService {
     @Transactional
     public PendingView reject(Long id, RejectRequest r) {
         PendingEntry p = requirePending(id);
+        if (CHANGE.equals(p.getKind()) && (r == null || blankToNull(r.note()) == null)) {
+            throw new BusinessException("Say why it is turned down, so they know what to answer");
+        }
+        if (BrickApprovalService.isBrick(p.getKind())) {
+            bricks.reject(id, new BrickApprovalService.DecideRequest(r == null ? null : r.note()));
+            return toView(pending.findById(id).orElseThrow());
+        }
         p.setStatus(PendingEntry.REJECTED);
         p.setReviewedBy(UserContext.get().fullName());
         p.setReviewedAt(LocalDateTime.now());
@@ -224,6 +256,85 @@ public class PendingService {
         activity.record("REJECTED", "Approvals", "Rejected " + p.getSummary() + " · " + ActivityService.money(p.getAmount())
                 + " from " + p.getSubmittedBy() + (p.getReviewNote() != null ? " · " + p.getReviewNote() : ""));
         return toView(p);
+    }
+
+    // ================================================================== change requests
+
+    /** A change asked by a user who needs approval: kept, not made; a checker approves it (it is made then) or turns it down. */
+    @Transactional
+    public PendingView submitChange(String method, String uri, String body, String label, List<String> fields, BigDecimal amount) {
+        CurrentUser me = UserContext.get();
+        PendingEntry p = new PendingEntry();
+        p.setTenantId(me.tenantId());
+        p.setKind(CHANGE);
+        p.setPayload(json.writeValueAsString(new ChangePayload(method, uri, body, label, fields)));
+        p.setSummary(ActivityService.cut(label, 255));
+        p.setAmount(amount == null ? BigDecimal.ZERO : amount);
+        p.setEntryDate(LocalDate.now());
+        p.setSubmittedBy(me.fullName());
+        p.setSubmittedById(me.userId());
+        p.setSubmittedAt(LocalDateTime.now());
+        p.setStatus(PendingEntry.PENDING);
+        p.setResubmits(0);
+        addStep(p, "SUBMITTED", fields.isEmpty() ? null : ActivityService.cut(String.join(" · ", fields), 500));
+        p = pending.save(p);
+        activity.record("SUBMITTED", "Approvals", "Asked to change: " + label);
+        return toView(p);
+    }
+
+    public boolean isChange(Long id) {
+        return pending.findByIdAndTenantId(id, UserContext.tenantId()).map(p -> CHANGE.equals(p.getKind())).orElse(false);
+    }
+
+    /** A change request waiting for this checker (not their own), and what it asks. */
+    public ChangePayload changeToMake(Long id) {
+        PendingEntry p = requirePending(id);
+        if (!CHANGE.equals(p.getKind())) throw new BusinessException("Not a change request");
+        return change(p);
+    }
+
+    /** The change was made (by the checker, as it was asked): the request is approved. */
+    @Transactional
+    public PendingView changeMade(Long id, String note) {
+        PendingEntry p = requirePending(id);
+        p.setStatus(PendingEntry.APPROVED);
+        p.setReviewedBy(UserContext.get().fullName());
+        p.setReviewedAt(LocalDateTime.now());
+        p.setReviewNote(blankToNull(note));
+        addStep(p, "APPROVED", p.getReviewNote());
+        p = pending.save(p);
+        activity.record("APPROVED", "Approvals", "Approved and made the change " + p.getSummary() + " asked by " + p.getSubmittedBy());
+        return toView(p);
+    }
+
+    /** The maker answers a rejected change request (a comment, evidence attached) and sends it again. */
+    @Transactional
+    public PendingView answerChange(Long id, String comment) {
+        PendingEntry p = requireOwn(id);
+        if (!CHANGE.equals(p.getKind())) throw new BusinessException("Not a change request");
+        boolean rejected = PendingEntry.REJECTED.equals(p.getStatus());
+        if (!rejected && !PendingEntry.PENDING.equals(p.getStatus())) throw new BusinessException("Already " + p.getStatus().toLowerCase());
+        if (blankToNull(comment) == null) throw new BusinessException(rejected ? "Answer the reason it was turned down" : "Write what you add");
+        if (rejected) {
+            p.setResubmits((p.getResubmits() == null ? 0 : p.getResubmits()) + 1);
+            p.setReviewedBy(null);
+            p.setReviewedAt(null);
+            p.setReviewNote(null);
+        }
+        p.setStatus(PendingEntry.PENDING);
+        p.setSubmittedAt(LocalDateTime.now());
+        addStep(p, rejected ? "RESUBMITTED" : "EDITED", comment.trim());
+        p = pending.save(p);
+        activity.record("SUBMITTED", "Approvals", (rejected ? "Answered and sent again: " : "Added to: ") + p.getSummary());
+        return toView(p);
+    }
+
+    public ChangePayload change(PendingEntry p) {
+        try {
+            return json.readValue(p.getPayload(), ChangePayload.class);
+        } catch (RuntimeException e) {
+            return new ChangePayload(null, null, null, p.getSummary(), List.of());
+        }
     }
 
     // ================================================================== helpers
@@ -275,6 +386,15 @@ public class PendingService {
 
     private String accountName(Long id) {
         return accounts.findByIdAndTenantId(id, UserContext.tenantId()).map(Account::getName).orElse("?");
+    }
+
+    /** Adds a step to a request's history (used for every kind of request, so they all read alike). */
+    public void step(PendingEntry p, String action, String note) {
+        addStep(p, action, note);
+    }
+
+    public List<Step> historyOf(PendingEntry p) {
+        return history(p);
     }
 
     private void addStep(PendingEntry p, String action, String note) {
@@ -363,6 +483,27 @@ public class PendingService {
     }
 
     private PendingView toView(PendingEntry p) {
+        if (CHANGE.equals(p.getKind())) {
+            ChangePayload c = change(p);
+            boolean editable = UserContext.current().map(me -> isMine(p, me)).orElse(false)
+                    && (PendingEntry.PENDING.equals(p.getStatus()) || PendingEntry.REJECTED.equals(p.getStatus()));
+            return new PendingView(p.getId(), p.getKind(), p.getSummary(), p.getAmount(), p.getEntryDate(), p.getSubmittedBy(),
+                    p.getSubmittedAt(), p.getStatus(), p.getReviewedBy(), p.getReviewedAt(), p.getReviewNote(), p.getJournalEntryId(),
+                    p.getLinkId(), null, "Change request", null, null, c.label(), null, c.fields() == null ? null : String.join(" · ", c.fields()),
+                    PendingEntry.PENDING.equals(p.getStatus()), attachmentRepository.findByPendingEntryId(p.getId()).size(),
+                    p.getResubmits() == null ? 0 : p.getResubmits(), history(p), editable, BrickApprovalService.numberOf(p));
+        }
+        if (BrickApprovalService.isBrick(p.getKind())) {
+            BrickApprovalService.Payload x = bricks.payload(p);
+            boolean editable = UserContext.current().map(me -> isMine(p, me)).orElse(false)
+                    && (PendingEntry.PENDING.equals(p.getStatus()) || PendingEntry.REJECTED.equals(p.getStatus()));
+            String why = x.reasons() == null || x.reasons().isEmpty() ? null : String.join(" · ", x.reasons());
+            return new PendingView(p.getId(), p.getKind(), p.getSummary(), p.getAmount(), p.getEntryDate(), p.getSubmittedBy(),
+                    p.getSubmittedAt(), p.getStatus(), p.getReviewedBy(), p.getReviewedAt(), p.getReviewNote(), p.getJournalEntryId(),
+                    p.getLinkId(), null, "Brick Management · " + BrickApprovalService.kindLabel(p.getKind()), null, null, p.getSummary(), x.customerName(),
+                    join(why, x.note()), PendingEntry.PENDING.equals(p.getStatus()), attachmentRepository.findByPendingEntryId(p.getId()).size(),
+                    p.getResubmits() == null ? 0 : p.getResubmits(), history(p), editable, BrickApprovalService.numberOf(p));
+        }
         ExpenseRequest r = request(p);
         Long tenantId = p.getTenantId();
         String category = r.categoryId() == null ? null : categories.findByIdAndTenantId(r.categoryId(), tenantId).map(Category::getName).orElse(null);

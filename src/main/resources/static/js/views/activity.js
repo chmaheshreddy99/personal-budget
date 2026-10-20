@@ -147,10 +147,11 @@ async function drawApprovals(body, actions, reload, isCurrent) {
         if (b) { approvalStatus = b.dataset.status; reload(); }
     });
     body.innerHTML = `
-        <p class="hint act-hint">${icon('info')} Expenses recorded through an access link with approval (or by a user who needs approval) wait here. Nothing reaches the books until a checker approves it;
+        <p class="hint act-hint">${icon('info')} Expenses recorded through an access link with approval (or by a user who needs approval) wait here, and so do Brick Management's order requests (a price below the lowest, a change to an order's money, a cancellation, free delivery). Nothing reaches the books until a checker approves it;
             the checker can correct the amount, date, category, account or description first. A rejected entry goes back to whoever recorded it, to correct and send again.</p>
         <div class="ap-list">${list.map(p => {
-            const ci = categoryIcon(p.categoryName || '');
+            const brick = String(p.kind || '').startsWith('BRICK_'), change = p.kind === 'CHANGE';
+            const ci = brick ? { name: 'brick', tone: 'gold' } : change ? { name: 'edit', tone: 'violet' } : categoryIcon(p.categoryName || '');
             const state = { PENDING: ['warning', 'hourglass', p.resubmits ? 'Sent again' : 'Waiting'], APPROVED: ['good', 'check-circle', 'Approved'],
                 REJECTED: ['critical', 'x', 'Rejected'], WITHDRAWN: ['gray', 'undo', 'Taken back'] }[p.status] || ['', 'info', p.status];
             return `<div class="ap-card ${p.status.toLowerCase()}">
@@ -159,8 +160,9 @@ async function drawApprovals(body, actions, reload, isCurrent) {
                     <div class="ap-top"><b>${esc(p.narration || p.categoryName)}</b><span class="badge ${state[0]}">${icon(state[1])}${state[2]}</span>
                         ${p.resubmits ? `<span class="tag warn" title="Corrected and sent again after a rejection">${icon('refresh')}${p.resubmits}× corrected</span>` : ''}</div>
                     <div class="ap-facts">
-                        <span>${icon('tag')}${esc(p.categoryName || '—')}</span><span>${icon('wallet')}${esc(p.paidFromName || '—')}</span>
+                        <span>${icon('tag')}${esc(p.categoryName || '—')}</span>${brick || change ? `<span>${icon('shield')}${esc(p.reference || '')}</span>` : `<span>${icon('wallet')}${esc(p.paidFromName || '—')}</span>`}
                         <span>${icon('calendar')}${date(p.entryDate)}</span>${p.party ? `<span>${icon('user')}${esc(p.party)}</span>` : ''}
+                        ${brick ? `<a href="#/bricks/approvals/${p.id}">${icon('link')}Open in Brick Management</a>` : ''}
                     </div>
                     <div class="ap-who">${icon(p.linkId ? 'link' : 'user')}Recorded by <b>${esc(p.submittedBy)}</b> · ${dateTime(p.submittedAt)}${p.notes ? ` · ${esc(p.notes)}` : ''}</div>
                     ${historyHtml(p)}
@@ -174,8 +176,28 @@ async function drawApprovals(body, actions, reload, isCurrent) {
         }).join('') || emptyState(approvalStatus === 'PENDING' ? 'Nothing is waiting for approval' : 'Nothing here', 'check-circle')}</div>`;
     body.addEventListener('click', e => {
         const ap = e.target.closest('[data-approve]'), rj = e.target.closest('[data-reject]');
-        if (ap) approveDialog(list.find(p => p.id === Number(ap.dataset.approve)), reload);
+        if (ap) {
+            const p = list.find(x => x.id === Number(ap.dataset.approve));
+            if (String(p.kind || '').startsWith('BRICK_') || p.kind === 'CHANGE') brickApproveDialog(p, reload); else approveDialog(p, reload);
+        }
         if (rj) rejectDialog(list.find(p => p.id === Number(rj.dataset.reject)), reload);
+    });
+}
+
+/** An order request of Brick Management: approved as it was asked (it is carried out then), with a word to the maker. */
+function brickApproveDialog(p, reload) {
+    openModal({
+        title: `Approve · ${p.reference || ''}${p.kind === 'CHANGE' ? ' (a change)' : ''}`, iconName: 'check-circle',
+        body: `<form class="form-grid one"><div class="post-summary"><div class="row"><b>${esc(p.narration || '')}</b><span class="spacer"></span>${p.amount ? `<b>${money(p.amount)}</b>` : ''}</div>
+                <div class="small muted">Asked by ${esc(p.submittedBy)} · ${dateTime(p.submittedAt)}${p.notes ? ` · ${esc(p.notes)}` : ''}</div></div>
+            ${field({ label: 'A word to the maker', name: 'note', placeholder: 'Optional' })}
+            <p class="small muted" style="margin:0">${p.kind === 'CHANGE' ? 'The change is made now, by you, exactly as it was asked: if it can no longer be made (the record changed since), you are told and nothing changes.' : 'It is carried out now, as it was asked. The details are in Brick Management → Approvals.'}</p></form>`,
+        actions: [{ label: 'Cancel' }, { label: 'Approve', kind: 'primary', iconName: 'check', onClick: async m => {
+            await api.post(`/approvals/${p.id}/approve`, { note: m.el.querySelector('[name=note]').value });
+            toast('Approved');
+            window.dispatchEvent(new Event('approvals-changed'));
+            reload();
+        } }],
     });
 }
 
@@ -213,10 +235,12 @@ function rejectDialog(p, reload) {
     openModal({
         title: `Reject · ${p.narration || p.categoryName}`, iconName: 'x',
         body: `<form class="form-grid one"><p class="small muted" style="margin:0">${money(p.amount)} recorded by ${esc(p.submittedBy)}. It stays out of the books; the maker sees the reason.</p>
-            ${field({ label: 'Reason', name: 'note', placeholder: 'e.g. Duplicate, wrong amount, not ours' })}</form>`,
+            ${field({ label: 'Reason', name: 'note', required: String(p.kind || '').startsWith('BRICK_') || p.kind === 'CHANGE', placeholder: 'e.g. Duplicate, wrong amount, not ours' })}
+            <p class="small muted" style="margin:0">They see the reason, can answer it (with evidence) and send it again.</p></form>`,
         actions: [{ label: 'Cancel' }, {
             label: 'Reject', kind: 'danger', iconName: 'x',
             onClick: async m => {
+                if (!m.el.querySelector('form').reportValidity()) return true;
                 await api.post(`/approvals/${p.id}/reject`, { note: m.el.querySelector('[name=note]').value });
                 toast('Rejected');
                 window.dispatchEvent(new Event('approvals-changed'));

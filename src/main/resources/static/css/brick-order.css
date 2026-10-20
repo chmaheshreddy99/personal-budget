@@ -152,3 +152,12 @@
 .bo-doc h2 { padding: 0 6px; }
 .bo-doc-wrap { margin: 0 -4px 10px; }
 .bo-doc .bd-doc { box-shadow: 0 4px 18px rgba(60, 30, 10, 0.12); }
+
+/* sharing where to deliver, and the bill's PDF */
+.bo-locask { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 22px; }
+.bo-locask > div { flex: 1; min-width: 160px; display: flex; flex-direction: column; font-size: 13.5px; }
+.bo-locask small { color: #5d6b78; font-size: 12px; }
+.bo-locask .bo-err, .bo-loc .bo-err { flex-basis: 100%; margin: 0; }
+.bo-loc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 13px; }
+.bo-doc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.bo-doc-acts .bo-btn { flex: 1; text-align: center; text-decoration: none; }

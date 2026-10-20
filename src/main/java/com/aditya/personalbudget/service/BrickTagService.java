@@ -40,8 +40,11 @@ import java.util.stream.Collectors;
 @Service
 public class BrickTagService {
 
-    /** what: Sale, Receipt, Raw material, Expense, Wages, Advance, Transfer or Entry; ref: the order, slip or material it was for. */
-    public record BrickTag(String what, String ref) {
+    /**
+     * what: Sale, Receipt, Raw material, Expense, Wages, Advance, Transfer or Entry; ref: the order, slip or material it was for;
+     * link: where it is in Brick Management, exactly (the order, the payment, the purchase …), or null when there is no such place.
+     */
+    public record BrickTag(String what, String ref, String link) {
     }
 
     private final BrickTripRepository trips;
@@ -105,6 +108,17 @@ public class BrickTagService {
                     x -> x.getSlipNo() + (BrickPayrollService.ADVANCE.equals(x.getKind()) ? "|A" : "")));
             default -> Map.of();
         });
+        Map<String, Map<Long, String>> links = new HashMap<>();
+        Function<String, Map<Long, String>> link = type -> links.computeIfAbsent(type, t -> switch (t) {
+            case BrickService.SOURCE_DELIVERY -> trips.findByTenantId(tenant).stream().collect(Collectors.toMap(BrickTrip::getId, x -> "bricks/sales/" + x.getOrderId()));
+            case BrickService.SOURCE_RECEIPT -> payments.findByTenantId(tenant).stream().collect(Collectors.toMap(BrickPayment::getId,
+                    x -> "bricks/sales/" + x.getOrderId() + "/payments"));
+            case BrickService.SOURCE_MATERIAL -> purchases.findByTenantId(tenant).stream().collect(Collectors.toMap(BrickMaterialPurchase::getId,
+                    x -> "bricks/materials/" + x.getMaterialId() + "/p" + x.getId()));
+            case BrickService.SOURCE_EXPENSE -> expenses.findByTenantId(tenant).stream().collect(Collectors.toMap(BrickExpense::getId, x -> "bricks/expenses/" + x.getId()));
+            case BrickService.SOURCE_SLIP -> slips.findByTenantId(tenant).stream().collect(Collectors.toMap(BrickPaySlip::getId, x -> "bricks/payments/" + x.getId()));
+            default -> Map.of();
+        });
         Map<Long, List<JournalLine>> linesByEntry = book.isEmpty() ? Map.of() : lines.findByJournalEntryIdIn(list.stream().map(JournalEntry::getId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.groupingBy(JournalLine::getJournalEntryId));
         Map<Long, BrickTag> out = new HashMap<>();
@@ -121,11 +135,19 @@ public class BrickTagService {
                     case BrickService.SOURCE_TRANSFER -> "Transfer";
                     default -> "Entry";
                 };
-                out.put(e.getId(), new BrickTag(what, r == null ? null : r.replace("|A", "")));
+                String to = e.getSourceId() == null ? null : link.apply(type).get(e.getSourceId());
+                if (to == null) to = bookLink(linesByEntry.get(e.getId()), book);
+                out.put(e.getId(), new BrickTag(what, r == null ? null : r.replace("|A", ""), to));
             } else if (linesByEntry.getOrDefault(e.getId(), List.of()).stream().anyMatch(l -> book.contains(l.getAccountId()))) {
-                out.put(e.getId(), new BrickTag(LedgerService.SOURCE_ACCOUNT_OPENING.equals(type) ? "Opening" : "Entry", null));
+                out.put(e.getId(), new BrickTag(LedgerService.SOURCE_ACCOUNT_OPENING.equals(type) ? "Opening" : "Entry", null, bookLink(linesByEntry.get(e.getId()), book)));
             }
         }
         return out;
+    }
+
+    /** The statement of the first brick-book account the entry moves (null when it moves none). */
+    private static String bookLink(List<JournalLine> lines, Set<Long> book) {
+        if (lines == null) return null;
+        return lines.stream().map(JournalLine::getAccountId).filter(book::contains).findFirst().map(id -> "bricks/accounts/" + id).orElse(null);
     }
 }

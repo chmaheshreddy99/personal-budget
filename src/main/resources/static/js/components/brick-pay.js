@@ -5,7 +5,7 @@
  */
 import { api } from '../core/api.js';
 import { invalidateAccounts } from '../core/store.js';
-import { esc, field, readForm, openModal, toast } from '../core/ui.js';
+import { esc, field, readForm, openModal, toast, loadingDialog } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
 import { slipDocHtml, verifyDoc, printDoc } from '../core/brick-docs.js';
@@ -15,9 +15,9 @@ const KIND_ICON = { PRODUCTION: 'factory', LOADING: 'layers', UNLOADING: 'layers
 
 /** The slip for one resource and period, from its preview (the work due, the wage, advances to take back). */
 export async function openSlip(resourceId, cycle, from, to, after) {
-    const p = await api.get('/bricks/payroll/preview', { resourceId, cycle, from, to });
-    const accounts = await moneyAccounts();
-    const meta = await loadMeta();
+    const got = await loadingDialog('Working out the pay…', () => Promise.all([api.get('/bricks/payroll/preview', { resourceId, cycle, from, to }), moneyAccounts(), loadMeta()]));
+    if (!got) return;
+    const [p, accounts, meta] = got;
     const r = p.resource.resource;
     openModal({
         title: `Pay ${r.name}`, iconName: 'users', size: 'lg', sub: `${cycle === 'MONTHLY' ? 'Monthly' : 'Weekly'} payment · ${date(from)} – ${date(to)}`,
@@ -88,8 +88,9 @@ export async function openSlip(resourceId, cycle, from, to, after) {
 }
 
 export async function openAdvance(resource, after) {
-    const accounts = await moneyAccounts();
-    const meta = await loadMeta();
+    const got = await loadingDialog('Getting the advance ready…', () => Promise.all([moneyAccounts(), loadMeta()]));
+    if (!got) return;
+    const [accounts, meta] = got;
     openModal({
         title: `Advance to ${resource.name}`, iconName: 'hand', sub: 'Given now, taken back from their coming payments',
         body: `<form class="form-grid two">
@@ -116,6 +117,12 @@ export async function openAdvance(resource, after) {
 }
 
 // ===================================================================== the slip
+
+/** Fetches a slip (a spinner meanwhile) and shows it. */
+export async function showSlip(id, options) {
+    const v = await loadingDialog('Opening the slip…', () => api.get(`/bricks/payroll/slips/${id}`));
+    if (v) openSlipView(v, options);
+}
 
 /** The slip in a dialog, as its branded document: print it, see its digital signature checked, cancel it. */
 export function openSlipView(v, { onCancelled } = {}) {

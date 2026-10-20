@@ -74,7 +74,25 @@ public class BrickProductionService {
     public record BatchView(BrickBatch batch, String teamName, String modelName, List<ItemView> items, int total, int damaged, int good,
                             BigDecimal labour, List<MaterialFlow> materials, String paidOn, Long earningId, BigDecimal expenses,
                             /* raw material used per 1,000 good bricks, by material */
-                            Map<Long, BigDecimal> usePerThousand) {
+                            Map<Long, BigDecimal> usePerThousand,
+                            /* paidOn is the slip's number: the slip and the day it was paid */
+                            Long slipId, LocalDate paidDate,
+                            /* the last batch: the only one that can still be changed or deleted (the others are closed) */
+                            boolean open) {
+
+        BatchView withoutPay() {
+            return new BatchView(batch, teamName, modelName, items.stream().map(i -> new ItemView(i.brickTypeId(), i.name(), i.color(), i.quantity(), i.damaged(),
+                    i.good(), null, null)).toList(), total, damaged, good, null, materials, paidOn, earningId, null, usePerThousand, slipId, paidDate, open);
+        }
+    }
+
+    /** One bill of raw material: several materials bought together (each its own purchase, in one go). */
+    public record PurchaseLine(@NotNull Long materialId, @NotNull @Positive BigDecimal quantity, @PositiveOrZero BigDecimal rate, @PositiveOrZero BigDecimal amount) {
+    }
+
+    public record PurchaseBill(@NotNull LocalDate receivedOn, @NotNull @Size(min = 1, max = 30) List<@jakarta.validation.Valid PurchaseLine> lines,
+                               @Size(max = 100) String vendor, @Size(max = 40) String billNo, @Size(max = 30) String vehicleNo, Long accountId,
+                               @Size(max = 300) String note) {
     }
 
     public record PurchaseView(BrickMaterialPurchase purchase, String material, String unit, String account, String entryNo) {
@@ -84,10 +102,19 @@ public class BrickProductionService {
     }
 
     public record Production(List<BatchView> batches, List<BrickService.TypeStock> stock, List<BrickService.MaterialStock> materials,
-                             List<PurchaseView> purchases, List<ExpenseView> expenses) {
+                             List<PurchaseView> purchases, List<ExpenseView> expenses,
+                             /* materials whose kept balance differs from their records: shown so it can be put right */
+                             List<BrickService.StockIssue> stockIssues) {
+
+        /** The same, without what the team earns (for a role that does not see the money). */
+        public Production withoutPay() {
+            return new Production(batches.stream().map(BatchView::withoutPay).toList(), stock, materials, purchases, expenses, stockIssues);
+        }
     }
 
     private final BrickService core;
+
+    private static final java.time.format.DateTimeFormatter DAY = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy");
 
     public BrickProductionService(BrickService core) {
         this.core = core;
@@ -96,7 +123,9 @@ public class BrickProductionService {
     // ================================================================== reads
 
     public Production production() {
-        return new Production(batches(), core.brickStock(), core.materialStock(), purchaseViews(), expenseViews());
+        // reads change nothing (a GET is read-only): a balance never kept yet is worked out from the records when shown, and kept
+        // by the next purchase or batch saved (or Recalculate)
+        return new Production(batches(), core.brickStock(), core.materialStock(), purchaseViews(), expenseViews(), core.stockIssues());
     }
 
     public List<BatchView> batches() {
@@ -108,12 +137,14 @@ public class BrickProductionService {
         Map<Long, BigDecimal> spent = core.expenses().findByTenantId(t).stream().filter(e -> e.getBatchId() != null)
                 .collect(Collectors.groupingBy(BrickExpense::getBatchId, Collectors.reducing(Money.ZERO, BrickExpense::getAmount, BigDecimal::add)));
         Map<Long, BrickPaySlip> slipById = core.slips().findByTenantId(t).stream().collect(Collectors.toMap(BrickPaySlip::getId, Function.identity()));
-        return core.batchesInOrder().reversed().stream().map(b -> view(b, items.getOrDefault(b.getId(), List.of()), flows.getOrDefault(b.getId(), List.of()),
-                earned.get(b.getId()), spent.getOrDefault(b.getId(), Money.ZERO), slipById)).toList();
+        List<BrickBatch> order = core.batchesInOrder();
+        Long last = order.isEmpty() ? null : order.get(order.size() - 1).getId();
+        return order.reversed().stream().map(b -> view(b, items.getOrDefault(b.getId(), List.of()), flows.getOrDefault(b.getId(), List.of()),
+                earned.get(b.getId()), spent.getOrDefault(b.getId(), Money.ZERO), slipById, b.getId().equals(last))).toList();
     }
 
     private BatchView view(BrickBatch b, List<BrickBatchItem> items, List<MaterialFlow> flows, BrickEarning e, BigDecimal spent,
-                           Map<Long, BrickPaySlip> slips) {
+                           Map<Long, BrickPaySlip> slips, boolean open) {
         List<ItemView> iv = items.stream().map(i -> {
             var type = core.types().findById(i.getBrickTypeId()).orElse(null);
             int good = i.getQuantity() - BrickService.nz(i.getDamaged());
@@ -131,12 +162,15 @@ public class BrickProductionService {
                     f.consumed().multiply(BigDecimal.valueOf(1000)).divide(BigDecimal.valueOf(good), 3, RoundingMode.HALF_UP)));
         }
         String paid = null;
+        LocalDate paidDate = null;
         if (e != null && e.getSlipId() != null) {
             BrickPaySlip s = slips.get(e.getSlipId());
             paid = s == null ? "paid" : s.getSlipNo();
+            paidDate = s == null ? null : s.getPaidOn();
         }
         String model = b.getPricingModelId() == null ? null : core.models().findById(b.getPricingModelId()).map(BrickPricingModel::getName).orElse(null);
-        return new BatchView(b, core.resourceName(b.getTeamId()), model, iv, total, damaged, good, labour, flows, paid, e == null ? null : e.getId(), spent, per);
+        return new BatchView(b, core.resourceName(b.getTeamId()), model, iv, total, damaged, good, labour, flows, paid, e == null ? null : e.getId(), spent, per,
+                e == null ? null : e.getSlipId(), paidDate, open);
     }
 
     public BatchView batch(Long id) {
@@ -159,6 +193,16 @@ public class BrickProductionService {
         BrickEarning earning = id == null ? null : batchEarning(id);
         boolean paid = earning != null && earning.getSlipId() != null;
         if (r.producedOn().isAfter(LocalDate.now())) throw new BusinessException("A batch cannot be dated in the future");
+        // raw material is counted batch after batch: only the last batch can change, and a batch follows the one before it
+        List<BrickBatch> order = core.batchesInOrder();
+        BrickBatch last = order.isEmpty() ? null : order.get(order.size() - 1);
+        if (id != null && !last.getId().equals(id)) {
+            throw new BusinessException("Batch " + b.getBatchNo() + " is closed: only the last batch, " + last.getBatchNo() + ", can be changed");
+        }
+        BrickBatch before = id == null ? last : order.size() > 1 ? order.get(order.size() - 2) : null;
+        if (before != null && r.producedOn().isBefore(before.getProducedOn())) {
+            throw new BusinessException("A batch cannot be dated before " + before.getBatchNo() + " of " + before.getProducedOn().format(DAY) + ", the batch before it");
+        }
         BrickResource team = r.teamId() == null ? null : core.requireResource(r.teamId());
         BrickPricingModel model = r.pricingModelId() == null ? core.defaultModel() : core.requireModel(r.pricingModelId());
         List<ItemInput> items = r.items().stream().filter(i -> i.quantity() > 0).toList();
@@ -218,10 +262,14 @@ public class BrickProductionService {
                 m.setBatchId(batchId);
                 m.setMaterialId(c.materialId());
                 m.setClosing(c.closing());
+                // the time of the count is kept from the first time it was taken: a correction keeps it
+                if (m.getCountedAt() == null) m.setCountedAt(LocalDateTime.now());
                 core.batchMaterials().save(m);
             }
             have.values().stream().filter(m -> !sent.contains(m.getMaterialId())).forEach(core.batchMaterials()::delete);
         }
+        // the counts' flows brought up to date first (the last batch's worked out again), then checked
+        core.refreshMaterialStock();
         checkStock();
         if (!paid) syncEarning(b, team);
         BatchView v = batch(batchId);
@@ -233,6 +281,11 @@ public class BrickProductionService {
     @Transactional
     public void deleteBatch(Long id) {
         BrickBatch b = requireBatch(id);
+        List<BrickBatch> order = core.batchesInOrder();
+        BrickBatch last = order.get(order.size() - 1);
+        if (!last.getId().equals(id)) {
+            throw new BusinessException("Batch " + b.getBatchNo() + " is closed: only the last batch, " + last.getBatchNo() + ", can be deleted");
+        }
         BrickEarning e = batchEarning(id);
         if (e != null && e.getSlipId() != null) {
             throw new BusinessException("The team was already paid for this batch; cancel that payment slip first");
@@ -245,6 +298,8 @@ public class BrickProductionService {
             core.expenses().save(x);
         });
         core.batches().deleteById(id);
+        // the counts' flows brought up to date first (the last batch's worked out again), then checked
+        core.refreshMaterialStock();
         checkStock();
         core.activity().record("DELETED", BrickService.AREA, "Batch " + b.getBatchNo() + " of " + b.getProducedOn());
     }
@@ -286,9 +341,16 @@ public class BrickProductionService {
                 .filter(e -> "BATCH".equals(e.getSourceType()) && batchId.equals(e.getSourceId())).findFirst().orElse(null);
     }
 
-    /** No batch may have used more raw material than there was (a closing count above opening plus received). */
+    /**
+     * The last batch may not have used more raw material than there was (a closing count above opening plus received). The
+     * batches before it are closed: what they kept is history, and can no longer be corrected.
+     */
     private void checkStock() {
+        List<BrickBatch> order = core.batchesInOrder();
+        if (order.isEmpty()) return;
+        Long last = order.get(order.size() - 1).getId();
         for (var entry : core.materialFlows(null, null, null).entrySet()) {
+            if (!entry.getKey().equals(last)) continue;
             for (MaterialFlow f : entry.getValue()) {
                 if (f.counted() && f.consumed().signum() < 0) {
                     String no = core.batches().findById(entry.getKey()).map(BrickBatch::getBatchNo).orElse("a batch");
@@ -317,6 +379,14 @@ public class BrickProductionService {
                 .map(p -> new PurchaseView(p, ms.containsKey(p.getMaterialId()) ? ms.get(p.getMaterialId()).getName() : "Raw material",
                         ms.containsKey(p.getMaterialId()) ? ms.get(p.getMaterialId()).getUnit() : "", accountName(p.getAccountId()), entryNo(p.getJournalEntryId())))
                 .toList();
+    }
+
+    @Transactional
+    /** Records a bill of several materials: one purchase each, all or none. */
+    public List<PurchaseView> saveBill(PurchaseBill b) {
+        if (b.lines().stream().map(PurchaseLine::materialId).distinct().count() < b.lines().size()) throw new BusinessException("Each material once on a bill, please");
+        return b.lines().stream().map(l -> savePurchase(null, new PurchaseRequest(l.materialId(), b.receivedOn(), l.quantity(), l.rate(), l.amount(),
+                b.vendor(), b.billNo(), b.vehicleNo(), b.accountId(), b.note()))).toList();
     }
 
     @Transactional
@@ -354,6 +424,8 @@ public class BrickProductionService {
         core.purchases().save(p);
         m.setLastRate(p.getRate());
         core.materials().save(m);
+        // the counts' flows brought up to date first (the last batch's worked out again), then checked
+        core.refreshMaterialStock();
         checkStock();
         core.activity().record(id == null ? "ADDED" : "CHANGED", BrickService.AREA, "Raw material " + m.getName() + " " + strip(p.getQuantity()) + " " + m.getUnit()
                 + " · " + ActivityService.money(p.getAmount()));
@@ -366,6 +438,8 @@ public class BrickProductionService {
         BrickMaterialPurchase p = requirePurchase(id);
         core.purchases().deleteById(id);
         core.unpost(p.getJournalEntryId());
+        // the counts' flows brought up to date first (the last batch's worked out again), then checked
+        core.refreshMaterialStock();
         checkStock();
         core.activity().record("DELETED", BrickService.AREA, "Raw material bought on " + p.getReceivedOn() + " · " + ActivityService.money(p.getAmount()));
     }

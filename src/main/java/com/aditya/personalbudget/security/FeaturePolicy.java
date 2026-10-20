@@ -49,6 +49,8 @@ public final class FeaturePolicy {
         Set<Feature> desktop = EnumSet.noneOf(Feature.class);
         desktop.addAll(Feature.parse(user.getFeatures(), Feature.all()));
         desktop.retainAll(ofTenant(tenant));
+        // staff of the brick business (a role chosen for them there): Brick Management only, everywhere
+        if (BrickRole.staffOf(user.getBrickRole()) != null) desktop.retainAll(EnumSet.of(Feature.BRICKS));
         if (!mobile) {
             return desktop;
         }

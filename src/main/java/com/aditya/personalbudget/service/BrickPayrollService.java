@@ -119,7 +119,9 @@ public class BrickPayrollService {
 
     public record SlipRow(Long id, String slipNo, String kind, String status, Long resourceId, String resourceName, String role,
                           LocalDate periodFrom, LocalDate periodTo, LocalDate paidOn, BigDecimal gross, BigDecimal deductions, BigDecimal net,
-                          String narrative, String account) {
+                          String narrative, String account,
+                          /* the journal entry the slip posted (its number, to show it) */
+                          Long journalEntryId) {
     }
 
     public record Payroll(List<ResourceView> resources, List<SlipRow> slips, List<EarningView> unpaid, BigDecimal unpaidTotal,
@@ -181,7 +183,8 @@ public class BrickPayrollService {
         String category = BrickService.blank(r.category()) == null ? null : r.category().trim().toUpperCase();
         if (category != null && !Set.of(STAFF, LABOUR).contains(category)) throw new BusinessException("Staff or production labour");
         x.setCategory(category);
-        boolean isDefault = Boolean.TRUE.equals(r.defaultTeam()) && x.getRole().contains("PRODUCTION") && Boolean.TRUE.equals(x.getActive());
+        // the default team: the production team new batches start with, and new orders' loading (and unloading) too
+        boolean isDefault = Boolean.TRUE.equals(r.defaultTeam()) && x.getRole().contains(PRODUCTION) && Boolean.TRUE.equals(x.getActive());
         x.setDefaultTeam(isDefault);
         if (isDefault) {
             // one default team: the others stop being it
@@ -279,7 +282,7 @@ public class BrickPayrollService {
                     BrickResource r = rs.get(s.getResourceId());
                     return new SlipRow(s.getId(), s.getSlipNo(), s.getKind(), s.getStatus(), s.getResourceId(), r == null ? "?" : r.getName(), r == null ? null : r.getRole(),
                             s.getPeriodFrom(), s.getPeriodTo(), s.getPaidOn(), s.getGross(), Money.nz(s.getDeductions()), s.getNet(), s.getNarrative(),
-                            s.getAccountId() == null ? null : acct.get(s.getAccountId()));
+                            s.getAccountId() == null ? null : acct.get(s.getAccountId()), s.getJournalEntryId());
                 }).toList();
     }
 

@@ -29,9 +29,9 @@ public class ChangeNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(ChangeNotifier.class);
     /** Sign-ins and sign-outs change these; nobody's screen needs to refresh for that. */
-    private static final Set<String> QUIET = Set.of("user_sessions", "app_users", "activity_log", "access_links");
+    private static final Set<String> QUIET = Set.of("user_sessions", "app_users", "activity_log", "access_links", "brick_notice_reads");
 
-    private record Subscriber(SseEmitter emitter, Long tenantId, Long userId) {
+    private record Subscriber(SseEmitter emitter, Long tenantId, Long userId, com.aditya.personalbudget.domain.type.UserRole role) {
     }
 
     private final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
@@ -48,7 +48,7 @@ public class ChangeNotifier {
 
     public SseEmitter subscribe(CurrentUser user) {
         SseEmitter emitter = new SseEmitter(0L);   // no timeout: the browser reconnects if it drops
-        Subscriber subscriber = new Subscriber(emitter, user.tenantId(), user.userId());
+        Subscriber subscriber = new Subscriber(emitter, user.tenantId(), user.userId(), user.role());
         subscribers.add(subscriber);
         Runnable remove = () -> subscribers.remove(subscriber);
         emitter.onCompletion(remove);
@@ -77,6 +77,16 @@ public class ChangeNotifier {
             if (by == null || s.tenantId().equals(by.tenantId())) {
                 send(s, "change", payload);
             }
+        }
+    }
+
+    /**
+     * A notification for some of a household's users (a new order, a request to approve …): sent as a "notice" event to
+     * the browsers of those {@code forUser} accepts (user id, app role).
+     */
+    public void notice(Long tenantId, Object payload, java.util.function.BiPredicate<Long, com.aditya.personalbudget.domain.type.UserRole> forUser) {
+        for (Subscriber s : subscribers) {
+            if (s.tenantId().equals(tenantId) && forUser.test(s.userId(), s.role())) send(s, "notice", payload);
         }
     }
 

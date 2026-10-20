@@ -28,12 +28,16 @@ public class AuthInterceptor implements HandlerInterceptor {
     private static final String BEARER = "Bearer ";
 
     private final SessionRegistry sessions;
+    private final BrickAccess brickAccess;
+    private final ChangeGate changes;
 
     /** What a user still on the default password may call: who am I, set the password, sign out. */
     private static final java.util.Set<String> PASSWORD_STEP = java.util.Set.of("/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/events");
 
-    public AuthInterceptor(SessionRegistry sessions) {
+    public AuthInterceptor(SessionRegistry sessions, BrickAccess brickAccess, ChangeGate changes) {
         this.sessions = sessions;
+        this.brickAccess = brickAccess;
+        this.changes = changes;
     }
 
     public static String tokenOf(HttpServletRequest request) {
@@ -68,6 +72,14 @@ public class AuthInterceptor implements HandlerInterceptor {
                 throw new ForbiddenException("Your role (" + user.role().getLabel() + ") does not allow: "
                         + permission.getDescription());
             }
+            // Brick Management: the role there must hold one of the permissions the endpoint names
+            BrickGuard guard = method.getMethodAnnotation(BrickGuard.class);
+            if (guard != null) brickAccess.require(guard.value());
+        }
+        // staff of the brick business: Brick Management only, at the API too (whatever their app role allows)
+        BrickRole staff = brickAccess.staffRole(user);
+        if (staff != null && !BrickAccess.staffMay(request.getRequestURI())) {
+            throw new ForbiddenException("Your role (" + staff.getLabel() + ") opens Brick Management only");
         }
         if (user.viaLink() && !FeaturePolicy.allowsLink(user, request.getMethod(), request.getRequestURI())) {
             throw new ForbiddenException("This link does not give access to that");
@@ -75,6 +87,15 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (!FeaturePolicy.allows(user.features(), request.getMethod(), request.getRequestURI())) {
             throw new ForbiddenException(user.mobile() ? "This section is not shared with you on mobile"
                     : "This section is not shared with you. Ask your admin.");
+        }
+        // maker-checker: who needs approval does not change what is recorded; the change waits for a checker instead
+        if (changes.holds(user, request.getMethod(), request.getRequestURI())) {
+            try {
+                changes.hold(request, response);
+            } catch (java.io.IOException e) {
+                throw new com.aditya.personalbudget.exception.BusinessException("The change could not be kept for approval");
+            }
+            return false;
         }
         return true;
     }

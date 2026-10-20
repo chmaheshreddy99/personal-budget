@@ -65,8 +65,12 @@ public class AccessController {
     private final ApprovalPolicy approvalPolicy;
     private final AppSettingsService appSettings;
 
+    private final com.aditya.personalbudget.service.ChangeReplayer replayer;
+
     public AccessController(AccessLinkService links, PendingService pending, ActivityService activity,
-                            OrganizationRepository tenants, ApprovalPolicy approvalPolicy, AppSettingsService appSettings) {
+                            OrganizationRepository tenants, ApprovalPolicy approvalPolicy, AppSettingsService appSettings,
+                            com.aditya.personalbudget.service.ChangeReplayer replayer) {
+        this.replayer = replayer;
         this.tenants = tenants;
         this.approvalPolicy = approvalPolicy;
         this.appSettings = appSettings;
@@ -127,7 +131,16 @@ public class AccessController {
     @PostMapping("/api/approvals/{id}/approve")
     @RequiresPermission(Permission.APPROVE_ENTRIES)
     public PendingView approve(@PathVariable Long id, @Valid @RequestBody(required = false) ApproveRequest request) {
+        // a change request is approved by making the change, as it was asked
+        if (pending.isChange(id)) return replayer.approve(id, request == null ? null : request.note());
         return pending.approve(id, request);
+    }
+
+    /** The maker answers a rejected change request with a comment (evidence attached to it) and sends it again. */
+    @PostMapping("/api/approvals/{id}/answer")
+    @RequiresPermission(Permission.VIEW)
+    public PendingView answer(@PathVariable Long id, @Valid @RequestBody RejectRequest request) {
+        return pending.answerChange(id, request == null ? null : request.note());
     }
 
     @PostMapping("/api/approvals/{id}/reject")

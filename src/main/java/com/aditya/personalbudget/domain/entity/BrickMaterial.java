@@ -45,6 +45,15 @@ public class BrickMaterial implements TenantOwned {
 
     private BigDecimal lastRate;
 
+    /**
+     * What is in the yard now: kept up to date in the same transaction as every purchase, batch count and change to them
+     * (BrickService#refreshMaterialStock), and read from here. Empty on rows from before it was kept.
+     */
+    private BigDecimal currentStock;
+
+    /** When currentStock was last brought up to date. */
+    private LocalDateTime stockUpdatedAt;
+
     private Integer sortOrder;
 
     @Column(nullable = false)

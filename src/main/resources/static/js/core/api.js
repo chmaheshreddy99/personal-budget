@@ -83,6 +83,17 @@ async function request(method, path, { params, body, key } = {}) {
     }
     if (response.status === 204) return null;
     const data = await response.json().catch(() => null);
+    // maker-checker: the change was not made, it waits for a checker. Said once here; the caller stops as on a refusal
+    // (a dialog closes, nothing is redrawn as changed)
+    if (response.status === 202 && data?.pendingApproval) {
+        window.dispatchEvent(new CustomEvent('change-held', { detail: data }));
+        window.dispatchEvent(new Event('approvals-changed'));
+        window.dispatchEvent(new Event('brick-approvals-changed'));
+        const held = new Error('');
+        held.pendingApproval = true;
+        held.pending = data.pending;
+        throw held;
+    }
 
     if (!response.ok) {
         if (response.status === 401 && !path.startsWith('/auth/login')) onUnauthorized();

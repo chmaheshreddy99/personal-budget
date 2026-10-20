@@ -86,6 +86,7 @@ export function billFromPublic(o) {
         company: o.seller, orderNo: o.orderNo, orderDate: o.orderDate, requiredBy: o.requiredBy, status: o.status, statusLabel: o.statusLabel,
         customer: { name: o.customerName, phone: o.customerPhone, address: o.deliverTo, landmark: o.landmark },
         items: o.items, totals: o.totals, deliveryWaived: o.deliveryWaived, waiveReason: o.waiveReason, handlingBilled: o.handlingBilled,
+        transporterPaid: !!o.transporterPaid,
         trips: o.trips.map(t => ({ tripNo: t.tripNo, status: t.status, vehicle: t.vehicle, deliveredAt: t.deliveredAt, quantity: t.delivered ?? t.quantity, ackName: t.ackName })),
         payments: o.payments, invoice: o.invoice, publicKey: o.publicKey, fingerprint: o.keyFingerprint,
     };
@@ -120,13 +121,15 @@ export function billDocHtml(d) {
         <section class="bd-totals">
             <div class="bd-words"><small>Amount in words</small><b>${esc(inWords(t.total))}</b>
                 ${d.transporterPaid ? '<p class="bd-free">Transport by a hired vehicle: its charges are paid to the transporter directly, not on this bill.</p>' : ''}
-                ${d.deliveryWaived && !d.transporterPaid ? `<p class="bd-free">Delivery free${d.waiveReason ? ` — ${esc(d.waiveReason)}` : ''}</p>` : ''}
+                ${d.deliveryWaived && !d.transporterPaid ? `<p class="bd-free">Free delivery${d.waiveReason ? ` — ${esc(d.waiveReason)}` : ''}</p>` : ''}
                 ${posted.length ? `<div class="bd-receipts"><small>Payments received</small>${posted.map(p => `<span>${esc(p.receiptNo || '')} · ${day(p.receivedOn)} · ${esc(p.mode || '')}<b>${rupees(p.amount)}</b></span>`).join('')}</div>` : ''}</div>
             <dl>
                 ${Number(t.discount) ? `<div><dt>At MRP</dt><dd>${rupees(t.atMrp)}</dd></div><div class="disc"><dt>Discount</dt><dd>− ${rupees(t.discount)}</dd></div>` : ''}
                 <div><dt>Bricks</dt><dd>${rupees(delivered ? Number(t.billed) - Number(t.delivery) - Number(t.handling) : t.bricks)}</dd></div>
-                <div><dt>Delivery (${t.trips} trip${t.trips === 1 ? '' : 's'})</dt><dd>${d.transporterPaid ? '<span class="bd-free-tag">TO TRANSPORTER</span>'
-                    : d.deliveryWaived ? '<span class="bd-free-tag">FREE</span>' : rupees(t.delivery)}</dd></div>
+                ${d.transporterPaid ? `<div><dt>Delivery (${t.trips} trip${t.trips === 1 ? '' : 's'})</dt><dd><span class="bd-free-tag">TO TRANSPORTER</span></dd></div>`
+                    : d.deliveryWaived && Number(t.deliveryGross) ? `<div><dt>Delivery (${t.trips} trip${t.trips === 1 ? '' : 's'})</dt><dd>${rupees(t.deliveryGross)}</dd></div>
+                        <div class="disc"><dt>Free delivery</dt><dd>− ${rupees(t.deliveryGross)}</dd></div>`
+                    : `<div><dt>Delivery (${t.trips} trip${t.trips === 1 ? '' : 's'})</dt><dd>${d.deliveryWaived ? '<span class="bd-free-tag">FREE</span>' : rupees(t.delivery)}</dd></div>`}
                 ${Number(t.handling) ? `<div><dt>Loading &amp; unloading</dt><dd>${rupees(t.handling)}</dd></div>` : ''}
                 <div class="grand"><dt>Total</dt><dd>${rupees(t.total)}</dd></div>
                 <div><dt>Paid</dt><dd>${rupees(t.paid)}</dd></div>
@@ -198,15 +201,61 @@ export async function verifyDoc(root, payload, signature, publicKey) {
     el.textContent = ok === true ? '✓ verified' : ok === false ? '✗ does not match: do not trust this copy' : '(this browser cannot check it)';
 }
 
-/** Prints a document on a page of its own. */
+/**
+ * Prints a document on one A4 sheet: it is laid out at the page's printable width (A4 less 10 mm margins: 190 × 277 mm),
+ * measured, and scaled down just enough that all of it (the signatures, the seal and the digital signature too) fits on
+ * the one page; it is never split over two.
+ */
 export function printDoc(html, title) {
     const win = window.open('', '_blank', 'width=860,height=1100');
     if (!win) return false;
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
         <link rel="stylesheet" href="${location.origin}/css/theme.css"><link rel="stylesheet" href="${location.origin}/css/bond.css">
         <link rel="stylesheet" href="${location.origin}/css/brick-docs.css">
-        <style>body{background:#fff;margin:0;padding:12px} .bd-doc{box-shadow:none;margin:0 auto} @page{size:A4;margin:10mm}</style></head>
-        <body class="bd-print">${html.replace(/<span data-verify[^>]*>[^<]*<\/span>/, '')}<script>window.onload=()=>setTimeout(()=>window.print(),350)<\/script></body></html>`);
+        <style>
+            @page { size: A4 portrait; margin: 10mm; }
+            html, body { margin: 0; padding: 0; background: #fff; }
+            /* 190 mm of printable width; the sheet's height (277 mm) is what it is fitted into */
+            .bd-doc { box-shadow: none; margin: 0 auto; width: 190mm; max-width: none; box-sizing: border-box; }
+            .bd-sheet { width: 190mm; margin: 0 auto; overflow: hidden; }
+            @media print { .bd-doc, .bd-doc * { break-inside: avoid; page-break-inside: avoid; } .bd-sheet { height: 276mm; } }
+            /* a long document first packs tighter (rows on one line, less air), and is scaled only for what is still over */
+            .bd-dense.bd-doc { padding: 16px 20px 12px; line-height: 1.3; }
+            .bd-dense .bd-brand { padding-bottom: 8px; margin-bottom: 8px; }
+            .bd-dense .bd-parties { margin-bottom: 8px; }
+            .bd-dense .bd-parties > div { padding: 4px 8px; }
+            .bd-dense .bd-lines { font-size: 11px; }
+            .bd-dense .bd-lines th { padding: 3px 6px; }
+            .bd-dense .bd-lines td { padding: 2px 6px; }
+            .bd-dense .bd-lines td small { display: inline; margin-left: 4px; }
+            .bd-dense .bd-lines td:not(:first-child) { white-space: nowrap; }
+            .bd-dense .bd-totals, .bd-dense .bd-net { margin-top: 8px; }
+            .bd-dense .bd-sign { margin-top: 16px; }
+            .bd-dense .bd-verify { margin-top: 8px; padding: 6px 0 4px; }
+            .bd-dense .bd-watermark { display: none; }
+        </style></head>
+        <body class="bd-print"><div class="bd-sheet">${html.replace(/<span data-verify[^>]*>[^<]*<\/span>/, '')}</div>
+        <script>
+            function fit() {
+                var doc = document.querySelector('.bd-doc');
+                var probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;visibility:hidden;height:276mm;width:1px';
+                document.body.appendChild(probe);
+                var room = probe.getBoundingClientRect().height;
+                probe.remove();
+                doc.style.zoom = 1;
+                doc.classList.remove('bd-dense');
+                var h = doc.getBoundingClientRect().height;
+                if (h > room) { doc.classList.add('bd-dense'); h = doc.getBoundingClientRect().height; }
+                if (h > room) doc.style.zoom = Math.floor((room / h) * 1000) / 1000;
+            }
+            window.onload = function () {
+                (document.fonts ? document.fonts.ready : Promise.resolve()).then(function () {
+                    fit();
+                    setTimeout(function () { fit(); window.print(); }, 300);
+                });
+            };
+        <\/script></body></html>`);
     win.document.close();
     return true;
 }

@@ -122,3 +122,17 @@
 .modal .check-line { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px; border-radius: 11px;
     border: 1px dashed var(--hairline-strong); background: #fafcfe; font-size: 13px; font-weight: 600; }
 .modal .check-line input[type=checkbox] { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* ---- waiting: a dialog's data loading, a save in progress, a button whose request is running */
+.modal.pending-modal { width: auto; min-width: 220px; flex-direction: row; display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+    font-size: 13px; color: var(--text-secondary); animation: none; }
+.modal.pending-modal .spinner { width: 22px; height: 22px; flex: none; }
+.modal.working .modal-body { pointer-events: none; opacity: 0.75; transition: opacity .2s; }
+.btn.busy, button.busy { position: relative; pointer-events: none; }
+.btn.busy > svg { visibility: hidden; }
+.btn.busy::before { content: ''; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+    border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.btn.busy:not(.icon) { padding-left: 30px; }
+.btn.busy:not(.icon)::before { left: 15px; }
+.spinner.sm { width: 16px; height: 16px; border-width: 2px; }
+.inline-loading { display: flex; align-items: center; gap: 8px; padding: 10px 4px; font-size: 12px; color: var(--text-muted); }

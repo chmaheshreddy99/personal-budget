@@ -282,6 +282,8 @@ let events = null;
 let pendingRefresh = null;
 
 window.addEventListener('approvals-changed', () => refreshApprovalBadge());
+// a change held for a checker (the user needs approval): said once, wherever it was made
+window.addEventListener('change-held', e => toast(e.detail?.message || 'Sent for approval', 'info'));
 
 function startLiveUpdates() {
     stopLiveUpdates();
@@ -296,6 +298,10 @@ function startLiveUpdates() {
         refreshApprovalBadge();
         refreshIntegrityBadge();
         const who = change.userId === state.user?.userId ? 'You (another window)' : (change.by || 'Someone');
+        // a screen that can bring just its changed parts up to date (an order the customer signed for) takes it over:
+        // no redraw, nothing lost
+        const inline = new CustomEvent('pb-live-change', { detail: change, cancelable: true });
+        if (!window.dispatchEvent(inline)) return;
         if (document.querySelector('.modal-backdrop, .ev-overlay')) {
             if (!pendingRefresh) toast(`${who} changed data; this page refreshes when you close the dialog`, 'info');
             pendingRefresh = who;
@@ -303,6 +309,12 @@ function startLiveUpdates() {
         }
         toast(`${who} updated the data — page refreshed`, 'info');
         route({ silent: true });
+    });
+    // Brick Management notifications (a new order, a request to approve, a signed delivery): a card wherever one is
+    events.addEventListener('notice', e => {
+        let data = {};
+        try { data = JSON.parse(e.data); } catch { return; }
+        import('./components/brick-alerts.js').then(() => window.dispatchEvent(new CustomEvent('brick-notice', { detail: data })));
     });
     events.onerror = () => {
         if (!state.user) stopLiveUpdates();   // signed out: stop reconnecting

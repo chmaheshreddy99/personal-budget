@@ -39,6 +39,10 @@ public class BrickOrderLink implements TenantOwned {
     @Column(nullable = false, unique = true, length = 64)
     private String tokenHash;
 
+    /** The link's token itself, so the same link can be shared again (links made before it was kept have none). */
+    @Column(length = 64)
+    private String token;
+
     @Column(nullable = false, length = 100)
     private String createdByName;
 

@@ -124,7 +124,9 @@ public class BrickService {
     }
 
     public record TypeRequest(@NotBlank @Size(max = 60) String name, @PositiveOrZero BigDecimal mrp, @Min(0) @Max(365) Integer curingDays,
-                              @Min(0) Integer openingStock, @Size(max = 10) String color, Boolean active) {
+                              @Min(0) Integer openingStock, @Size(max = 10) String color, Boolean active,
+                              /* the lowest price agreed without a checker's approval (empty: any) */
+                              @PositiveOrZero BigDecimal minPrice) {
     }
 
     public record MaterialRequest(@NotBlank @Size(max = 60) String name, @NotBlank @Size(max = 15) String unit, @PositiveOrZero BigDecimal openingStock,
@@ -177,6 +179,10 @@ public class BrickService {
 
     public record MaterialStock(Long materialId, String name, String unit, BigDecimal stock, BigDecimal reorderLevel, BigDecimal lastRate,
                                 BigDecimal avgDailyUse, Integer daysLeft, boolean low) {
+    }
+
+    /** A material whose kept balance differs from what its purchases and counts work out to (should never happen). */
+    public record StockIssue(Long materialId, String name, String unit, BigDecimal kept, BigDecimal worked) {
     }
 
     public record BookAccount(Long id, String name, String role, AccountType type, AccountClass accountClass, BigDecimal balance,
@@ -484,6 +490,23 @@ public class BrickService {
         return java.util.Arrays.stream(s.getExpenseHeads().split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
     }
 
+    /** Adds an expense head (kept for next time), when it is not there yet; gives the set-up with it. */
+    @Transactional
+    public Meta addExpenseHead(String name) {
+        ensureDefaults();
+        String head = name == null ? "" : name.trim().replace(",", " ").replaceAll("\s+", " ");
+        if (head.isEmpty() || head.length() > 40) throw new BusinessException("A head of up to 40 letters");
+        BrickSettings s = settings();
+        List<String> hs = new ArrayList<>(heads(s));
+        if (hs.stream().noneMatch(h -> h.equalsIgnoreCase(head))) {
+            hs.add(head);
+            s.setExpenseHeads(ActivityService.cut(String.join(",", hs), 600));
+            settingsRepo.save(s);
+            activity.record("ADDED", AREA, "Expense head " + head);
+        }
+        return meta();
+    }
+
     @Transactional
     public Meta updateSettings(SettingsRequest r) {
         ensureDefaults();
@@ -544,6 +567,7 @@ public class BrickService {
         }
         b.setName(name);
         b.setMrp(r.mrp() == null ? null : r.mrp());
+        b.setMinPrice(r.minPrice() == null || r.minPrice().signum() == 0 ? null : r.minPrice());
         b.setCuringDays(r.curingDays() == null ? 14 : r.curingDays());
         b.setOpeningStock(r.openingStock() == null ? 0 : r.openingStock());
         b.setColor(blank(r.color()) != null && r.color().matches("#[0-9a-fA-F]{6}") ? r.color() : b.getColor() != null ? b.getColor() : "#b4532a");
@@ -592,6 +616,7 @@ public class BrickService {
         m.setReorderLevel(r.reorderLevel());
         m.setActive(r.active() == null || r.active());
         materials.save(m);
+        refreshMaterialStock();
         activity.record(id == null ? "ADDED" : "CHANGED", AREA, "Raw material " + name + " (" + m.getUnit() + ")");
         return meta();
     }
@@ -933,57 +958,185 @@ public class BrickService {
 
     /**
      * Raw material through the batches: each batch's opening is the batch before's closing (the first's is the material's
-     * opening stock), it received what was bought after that batch up to its own date, and used what is no longer there.
-     * {@code virtual} is a batch being entered (or changed): its date, id (null: a new one) and the closing counts typed.
+     * opening stock); it received the purchases that were in the yard when its count was taken (recorded before the count,
+     * whatever their date), and used what is no longer there. A purchase recorded after a count was not in it: it goes to
+     * the next batch counted after it, or (none yet) adds to the stock now. What a count worked out is kept with it
+     * ({@link #keepCounts}) and read back as kept. {@code virtual} is a batch
+     * being entered (or changed): its date, id (null: a new one) and the closing counts typed (counted now).
      * Returns batch id → flows (the virtual batch under {@code Long.MAX_VALUE} when new).
      */
     Map<Long, List<MaterialFlow>> materialFlows(LocalDate virtualDate, Long virtualId, Map<Long, BigDecimal> virtualClosing) {
+        return materialLedger(virtualDate, virtualId, virtualClosing).flows();
+    }
+
+    /** The flows batch by batch, and per material what was bought and is not in any batch's count yet (it adds to the stock). */
+    record MaterialLedger(Map<Long, List<MaterialFlow>> flows, Map<Long, BigDecimal> notYetCounted) {
+    }
+
+    MaterialLedger materialLedger(LocalDate virtualDate, Long virtualId, Map<Long, BigDecimal> virtualClosing) {
+        return materialLedger(virtualDate, virtualId, virtualClosing, true);
+    }
+
+    /**
+     * {@code kept}: a count's flow is the one kept when it was taken (the batch being entered is worked out); false: every
+     * flow worked out from the records, to check the kept ones against.
+     */
+    private MaterialLedger materialLedger(LocalDate virtualDate, Long virtualId, Map<Long, BigDecimal> virtualClosing, boolean kept) {
         Long t = UserContext.tenantId();
         List<BrickBatch> list = new ArrayList<>(batchesInOrder());
         long vid = virtualId == null ? Long.MAX_VALUE : virtualId;
         if (virtualDate != null) {
+            // a batch being changed keeps the time it was recorded; a new one is recorded now
+            LocalDateTime recorded = list.stream().filter(b -> b.getId().equals(virtualId)).map(BrickBatch::getCreatedAt).findFirst().orElse(LocalDateTime.now());
             list.removeIf(b -> b.getId().equals(virtualId));
             BrickBatch v = new BrickBatch();
             v.setId(vid);
             v.setProducedOn(virtualDate);
+            v.setCreatedAt(recorded);
             list.add(v);
             list.sort(Comparator.comparing(BrickBatch::getProducedOn).thenComparing(BrickBatch::getId));
         }
-        Map<Long, Map<Long, BigDecimal>> closing = new HashMap<>();
+        Map<Long, Map<Long, BrickBatchMaterial>> counts = new HashMap<>();
         for (BrickBatchMaterial m : batchMaterials.findByTenantId(t)) {
-            closing.computeIfAbsent(m.getBatchId(), k -> new HashMap<>()).put(m.getMaterialId(), m.getClosing());
+            counts.computeIfAbsent(m.getBatchId(), k -> new HashMap<>()).put(m.getMaterialId(), m);
         }
-        if (virtualDate != null) closing.put(vid, virtualClosing == null ? Map.of() : virtualClosing);
+        LocalDateTime now = LocalDateTime.now();
+        if (virtualDate != null) {
+            Map<Long, BrickBatchMaterial> typed = new HashMap<>();
+            Map<Long, BrickBatchMaterial> before = counts.getOrDefault(vid, Map.of());
+            (virtualClosing == null ? Map.<Long, BigDecimal>of() : virtualClosing).forEach((id, close) -> {
+                BrickBatchMaterial x = new BrickBatchMaterial();
+                x.setMaterialId(id);
+                x.setClosing(close);
+                // a count being corrected keeps the time it was taken; a new one is taken now
+                x.setCountedAt(before.containsKey(id) && before.get(id).getCountedAt() != null ? before.get(id).getCountedAt() : now);
+                typed.put(id, x);
+            });
+            counts.put(vid, typed);
+        }
+        Map<Long, LocalDateTime> batchTime = new HashMap<>();
+        list.forEach(b -> batchTime.put(b.getId(), b.getCreatedAt()));
         List<BrickMaterial> ms = materials.findByTenantId(t).stream().sorted(order(BrickMaterial::getSortOrder, BrickMaterial::getId)).toList();
-        Map<Long, List<BrickMaterialPurchase>> bought = purchases.findByTenantId(t).stream().collect(Collectors.groupingBy(BrickMaterialPurchase::getMaterialId));
+        // each material's purchases, earliest first; each is taken once, by the first batch whose count it was in
+        Map<Long, List<BrickMaterialPurchase>> waiting = new HashMap<>();
+        purchases.findByTenantId(t).stream()
+                .sorted(Comparator.comparing(BrickMaterialPurchase::getReceivedOn).thenComparing(p -> p.getCreatedAt() == null ? LocalDateTime.MIN : p.getCreatedAt()))
+                .forEach(p -> waiting.computeIfAbsent(p.getMaterialId(), k -> new ArrayList<>()).add(p));
         Map<Long, List<MaterialFlow>> out = new LinkedHashMap<>();
         Map<Long, BigDecimal> prevClose = new HashMap<>();
-        LocalDate prevDate = null;
         for (BrickBatch b : list) {
             List<MaterialFlow> flows = new ArrayList<>();
             for (BrickMaterial m : ms) {
                 BigDecimal opening = prevClose.getOrDefault(m.getId(), Money.nz(m.getOpeningStock()));
-                LocalDate after = prevDate;
-                BigDecimal received = bought.getOrDefault(m.getId(), List.of()).stream()
-                        .filter(p -> (after == null || p.getReceivedOn().isAfter(after)) && !p.getReceivedOn().isAfter(b.getProducedOn()))
-                        .map(BrickMaterialPurchase::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
-                BigDecimal counted = closing.getOrDefault(b.getId(), Map.of()).get(m.getId());
-                BigDecimal close = counted != null ? counted : opening.add(received);
-                flows.add(new MaterialFlow(m.getId(), m.getName(), m.getUnit(), opening, received, close, opening.add(received).subtract(close), counted != null));
+                BrickBatchMaterial count = counts.getOrDefault(b.getId(), Map.of()).get(m.getId());
+                // the stock as it stood when the yard was counted (the count's own time, else when the batch was recorded): every
+                // purchase recorded by then, whatever its date. A purchase from before times were kept goes by its date.
+                LocalDateTime countedAt = count != null && count.getCountedAt() != null ? count.getCountedAt() : batchTime.get(b.getId());
+                List<BrickMaterialPurchase> mine = waiting.getOrDefault(m.getId(), new ArrayList<>());
+                List<BrickMaterialPurchase> in = mine.stream().filter(p -> countedAt != null && p.getCreatedAt() != null
+                        ? !p.getCreatedAt().isAfter(countedAt) : !p.getReceivedOn().isAfter(b.getProducedOn())).toList();
+                BigDecimal received = in.stream().map(BrickMaterialPurchase::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+                mine.removeAll(in);
+                BigDecimal close = count != null ? count.getClosing() : opening.add(received);
+                if (kept && count != null && count.getConsumed() != null && b.getId() != vid) {
+                    // as it stood when counted
+                    flows.add(new MaterialFlow(m.getId(), m.getName(), m.getUnit(), count.getOpening(), count.getReceived(), close, count.getConsumed(), true));
+                } else {
+                    flows.add(new MaterialFlow(m.getId(), m.getName(), m.getUnit(), opening, received, close, opening.add(received).subtract(close), count != null));
+                }
                 prevClose.put(m.getId(), close);
             }
-            prevDate = b.getProducedOn();
             out.put(b.getId(), flows);
+        }
+        Map<Long, BigDecimal> left = new HashMap<>();
+        waiting.forEach((id, ps) -> left.put(id, ps.stream().map(BrickMaterialPurchase::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add)));
+        return new MaterialLedger(out, left);
+    }
+
+    /** What every material's purchases and counts work out to now: the last count, plus what was bought and not counted since. */
+    Map<Long, BigDecimal> workedOutStock() {
+        Long t = UserContext.tenantId();
+        MaterialLedger ledger = materialLedger(null, null, null);
+        Map<Long, BigDecimal> stock = new HashMap<>();
+        for (BrickBatch b : batchesInOrder()) {
+            for (MaterialFlow f : ledger.flows().getOrDefault(b.getId(), List.of())) stock.put(f.materialId(), f.closing());
+        }
+        Map<Long, BigDecimal> out = new HashMap<>();
+        for (BrickMaterial m : materials.findByTenantId(t)) {
+            out.put(m.getId(), stock.getOrDefault(m.getId(), Money.nz(m.getOpeningStock())).add(ledger.notYetCounted().getOrDefault(m.getId(), BigDecimal.ZERO)));
         }
         return out;
     }
 
-    /** Raw material in the yard now, how fast it goes (over the last 30 days of batches) and so how many days it lasts. */
+    /**
+     * Keeps each count's flow as the stock stood when it was taken. The last batch's (the only one that can still change) is
+     * worked out again; a closed batch's must come out as it was kept: a change that would alter it (a purchase it took in
+     * changed or deleted, an opening stock changed) is refused. Counts from before flows were kept get theirs now.
+     */
+    void keepCounts() {
+        List<BrickBatch> order = batchesInOrder();
+        if (order.isEmpty()) return;
+        Long last = order.get(order.size() - 1).getId();
+        Map<Long, List<MaterialFlow>> worked = materialLedger(null, null, null, false).flows();
+        for (BrickBatchMaterial c : batchMaterials.findByTenantId(UserContext.tenantId())) {
+            MaterialFlow f = worked.getOrDefault(c.getBatchId(), List.of()).stream().filter(x -> x.materialId().equals(c.getMaterialId())).findFirst().orElse(null);
+            if (f == null) continue;
+            boolean same = c.getConsumed() != null && c.getOpening().compareTo(f.opening()) == 0 && c.getReceived().compareTo(f.received()) == 0
+                    && c.getConsumed().compareTo(f.consumed()) == 0;
+            if (same) continue;
+            if (c.getConsumed() != null && !c.getBatchId().equals(last)) {
+                String no = batches.findById(c.getBatchId()).map(BrickBatch::getBatchNo).orElse("a batch");
+                throw new BusinessException("Batch " + no + " is closed and this would change its " + f.name() + " (it took in " + plain(c.getReceived())
+                        + " " + f.unit() + " and used " + plain(c.getConsumed()) + "; it would be " + plain(f.received()) + " in and " + plain(f.consumed())
+                        + " used). Only the last batch and what came after it can change");
+            }
+            c.setOpening(f.opening());
+            c.setReceived(f.received());
+            c.setConsumed(f.consumed());
+            batchMaterials.save(c);
+        }
+    }
+
+    private static String plain(BigDecimal v) {
+        return v.stripTrailingZeros().toPlainString();
+    }
+
+    /**
+     * Brings every material's kept balance up to date. Called inside the transaction of each change that moves raw material
+     * (a purchase saved or deleted, a batch counted, changed or deleted, a material's opening stock changed), so the balance
+     * read everywhere is always the one the records give. Returns the materials whose balance changed.
+     */
+    @Transactional
+    public int refreshMaterialStock() {
+        keepCounts();
+        Map<Long, BigDecimal> worked = workedOutStock();
+        int changed = 0;
+        for (BrickMaterial m : materials.findByTenantId(UserContext.tenantId())) {
+            BigDecimal now = worked.getOrDefault(m.getId(), BigDecimal.ZERO).stripTrailingZeros();
+            if (m.getCurrentStock() == null || m.getCurrentStock().compareTo(now) != 0) {
+                m.setCurrentStock(now.scale() < 0 ? now.setScale(0) : now);
+                m.setStockUpdatedAt(LocalDateTime.now());
+                materials.save(m);
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    /** Materials whose kept balance does not match their records (one never kept yet is shown worked out, so it is not off). */
+    public List<StockIssue> stockIssues() {
+        Map<Long, BigDecimal> worked = workedOutStock();
+        return materials.findByTenantId(UserContext.tenantId()).stream()
+                .filter(m -> m.getCurrentStock() != null && m.getCurrentStock().compareTo(worked.getOrDefault(m.getId(), BigDecimal.ZERO)) != 0)
+                .map(m -> new StockIssue(m.getId(), m.getName(), m.getUnit(), m.getCurrentStock(), worked.getOrDefault(m.getId(), BigDecimal.ZERO))).toList();
+    }
+
+    /** Raw material in the yard now (the kept balance), how fast it goes (over the last 30 days of batches) and so how many days it lasts. */
     public List<MaterialStock> materialStock() {
         Long t = UserContext.tenantId();
-        Map<Long, List<MaterialFlow>> flows = materialFlows(null, null, null);
+        MaterialLedger ledger = materialLedger(null, null, null);
+        Map<Long, List<MaterialFlow>> flows = ledger.flows();
         List<BrickBatch> list = batchesInOrder();
-        LocalDate last = list.isEmpty() ? null : list.getLast().getProducedOn();
         Map<Long, BigDecimal> stock = new HashMap<>();
         Map<Long, BigDecimal> used = new HashMap<>();
         LocalDate since = LocalDate.now().minusDays(30);
@@ -995,9 +1148,9 @@ public class BrickService {
         }
         List<MaterialStock> out = new ArrayList<>();
         for (BrickMaterial m : materials.findByTenantId(t).stream().sorted(order(BrickMaterial::getSortOrder, BrickMaterial::getId)).toList()) {
-            BigDecimal after = purchases.findByTenantId(t).stream().filter(p -> p.getMaterialId().equals(m.getId()) && (last == null || p.getReceivedOn().isAfter(last)))
-                    .map(BrickMaterialPurchase::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal now = stock.getOrDefault(m.getId(), Money.nz(m.getOpeningStock())).add(after);
+            // the kept balance; one never kept yet (older data): the last batch's closing, plus what was bought and not counted since
+            BigDecimal now = m.getCurrentStock() != null ? m.getCurrentStock()
+                    : stock.getOrDefault(m.getId(), Money.nz(m.getOpeningStock())).add(ledger.notYetCounted().getOrDefault(m.getId(), BigDecimal.ZERO));
             if (!Boolean.TRUE.equals(m.getActive()) && now.signum() == 0) continue;
             BigDecimal daily = used.getOrDefault(m.getId(), BigDecimal.ZERO).divide(BigDecimal.valueOf(30), 3, java.math.RoundingMode.HALF_UP);
             Integer days = daily.signum() > 0 ? now.max(BigDecimal.ZERO).divide(daily, 0, java.math.RoundingMode.DOWN).intValue() : null;
@@ -1040,6 +1193,23 @@ public class BrickService {
 
     BrickVehicle requireVehicle(Long id) {
         return vehicles.findByIdAndTenantId(id, UserContext.tenantId()).orElseThrow(() -> new NotFoundException("Vehicle", id));
+    }
+
+    /**
+     * The team a job starts with: the active team of that role marked the default, else the only one there is.
+     * {@code role} is LOADING_TEAM (loads and unloads our vehicles) or PRODUCTION (makes the bricks, loads hired vehicles).
+     */
+    Long defaultTeam(String role) {
+        List<BrickResource> teams = resources.findByTenantId(UserContext.tenantId()).stream()
+                .filter(r -> Boolean.TRUE.equals(r.getActive()) && r.getRole() != null && r.getRole().contains(role)).toList();
+        return teams.stream().filter(r -> Boolean.TRUE.equals(r.getDefaultTeam())).findFirst()
+                .or(() -> teams.size() == 1 ? java.util.Optional.of(teams.get(0)) : java.util.Optional.empty())
+                .map(BrickResource::getId).orElse(null);
+    }
+
+    /** A line in the activity log, under Brick Management. */
+    public void note(String action, String text) {
+        activity.record(action, AREA, text);
     }
 
     BrickResource requireResource(Long id) {

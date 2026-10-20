@@ -42,7 +42,9 @@ export function refreshFooter(soft = false) {
         try {
             lastPulse = await api.get('/pulse');
             render(lastPulse);
-        } catch {
+        } catch (e) {
+            // the figures are not for every role (a business's staff): nothing shown, the server is there
+            if (e?.status === 403) { $('foot-status').innerHTML = ''; return; }
             if (!soft) $('foot-status').innerHTML = `<span class="foot-dot down"></span><span>Server unreachable</span>`;
         }
     }, soft ? 50 : 400);

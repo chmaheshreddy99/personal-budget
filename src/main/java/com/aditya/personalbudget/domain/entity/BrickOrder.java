@@ -104,6 +104,18 @@ public class BrickOrder implements TenantOwned {
     @Column(length = 10)
     private String hiredPaidBy;
 
+    /** Unloading at the site is done by the customer or the transporter, not by a team of ours (nothing earned or billed for it). */
+    private Boolean unloadingOutside;
+
+    /** Deliver in this many trips whatever the vehicle carries (a special case); empty: as many as the vehicle needs. */
+    private Integer plannedTrips;
+
+    /** Where to deliver, as the customer shared it from their phone on the order link: "lat,lng,accuracy", and when. */
+    @Column(length = 80)
+    private String deliveryLocation;
+
+    private LocalDateTime deliveryLocationAt;
+
     @Column(length = 50)
     private String createdBy;
 

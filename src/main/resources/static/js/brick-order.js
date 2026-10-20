@@ -6,7 +6,7 @@
  */
 import { upiLogo } from './core/upi-logos.js';
 import { qrSvg } from './core/qr.js';
-import { esc, signaturePad, signatureSvg, deviceInfo, locate } from './core/bond.js';
+import { esc, signaturePad, signatureSvg, deviceInfo, deviceFingerprint, locate } from './core/bond.js';
 import { billDocHtml, billFromPublic, verifyDoc, printDoc } from './core/brick-docs.js';
 
 const token = location.hash.slice(1);
@@ -57,7 +57,7 @@ function draw() {
     $('bo-company').textContent = o.company;
     const main = $('bo-main');
     main.innerHTML = o.invoice ? `${heroHtml()}${billHtml()}${tripsHtml()}${paymentsHtml()}${aboutHtml()}`
-        : `${heroHtml()}${claimedHtml()}${tripsHtml()}${payHtml()}${billHtml()}${paymentsHtml()}${aboutHtml()}`;
+        : `${heroHtml()}${locationAsk()}${claimedHtml()}${tripsHtml()}${payHtml()}${billHtml()}${paymentsHtml()}${aboutHtml()}`;
     requestAnimationFrame(() => main.querySelector('.bo-road')?.classList.add('go'));
     if (o.invoice) verifyDoc(main.querySelector('.bo-doc'), o.invoice.payload, o.invoice.signature, o.publicKey);
     bind(main);
@@ -130,7 +130,8 @@ function billHtml() {
     const inv = o.invoice;
     return `<section class="sh-card bo-doc"><h2>${inv ? `Your invoice <small>${esc(inv.invoiceNo)} · paid in full</small>` : 'Your bill <small>the invoice comes once it is paid in full</small>'}</h2>
         <div class="bo-doc-wrap">${billDocHtml(billFromPublic(o))}</div>
-        <button class="bo-btn" data-print>🖨️ ${inv ? 'Print or save the invoice' : 'Print or save the bill'}</button></section>`;
+        <div class="bo-doc-acts"><a class="bo-btn primary" href="/api/public/brick-orders/${encodeURIComponent(token)}/bill.pdf" target="_blank" rel="noopener">📄 Download the PDF</a>
+            <button class="bo-btn" data-print>🖨️ Print</button></div></section>`;
 }
 
 // ---------------------------------------------------------------- paying
@@ -193,8 +194,18 @@ function paymentsHtml() {
     return `<section class="sh-card bo-payments"><h2>Payments received</h2>${posted.map(p => `<div><span>${esc(p.receiptNo || '')} · ${day(p.receivedOn)} · ${esc(p.mode)}</span><b>${money(p.amount)}</b></div>`).join('')}</section>`;
 }
 
+/** While the bricks are still to come and no location is shared: ask for it, so the driver finds the site. */
+function locationAsk() {
+    if (o.deliveryLocation || ['DELIVERED', 'CANCELLED'].includes(o.status)) return '';
+    return `<section class="sh-card bo-locask">📍 <div><b>Help our driver find you</b><small>Share where to deliver from this phone (at the site, or pick it on the map later).</small></div>
+        <button class="bo-btn primary" data-share-loc>Share location</button><p class="bo-err" data-loc-err></p></section>`;
+}
+
 function aboutHtml() {
+    const loc = o.deliveryLocation ? o.deliveryLocation.split(',') : null;
     return `<section class="sh-card bo-about"><h2>Delivery to</h2><p>${esc(o.customerName)}<br>${esc(o.deliverTo || '')}${o.landmark ? `<br><small>near ${esc(o.landmark)}</small>` : ''}</p>
+        ${['DELIVERED', 'CANCELLED'].includes(o.status) ? '' : `<div class="bo-loc">${loc ? `✅ Location shared · <a href="https://maps.google.com/?q=${esc(loc[0])},${esc(loc[1])}" target="_blank" rel="noopener">see it on the map</a>${loc[2] ? ` <small>(± ${esc(loc[2])} m)</small>` : ''}` : '📍 No location shared yet'}
+            <button class="bo-btn" data-share-loc>${loc ? 'Update it from here' : 'Share my location'}</button><p class="bo-err" data-loc-err></p></div>`}
         <p class="bo-from"><b>${esc(o.company)}</b>${o.address ? `<br>${esc(o.address)}` : ''}${o.phone ? `<br><a href="tel:${esc(o.phone)}">📞 ${esc(o.phone)}</a>` : ''}</p>
         <small class="muted">Updated ${time(o.asOf)} · this link works until ${time(o.expiresAt)}</small></section>`;
 }
@@ -210,6 +221,8 @@ function bind(main) {
         main.querySelector('[data-any]').href = upiLink(v);
         main.querySelector('[data-qr]').innerHTML = qrSvg(upiLink(v), { size: 180 });
     });
+    if (main._bound) return bindPaid(main);
+    main._bound = true;
     main.addEventListener('click', async e => {
         const copy = e.target.closest('[data-copy]');
         if (copy) { try { await navigator.clipboard.writeText(copy.dataset.copy); copy.textContent = 'Copied'; } catch { /* nothing */ } }
@@ -217,7 +230,26 @@ function bind(main) {
         if (e.target.closest('[data-print]')) printDoc(billDocHtml(billFromPublic(o)), o.invoice ? o.invoice.invoiceNo : o.orderNo);
         const ack = e.target.closest('[data-ack]');
         if (ack) openAck(Number(ack.dataset.ack));
+        const sl = e.target.closest('[data-share-loc]');
+        if (sl && !sl.disabled) {
+            const err = sl.parentElement.querySelector('[data-loc-err]');
+            sl.disabled = true;
+            sl.textContent = 'Finding you…';
+            const where = await locate();
+            if (!where) {
+                err.textContent = 'Location is off or not allowed: allow it for this page in the browser and try again.';
+                sl.disabled = false; sl.textContent = 'Share location';
+                return;
+            }
+            try { o = await call('/location', { location: where }); draw(); }
+            catch (x) { err.textContent = x.message; sl.disabled = false; sl.textContent = 'Share location'; }
+        }
     });
+    bindPaid(main);
+}
+
+/** The "already paid" form is drawn afresh each time: wire it each time. */
+function bindPaid(main) {
     main.querySelector('[data-paid]')?.addEventListener('submit', async e => {
         e.preventDefault();
         const f = e.target;
@@ -257,7 +289,8 @@ function openAck(tripNo) {
         e.target.disabled = true;
         e.target.textContent = 'Sending…';
         try {
-            o = await call('/acknowledge', { tripNo, name, signature: pad.path(), location: await where, device: JSON.stringify(deviceInfo()),
+            const device = { ...deviceInfo(), ...(await deviceFingerprint()) };
+            o = await call('/acknowledge', { tripNo, name, signature: pad.path(), location: await where, device: JSON.stringify(device),
                 remarks: sheet.querySelector('[name=remarks]').value.trim() || null });
             sheet.remove();
             draw();

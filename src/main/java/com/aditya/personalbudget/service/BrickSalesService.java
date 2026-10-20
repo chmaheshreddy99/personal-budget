@@ -86,7 +86,17 @@ public class BrickSalesService {
                                Boolean handlingBilled, @Size(max = 500) String note,
                                /* a vehicle hired from outside instead of one of ours: see BrickOrder */
                                Boolean hired, @Size(max = 30) String hiredVehicle, @Size(max = 100) String hiredContact,
-                               @Positive Integer hiredCapacity, @PositiveOrZero BigDecimal hiredCharge, @Size(max = 10) String hiredPaidBy) {
+                               @Positive Integer hiredCapacity, @PositiveOrZero BigDecimal hiredCharge, @Size(max = 10) String hiredPaidBy,
+                               /* unloading by the customer or the transporter; deliver in this many trips whatever the vehicle carries */
+                               Boolean unloadingOutside, @Min(1) @Max(200) Integer plannedTrips) {
+    }
+
+    /** Split a trip into parts of these sizes (bricks), the first staying on the trip. */
+    public record SplitRequest(@NotNull @Size(min = 2, max = 50) List<@NotNull @Positive Integer> parts) {
+    }
+
+    /** Where to deliver, shared by the customer from their phone ("lat,lng,accuracy"). */
+    public record LocationRequest(@NotBlank @Size(max = 80) String location) {
     }
 
     public record TripItemInput(@NotNull Long brickTypeId, @NotNull @Min(0) Integer quantity) {
@@ -138,12 +148,16 @@ public class BrickSalesService {
     }
 
     public record LinkView(Long id, String createdByName, LocalDateTime createdAt, LocalDateTime expiresAt, LocalDateTime revokedAt, int views,
-                           LocalDateTime lastViewedAt, String status) {
+                           LocalDateTime lastViewedAt, String status,
+                           /* the token, to share the same link again (managers only, active links kept since tokens are stored) */
+                           String token) {
     }
 
     public record Totals(int quantity, BigDecimal atMrp, BigDecimal discount, BigDecimal bricks, int trips, BigDecimal deliveryPerTrip,
                          BigDecimal delivery, BigDecimal handling, BigDecimal total, int delivered, int pending, BigDecimal billed,
-                         BigDecimal paid, BigDecimal claimed, BigDecimal balance, BigDecimal dueNow) {
+                         BigDecimal paid, BigDecimal claimed, BigDecimal balance, BigDecimal dueNow,
+                         /* delivery before any waiver (trips × charge): the bill shows it, then the free delivery taken off */
+                         BigDecimal deliveryGross) {
     }
 
     /** The invoice of a paid order: its number, when it was made, the signed text and its signature. */
@@ -190,7 +204,8 @@ public class BrickSalesService {
                               List<ItemView> items, Totals totals, boolean deliveryWaived, String waiveReason, boolean handlingBilled,
                               List<PublicTrip> trips, List<PublicPayment> payments, String upiId, String payeeName, BigDecimal payNow,
                               LocalDateTime expiresAt, String currency, String publicKey, String keyFingerprint, LocalDateTime asOf,
-                              BrickService.Company seller, Invoice invoice, String customerPhone) {
+                              BrickService.Company seller, Invoice invoice, String customerPhone, String deliveryLocation,
+                              boolean transporterPaid) {
     }
 
     private final BrickService core;
@@ -198,11 +213,19 @@ public class BrickSalesService {
     private final OrganizationRepository tenants;
     private final SecureRandom random = new SecureRandom();
 
-    public BrickSalesService(BrickService core, BrickPayrollService payroll, OrganizationRepository tenants) {
+    public BrickSalesService(BrickService core, BrickPayrollService payroll, OrganizationRepository tenants, BrickNoticeService notices,
+                             com.aditya.personalbudget.security.BrickAccess access, tools.jackson.databind.ObjectMapper json) {
+        this.json = json;
         this.core = core;
         this.payroll = payroll;
         this.tenants = tenants;
+        this.notices = notices;
+        this.access = access;
     }
+
+    private final BrickNoticeService notices;
+    private final com.aditya.personalbudget.security.BrickAccess access;
+    private final tools.jackson.databind.ObjectMapper json;
 
     // ================================================================== orders
 
@@ -291,6 +314,20 @@ public class BrickSalesService {
         BrickOrder saved = o;
         core.activity().record("ADDED", BrickService.AREA, "Order " + o.getOrderNo() + " · " + o.getCustomerName() + " · "
                 + BrickService.bricks(r.items().stream().mapToInt(ItemInput::quantity).sum()));
+        // what the alert shows and says: the order, for whom, the bricks, where and when
+        java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("orderId", o.getId());
+        data.put("orderNo", o.getOrderNo());
+        data.put("customer", o.getCustomerName());
+        data.put("phone", o.getCustomerPhone());
+        data.put("address", java.util.stream.Stream.of(o.getAddress(), o.getLandmark()).filter(x -> x != null && !x.isBlank()).collect(Collectors.joining(", ")));
+        data.put("requiredBy", o.getRequiredBy() == null ? null : o.getRequiredBy().toString());
+        data.put("items", r.items().stream().map(i -> java.util.Map.of("name", core.typeName(i.brickTypeId()), "quantity", i.quantity(), "price", i.price())).toList());
+        data.put("amount", r.items().stream().map(i -> i.price().multiply(BigDecimal.valueOf(i.quantity()))).reduce(BigDecimal.ZERO, BigDecimal::add));
+        data.put("hired", Boolean.TRUE.equals(o.getHired()));
+        notices.post(t, "ORDER", "New order " + o.getOrderNo(), o.getCustomerName() + " · " + BrickService.bricks(r.items().stream().mapToInt(ItemInput::quantity).sum())
+                + (o.getRequiredBy() != null ? " · needed by " + o.getRequiredBy().format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) : ""), "bricks/sales/" + o.getId(), BrickNoticeService.ALL,
+                json.writeValueAsString(data));
         return order(saved.getId());
     }
 
@@ -324,6 +361,19 @@ public class BrickSalesService {
         o.setHiredCapacity(hired ? r.hiredCapacity() : null);
         o.setHiredCharge(hired && r.hiredCharge() != null ? Money.round(r.hiredCharge()) : null);
         o.setHiredPaidBy(hired ? paidBy : null);
+        if (hired) {
+            if (BrickService.blank(r.hiredVehicle()) == null && BrickService.blank(r.hiredContact()) == null) {
+                throw new BusinessException("Enter the hired vehicle's number or the transporter (name and mobile)");
+            }
+            if (US.equals(paidBy) && (r.hiredCharge() == null || r.hiredCharge().signum() <= 0)) {
+                throw new BusinessException("Enter what the transporter charges a trip: we pay it and it goes on the bill");
+            }
+        }
+        // a new hired vehicle is unloaded by the customer / transporter unless our team is picked
+        boolean outside = Boolean.TRUE.equals(r.unloadingOutside()) || fresh && hired && r.unloadingOutside() == null && r.unloadingTeamId() == null;
+        if (outside && r.unloadingTeamId() != null) throw new BusinessException("Unloading is by the customer or the transporter: leave the unloading team empty");
+        o.setUnloadingOutside(outside);
+        o.setPlannedTrips(r.plannedTrips());
         BrickVehicle v = hired || r.vehicleId() == null ? null : core.requireVehicle(r.vehicleId());
         if (v == null && fresh && !hired) {
             v = core.vehicles().findByTenantId(o.getTenantId()).stream().filter(x -> Boolean.TRUE.equals(x.getActive()))
@@ -334,6 +384,11 @@ public class BrickSalesService {
         o.setDriverId(driver);
         o.setLoadingTeamId(r.loadingTeamId() == null ? null : core.requireResource(r.loadingTeamId()).getId());
         o.setUnloadingTeamId(r.unloadingTeamId() == null ? null : core.requireResource(r.unloadingTeamId()).getId());
+        if (fresh) {
+            // a new order starts with the default production team: it loads, and unloads our own vehicle
+            if (o.getLoadingTeamId() == null) o.setLoadingTeamId(core.defaultTeam(BrickPayrollService.PRODUCTION));
+            if (!hired && !outside && o.getUnloadingTeamId() == null) o.setUnloadingTeamId(core.defaultTeam(BrickPayrollService.PRODUCTION));
+        }
         o.setDeliveryChargePerTrip(r.deliveryChargePerTrip() != null ? Money.round(r.deliveryChargePerTrip()) : fresh ? s.getDeliveryChargePerTrip() : o.getDeliveryChargePerTrip());
         int qty = r.items().stream().mapToInt(ItemInput::quantity).sum();
         boolean qualifies = s.getFreeDeliveryMinQty() != null && qty >= s.getFreeDeliveryMinQty();
@@ -434,6 +489,11 @@ public class BrickSalesService {
         BrickVehicle v = o.getVehicleId() == null ? null : core.vehicles().findById(o.getVehicleId()).orElse(null);
         Integer capacity = isHired(o) ? o.getHiredCapacity() : v == null ? null : v.getCapacity();
         int cap = capacity == null || capacity <= 0 ? total : capacity;
+        if (o.getPlannedTrips() != null && o.getPlannedTrips() > 0) {
+            // a set number of trips, whatever the vehicle carries: the order's bricks in that many equal loads
+            int ordered = items.stream().mapToInt(BrickOrderItem::getQuantity).sum();
+            cap = Math.max(1, (int) Math.ceil(ordered / (double) o.getPlannedTrips()));
+        }
         int no = trips.stream().mapToInt(BrickTrip::getTripNo).max().orElse(0);
         LocalDate on = o.getRequiredBy() != null ? o.getRequiredBy() : o.getOrderDate();
         while (total > 0) {
@@ -482,7 +542,7 @@ public class BrickSalesService {
 
     private void renumber(BrickOrder o) {
         int n = 0;
-        for (BrickTrip tr : core.trips().findByOrderId(o.getId()).stream().sorted(Comparator.comparing(BrickTrip::getTripNo)).toList()) {
+        for (BrickTrip tr : core.trips().findByOrderId(o.getId()).stream().sorted(Comparator.comparing(BrickTrip::getTripNo).thenComparing(BrickTrip::getId)).toList()) {
             if (tr.getTripNo() != ++n) {
                 tr.setTripNo(n);
                 core.trips().save(tr);
@@ -540,6 +600,68 @@ public class BrickSalesService {
         plan(o);
         refreshStatus(o);
         core.activity().record("CHANGED", BrickService.AREA, "Trip " + tr.getTripNo() + " of " + o.getOrderNo());
+        refreshInvoice(requireOrder(id));
+        return order(id);
+    }
+
+    /**
+     * Splits a trip that has not left the yard into parts of the sizes given (a special case: whatever the vehicle carries);
+     * the first part stays on the trip, each other one becomes a trip of its own right after it, with the same vehicle,
+     * driver, teams and day. A trip of several brick types is cut in their order.
+     */
+    @Transactional
+    public OrderView splitTrip(Long id, Long tripId, SplitRequest r) {
+        BrickOrder o = requireOpenOrder(id);
+        BrickTrip tr = requireTrip(o, tripId);
+        if (!Set.of(PLANNED, LOADING).contains(tr.getStatus())) throw new BusinessException("Only a trip still at the yard can be split");
+        List<BrickTripItem> items = core.tripItems().findByTripId(tripId).stream().sorted(Comparator.comparing(BrickTripItem::getId)).toList();
+        int total = items.stream().mapToInt(BrickTripItem::getQuantity).sum();
+        int sum = r.parts().stream().mapToInt(Integer::intValue).sum();
+        if (sum != total) throw new BusinessException("The parts add up to " + String.format("%,d", sum) + "; the trip carries " + String.format("%,d", total));
+        // what each part carries, cut from the trip's load in order
+        List<Map<Long, Integer>> loads = new ArrayList<>();
+        int i = 0, left = items.isEmpty() ? 0 : items.getFirst().getQuantity();
+        for (int part : r.parts()) {
+            Map<Long, Integer> load = new LinkedHashMap<>();
+            int need = part;
+            while (need > 0) {
+                int take = Math.min(need, left);
+                load.merge(items.get(i).getBrickTypeId(), take, Integer::sum);
+                need -= take;
+                left -= take;
+                if (left == 0 && i + 1 < items.size()) left = items.get(++i).getQuantity();
+            }
+            loads.add(load);
+        }
+        items.forEach(core.tripItems()::delete);
+        for (int k = 0; k < loads.size(); k++) {
+            BrickTrip target = tr;
+            if (k > 0) {
+                target = new BrickTrip();
+                target.setTenantId(o.getTenantId());
+                target.setOrderId(o.getId());
+                target.setTripNo(tr.getTripNo());
+                target.setVehicleId(tr.getVehicleId());
+                target.setDriverId(tr.getDriverId());
+                target.setLoadingTeamId(tr.getLoadingTeamId());
+                target.setUnloadingTeamId(tr.getUnloadingTeamId());
+                target.setScheduledOn(tr.getScheduledOn());
+                target.setStatus(PLANNED);
+                target.setCreatedAt(LocalDateTime.now());
+                target = core.trips().save(target);
+            }
+            for (var e : loads.get(k).entrySet()) {
+                BrickTripItem ti = new BrickTripItem();
+                ti.setTenantId(o.getTenantId());
+                ti.setTripId(target.getId());
+                ti.setBrickTypeId(e.getKey());
+                ti.setQuantity(e.getValue());
+                core.tripItems().save(ti);
+            }
+        }
+        renumber(o);
+        refreshStatus(o);
+        core.activity().record("CHANGED", BrickService.AREA, "Split trip " + tr.getTripNo() + " of " + o.getOrderNo() + " into " + r.parts().size() + " trips");
         refreshInvoice(requireOrder(id));
         return order(id);
     }
@@ -623,6 +745,14 @@ public class BrickSalesService {
         }
         List<BrickTripItem> items = core.tripItems().findByTripId(tr.getId());
         if (items.isEmpty()) throw new BusinessException("This trip carries nothing");
+        // who loads and who unloads (our team, or the customer / transporter) is set before a trip is loaded
+        if (from < STEPS.indexOf(LOADING)) {
+            boolean unloaded = tr.getUnloadingTeamId() != null || Boolean.TRUE.equals(o.getUnloadingOutside());
+            if (tr.getLoadingTeamId() == null || !unloaded) {
+                throw new BusinessException("Set the " + (tr.getLoadingTeamId() == null && !unloaded ? "loading and unloading teams" : tr.getLoadingTeamId() == null ? "loading team" : "unloading team")
+                        + " of trip " + tr.getTripNo() + " before loading it (edit the trip or the order)");
+            }
+        }
         if (tr.getVehicleId() == null && !isHired(o) && target >= STEPS.indexOf(DISPATCHED)) throw new BusinessException("Pick the vehicle of this trip first");
         for (int s = from + 1; s <= target; s++) {
             String st = STEPS.get(s);
@@ -735,8 +865,7 @@ public class BrickSalesService {
             bricks = bricks.add(price.getOrDefault(i.getBrickTypeId(), Money.ZERO).multiply(BigDecimal.valueOf(d)));
         }
         BigDecimal delivery = Boolean.TRUE.equals(o.getDeliveryWaived()) ? Money.ZERO : Money.nz(o.getDeliveryChargePerTrip());
-        BigDecimal handling = Boolean.TRUE.equals(o.getHandlingBilled())
-                ? Money.nz(o.getLoadingRate()).add(Money.nz(o.getUnloadingRate())).multiply(BigDecimal.valueOf(qty)) : Money.ZERO;
+        BigDecimal handling = Boolean.TRUE.equals(o.getHandlingBilled()) ? handlingRate(o).multiply(BigDecimal.valueOf(qty)) : Money.ZERO;
         return new BigDecimal[]{Money.round(bricks), Money.round(delivery), Money.round(handling)};
     }
 
@@ -814,6 +943,8 @@ public class BrickSalesService {
     public OrderView deletePayment(Long id, Long paymentId) {
         BrickOrder o = requireOrder(id);
         BrickPayment p = requirePayment(o, paymentId);
+        // a payment in the books is taken out only by who sees the money or approves; a maker can turn down one only reported
+        if (!"CLAIMED".equals(p.getStatus())) access.require(com.aditya.personalbudget.security.BrickPermission.FINANCE, com.aditya.personalbudget.security.BrickPermission.APPROVE);
         core.payments().delete(p);
         core.unpost(p.getJournalEntryId());
         core.activity().record("DELETED", BrickService.AREA, ("CLAIMED".equals(p.getStatus()) ? "Turned down a payment reported" : "Deleted the payment")
@@ -834,6 +965,7 @@ public class BrickSalesService {
         l.setTenantId(o.getTenantId());
         l.setOrderId(id);
         l.setTokenHash(AccessLinkService.hash(token));
+        l.setToken(token);
         l.setCreatedByName(UserContext.get().fullName());
         l.setCreatedAt(LocalDateTime.now());
         l.setExpiresAt(LocalDateTime.now().plusHours(r.hours()));
@@ -857,6 +989,23 @@ public class BrickSalesService {
         return order(id);
     }
 
+    /** The order's bill (or invoice) as a PDF. */
+    public byte[] billPdf(Long id) {
+        return BrickBillPdf.render(order(id));
+    }
+
+    /** The bill as a PDF from the customer's link (no sign-in). */
+    public byte[] publicBillPdf(String token) {
+        BrickOrderLink l = activeLink(token);
+        return asTenant(l, () -> BrickBillPdf.render(order(l.getOrderId())));
+    }
+
+    /** The name a bill's PDF is saved under: "Bill SO-0001.pdf", "Invoice INV-0003.pdf". */
+    public String billFileName(Long id) {
+        BrickOrder o = requireOrder(id);
+        return (o.getInvoiceNo() != null ? "Invoice " + o.getInvoiceNo() : "Bill " + o.getOrderNo()) + ".pdf";
+    }
+
     /** The customer's page: the order as of now (counts the view). No sign-in. */
     @Transactional
     public PublicOrder open(String token) {
@@ -865,6 +1014,23 @@ public class BrickSalesService {
         l.setLastViewedAt(LocalDateTime.now());
         core.links().save(l);
         return asTenant(l, () -> toPublic(l));
+    }
+
+    /** The customer shares where to deliver from their phone: kept on the order (and shown to the drivers). */
+    @Transactional
+    public PublicOrder shareLocation(String token, LocationRequest r) {
+        BrickOrderLink l = activeLink(token);
+        return asTenant(l, () -> {
+            BrickOrder o = core.orders().findById(l.getOrderId()).orElseThrow(() -> new BusinessException("This order no longer exists"));
+            if (Set.of(DELIVERED, CANCELLED).contains(o.getStatus())) throw new BusinessException("This order is " + statusLabel(o.getStatus()).toLowerCase());
+            String loc = r.location().trim();
+            if (!loc.matches("-?\\d{1,3}(\\.\\d+)?,-?\\d{1,3}(\\.\\d+)?(,\\d+(\\.\\d+)?)?")) throw new BusinessException("That is not a location");
+            o.setDeliveryLocation(loc);
+            o.setDeliveryLocationAt(LocalDateTime.now());
+            core.orders().save(o);
+            core.activity().record("CHANGED", BrickService.AREA, o.getCustomerName() + " shared the delivery location of " + o.getOrderNo());
+            return toPublic(l);
+        });
     }
 
     /** The customer signs for a trip received (it is marked delivered when it was still on its way). */
@@ -918,6 +1084,8 @@ public class BrickSalesService {
             tr.setAckDigitalSignature(core.appSettings().signPayLink(tr.getAckPayload()));
             core.trips().save(tr);
             core.activity().record("ACCEPTED", BrickService.AREA, name + " signed for trip " + tr.getTripNo() + " of " + o.getOrderNo() + " · " + BrickService.bricks(qty));
+            notices.post(o.getTenantId(), "SIGNED", "Delivery signed: " + o.getOrderNo() + " trip " + tr.getTripNo(), name + " signed for " + BrickService.bricks(qty) + " · " + o.getCustomerName(),
+                    "bricks/sales/" + o.getId(), BrickNoticeService.ALL);
             return toPublic(l);
         });
     }
@@ -950,6 +1118,8 @@ public class BrickSalesService {
             core.payments().save(p);
             core.activity().record("ADDED", BrickService.AREA, o.getCustomerName() + " reported paying " + ActivityService.money(p.getAmount()) + " for " + o.getOrderNo()
                     + " (UPI ref " + ref + ") · to confirm");
+            notices.post(o.getTenantId(), "PAID", "Payment reported: " + o.getOrderNo(), o.getCustomerName() + " says they paid " + ActivityService.money(p.getAmount())
+                    + ": confirm it once it is in the bank", "bricks/sales/" + o.getId() + "/payments", BrickNoticeService.ALL);
             return toPublic(l);
         });
     }
@@ -1025,7 +1195,7 @@ public class BrickSalesService {
                 o.getAddress(), o.getLandmark(), o.getStatus(), statusLabel(o.getStatus()), v.items(), v.totals(), Boolean.TRUE.equals(o.getDeliveryWaived()),
                 o.getWaiveReason(), Boolean.TRUE.equals(o.getHandlingBilled()), trips, pays, s.getUpiId(), s.getPayeeName() != null ? s.getPayeeName() : company,
                 payNow, l.getExpiresAt(), org.getCurrency(), core.appSettings().payLinkPublicKey(), core.appSettings().payLinkFingerprint(), LocalDateTime.now(),
-                v.company(), v.invoice(), o.getCustomerPhone());
+                v.company(), v.invoice(), o.getCustomerPhone(), o.getDeliveryLocation(), isHired(o) && !US.equals(o.getHiredPaidBy()));
     }
 
     private BrickOrderLink activeLink(String token) {
@@ -1053,7 +1223,9 @@ public class BrickSalesService {
     private LinkView linkView(BrickOrderLink l) {
         LocalDateTime now = LocalDateTime.now();
         String status = l.getRevokedAt() != null ? "REVOKED" : l.getExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
-        return new LinkView(l.getId(), l.getCreatedByName(), l.getCreatedAt(), l.getExpiresAt(), l.getRevokedAt(), BrickService.nz(l.getViews()), l.getLastViewedAt(), status);
+        boolean manager = UserContext.current().filter(u -> u.userId() != null).isPresent() && access.allows(com.aditya.personalbudget.security.BrickPermission.SALES);
+        return new LinkView(l.getId(), l.getCreatedByName(), l.getCreatedAt(), l.getExpiresAt(), l.getRevokedAt(), BrickService.nz(l.getViews()), l.getLastViewedAt(), status,
+                manager && "ACTIVE".equals(status) ? l.getToken() : null);
     }
 
     // ================================================================== figures
@@ -1091,8 +1263,7 @@ public class BrickSalesService {
         int tripCount = Math.max(live.size(), qty > 0 ? 1 : 0);
         BigDecimal perTrip = Money.nz(o.getDeliveryChargePerTrip());
         BigDecimal delivery = Boolean.TRUE.equals(o.getDeliveryWaived()) ? Money.ZERO : perTrip.multiply(BigDecimal.valueOf(tripCount));
-        BigDecimal handling = Boolean.TRUE.equals(o.getHandlingBilled())
-                ? Money.nz(o.getLoadingRate()).add(Money.nz(o.getUnloadingRate())).multiply(BigDecimal.valueOf(qty)) : Money.ZERO;
+        BigDecimal handling = Boolean.TRUE.equals(o.getHandlingBilled()) ? handlingRate(o).multiply(BigDecimal.valueOf(qty)) : Money.ZERO;
         int delivered = 0;
         BigDecimal billed = Money.ZERO;
         for (BrickTrip t : live) {
@@ -1109,7 +1280,7 @@ public class BrickSalesService {
         if (CANCELLED.equals(o.getStatus())) total = Money.ZERO;
         return new Totals(qty, Money.round(atMrp), Money.round(atMrp.subtract(bricks)), Money.round(bricks), tripCount, perTrip, Money.round(delivery),
                 Money.round(handling), total, delivered, Math.max(0, qty - delivered), Money.round(billed), paid, claimed, total.subtract(paid),
-                Money.round(billed).subtract(paid));
+                Money.round(billed).subtract(paid), Money.round(perTrip.multiply(BigDecimal.valueOf(tripCount))));
     }
 
     private ItemView itemView(BrickOrderItem i, int[] f) {
@@ -1137,6 +1308,12 @@ public class BrickSalesService {
                 d == null ? (isHired(o) ? o.getHiredContact() : null) : d.getName(), d == null ? null : d.getPhone(),
                 core.resourceName(tr.getLoadingTeamId()), core.resourceName(tr.getUnloadingTeamId()), b[0].add(b[1]).add(b[2]),
                 entryNo(tr.getJournalEntryId()), tr.getAckAt() != null);
+    }
+
+    /** Loading and unloading a brick, as billed: unloading done by the customer or transporter is not ours to bill. */
+    static BigDecimal handlingRate(BrickOrder o) {
+        BigDecimal rate = Money.nz(o.getLoadingRate());
+        return Boolean.TRUE.equals(o.getUnloadingOutside()) ? rate : rate.add(Money.nz(o.getUnloadingRate()));
     }
 
     static boolean isHired(BrickOrder o) {

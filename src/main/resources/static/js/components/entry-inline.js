@@ -23,8 +23,14 @@ import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim
 
 const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
     construction: 'Open Construction', 'expenses/emi': 'Open EMIs', bricks: 'Open Brick Management' };
-/** Where an entry is managed: a construction entry opens its own project. */
-const manageTarget = e => e.manageAt === 'construction' && e.construction?.projectId ? `construction/${e.construction.projectId}` : e.manageAt;
+/**
+ * Where an entry is managed: a construction entry opens its own project; a brick entry opens exactly what it was for
+ * (the order, the payment, the purchase, the expense, the slip) — and no button when there is no such place.
+ */
+const manageTarget = e => e.manageAt === 'construction' && e.construction?.projectId ? `construction/${e.construction.projectId}`
+    : e.brick ? e.brick.link || null : e.manageAt;
+const BRICK_LABEL = { Sale: 'Open the order', Receipt: 'Open the payment', 'Raw material': 'Open the purchase', Expense: 'Open the expense',
+    Wages: 'Open the slip', Advance: 'Open the slip', Opening: 'Open the statement', Entry: 'Open the statement', Transfer: 'Open the statement' };
 
 /**
  * Toggles the detail row under `row`.
@@ -180,7 +186,7 @@ function detailHtml(e) {
             ${e.quickEdit && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="quick-edit" title="Change the date, amount, accounts, details or note">${icon('edit')}Edit</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon" data-entry-action="copy" title="Duplicate">${icon('copy')}</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
-            ${e.manageAt && !e.claimId && !location.hash.startsWith(`#/${manageTarget(e)}`) ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
+            ${(e.manageAt || e.brick) && manageTarget(e) && !e.claimId && location.hash !== `#/${manageTarget(e)}` ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : e.brick ? BRICK_LABEL[e.brick.what] || 'Open in Brick Management' : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
             ${e.reversible && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="reverse">${icon('undo')}Reverse</button>` : ''}
             <button class="btn sm ghost icon" data-entry-action="close" title="Close">${icon('x')}</button>
         </div>

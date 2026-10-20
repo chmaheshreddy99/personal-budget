@@ -262,7 +262,8 @@ function enhanceSelect(select) {
             });
         };
         // a short list needs no search box: arrows / Enter or a click pick straight away
-        const short = select.options.length <= 8 && !select.querySelector('optgroup');
+        // (data-search on the select keeps the search box on a short list too)
+        const short = select.dataset.search === undefined && select.options.length <= 8 && !select.querySelector('optgroup');
         const header = `<div class="ac-search ${short ? 'ac-search-hidden' : ''}">${icon('search')}<input placeholder="Type to search…" autocomplete="off" data-plain></div>`;
         show(button, header, build());
         const search = popup.querySelector('.ac-search input');

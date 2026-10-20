@@ -38,6 +38,12 @@ public class BrickType implements TenantOwned {
 
     private BigDecimal mrp;
 
+    /**
+     * The lowest price a brick a maker may agree on an order (maker-checker): below it the order waits for a checker's
+     * approval. Empty: any price.
+     */
+    private BigDecimal minPrice;
+
     private Integer curingDays;
 
     private Integer openingStock;

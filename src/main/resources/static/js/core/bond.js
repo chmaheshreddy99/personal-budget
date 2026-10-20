@@ -98,6 +98,37 @@ export function deviceInfo() {
     };
 }
 
+/**
+ * A fingerprint of this device: a SHA-256 over what stays the same on it between visits (the browser and system, screen,
+ * time zone, languages, hardware, how it draws text and its graphics chip), with the graphics chip named. Kept with a
+ * signature so the same phone can be recognised later.
+ */
+export async function deviceFingerprint() {
+    const n = navigator;
+    let canvas = '', gpu = '';
+    try {
+        const c = document.createElement('canvas');
+        c.width = 240; c.height = 40;
+        const x = c.getContext('2d');
+        x.textBaseline = 'top'; x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
+        x.fillStyle = '#069'; x.fillText('Bricks ✓ 1234 ₹', 2, 15);
+        canvas = c.toDataURL();
+    } catch { /* not available */ }
+    try {
+        const gl = document.createElement('canvas').getContext('webgl');
+        const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+        gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl ? gl.getParameter(gl.RENDERER) : '';
+    } catch { /* not available */ }
+    const parts = [n.userAgent, n.platform, n.language, (n.languages || []).join(','), screen.width + 'x' + screen.height, screen.colorDepth, devicePixelRatio,
+        Intl.DateTimeFormat().resolvedOptions().timeZone, n.hardwareConcurrency, n.deviceMemory, n.maxTouchPoints, gpu, canvas].join('|');
+    let fingerprint = '';
+    try {
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(parts));
+        fingerprint = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch { /* not a secure page */ }
+    return { fingerprint, gpu: String(gpu || '').slice(0, 120) };
+}
+
 /** The location, when allowed (lat,lng,accuracy); null when refused or too slow. */
 export function locate() {
     return new Promise(resolve => {
