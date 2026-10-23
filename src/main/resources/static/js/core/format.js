@@ -4,6 +4,25 @@
 
 let currency = 'INR';
 let locale = 'en-IN';
+/** The organization's time zone (from /auth/me): "today" is today there, not in this device's zone. */
+let timeZone = null;
+
+export function setTimeZone(zone) {
+    try {
+        new Intl.DateTimeFormat('en-GB', { timeZone: zone || undefined });
+        timeZone = zone || null;
+    } catch { timeZone = null; }   // a zone this browser does not know: the device's own
+}
+
+/** The date and time now in the organization's zone, as a Date whose local fields hold them. */
+export function orgNow() {
+    const now = new Date();
+    if (!timeZone) return now;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone, hourCycle: 'h23',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        .formatToParts(now).map(p => [p.type, p.value]));
+    return new Date(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+}
 
 export function setCurrency(code) {
     currency = code || 'INR';
@@ -89,14 +108,14 @@ export function monthLabel(ym) {
     return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short' }) + ' ' + String(y).slice(2);
 }
 
-/** Local ISO date (yyyy-mm-dd) for an optional Date. */
-export function isoDate(d = new Date()) {
+/** ISO date (yyyy-mm-dd) of a Date's local fields; without one, today in the organization's zone. */
+export function isoDate(d = orgNow()) {
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export function firstOfMonth(offsetMonths = 0) {
-    const d = new Date();
+    const d = orgNow();
     return isoDate(new Date(d.getFullYear(), d.getMonth() + offsetMonths, 1));
 }
 

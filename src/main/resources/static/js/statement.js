@@ -4,6 +4,7 @@
  * interest falls due, and what is payable now; the month-by-month (or year-by-year) interest when it was shared.
  * Worked out when the page is opened, so it is always current. The token stays in the address fragment.
  */
+import { trackedFetch } from './core/busy.js';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const day = iso => iso ? new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -19,7 +20,7 @@ async function start() {
     const main = $('sh-main');
     if (!token) { main.innerHTML = message('This link is incomplete.'); return; }
     try {
-        const r = await fetch(`/api/public/statements/${encodeURIComponent(token)}`, { method: 'POST', headers: { Accept: 'application/json' } });
+        const r = await trackedFetch(`/api/public/statements/${encodeURIComponent(token)}`, { method: 'POST', headers: { Accept: 'application/json' } });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body.message || 'This link does not work any more.');
         st = body;

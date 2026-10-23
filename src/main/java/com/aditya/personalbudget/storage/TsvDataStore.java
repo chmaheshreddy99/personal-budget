@@ -4,23 +4,20 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,13 +36,16 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * The "database": a set of {@link TsvTable}s living in the data directory.
+ * The "database": a set of {@link TsvTable}s kept by a {@link TableStorage}: tab-separated files in the data
+ * directory (the default) or the tabs of a Google spreadsheet. Everything below works the same on either.
  * <p>
- * <b>No data is kept in memory between requests.</b> Every read goes to the {@code .tbl} files:
+ * <b>No data is kept in memory.</b> Data is read from the storage when it is needed, and dropped again:
  * <ul>
- *   <li>Within one request a table is parsed once and reused; it is parsed again as soon as the file
- *       changes on disk (another request committed, another server process, or a manual edit).
- *       {@link #endRequest()} drops these views when the request ends.</li>
+ *   <li>Within one request a table is parsed once and reused; it is parsed again as soon as the
+ *       storage reports a change (another request committed, another server process, or a manual edit).
+ *       {@link #endRequest()} drops what the request read when it ends; a unit of work drops it when it starts
+ *       and when it ends. Work outside a web request (a nightly job, the startup steps) calls
+ *       {@link #endRequest()} when done.</li>
  *   <li>A read-only request ({@link #beginReadOnly()}) holds the shared lock, so it sees every table as of
  *       one moment and can never write (an attempt fails).</li>
  *   <li>A transaction takes the exclusive lock (in this JVM) plus an OS file lock on {@code data/.lock}
@@ -57,13 +57,14 @@ import java.util.stream.Collectors;
  * one on disk is rejected with {@link ConcurrentUpdateException}). Ids come from a persisted sequence, so a
  * deleted id is never handed out again.
  */
-@Component
 public class TsvDataStore {
 
     private static final Logger log = LoggerFactory.getLogger(TsvDataStore.class);
-    private static final String SEQUENCE_FILE = "sequences.properties";
+    /** Sequence keys that record a one-off step as done rather than the last id of a table. */
+    private static final String DONE_PREFIX = "done.";
 
     private final Path dataDir;
+    private final TableStorage storage;
     private final Validator validator;
     private final Map<Class<?>, TsvTable<?>> tables = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
@@ -74,25 +75,39 @@ public class TsvDataStore {
     private final List<Consumer<Set<String>>> commitListeners = new CopyOnWriteArrayList<>();
     private final List<StoreListener> storeListeners = new CopyOnWriteArrayList<>();
 
-    public TsvDataStore(@Value("${budget.data-dir:data}") String dataDir, Validator validator) {
-        this.dataDir = Path.of(dataDir).toAbsolutePath().normalize();
+    /** A store on tab-separated files in {@code dataDir}. */
+    public TsvDataStore(String dataDir, Validator validator) {
+        this(Path.of(dataDir), new LocalFileStorage(Path.of(dataDir)), validator);
+    }
+
+    /**
+     * A store whose tables live in {@code storage}. The data directory still holds what is not a table: the lock
+     * file, evidence attachments and settings files.
+     */
+    public TsvDataStore(Path dataDir, TableStorage storage, Validator validator) {
+        this.dataDir = dataDir.toAbsolutePath().normalize();
+        this.storage = storage;
         this.validator = validator;
         try {
             Files.createDirectories(this.dataDir);
         } catch (IOException e) {
             throw new StorageException("Cannot create data directory " + this.dataDir, e);
         }
-        StorageRenames.apply(this.dataDir, SEQUENCE_FILE);   // before any table is opened (and created empty)
-        log.info("Tab-separated data store at {} (read from disk on demand)", this.dataDir);
+        log.info("Data store: {}", storage.describe());
     }
 
     public Path dataDir() {
         return dataDir;
     }
 
-    /** Creates (or opens) the {@code .tbl} file for an entity type. Called by each repository. */
+    /** How many tables there are and how much they hold. */
+    public TableStorage.Footprint footprint() {
+        return storage.footprint();
+    }
+
+    /** Creates (or opens) the table for an entity type. Called by each repository. */
     public <T extends Identifiable> void register(Class<T> type) {
-        tables.computeIfAbsent(type, t -> new TsvTable<>(EntityMetadata.of(type), dataDir));
+        tables.computeIfAbsent(type, t -> new TsvTable<>(EntityMetadata.of(type), storage));
     }
 
     /** Called after every successful commit with the names of the tables that changed. */
@@ -115,6 +130,7 @@ public class TsvDataStore {
     /** Ends the request: releases a read-only lock if held and forgets every table read. */
     public void endRequest() {
         views.remove();
+        storage.forget();
         while (lock.getReadHoldCount() > 0) {
             lock.readLock().unlock();
         }
@@ -176,6 +192,113 @@ public class TsvDataStore {
         });
     }
 
+    // ================================================================== one-off steps
+
+    /**
+     * A one-off step (a data migration) already ran on this data. The record is kept with the id sequences, so it
+     * travels with the data: a new server on the same Google spreadsheet does not run the step again.
+     */
+    public boolean isDone(String step) {
+        UnitOfWork work = currentWork.get();
+        return (work != null ? work.sequences() : storage.readSequences()).containsKey(DONE_PREFIX + step);
+    }
+
+    /** Records a one-off step as done, with the current unit of work (or in one of its own). */
+    public void markDone(String step) {
+        write(() -> {
+            UnitOfWork work = work();
+            work.sequences().setProperty(DONE_PREFIX + step, LocalDate.now().toString());
+            work.sequencesChanged = true;
+            return null;
+        });
+    }
+
+    // ================================================================== whole-store copy (backup and restore)
+
+    /** Every table (header row first, cells as {@link TsvCodec} text) and the id sequences, as of one moment. */
+    public record Dump(Map<String, List<List<String>>> tables, Properties sequences) {
+    }
+
+    /** Reads every table and the sequences. Inside a read-only request or a unit of work it sees one moment. */
+    public Dump dump() {
+        boolean locked = !isInTransaction() && lock.getReadHoldCount() == 0;
+        if (locked) {
+            lock.readLock().lock();
+        }
+        try {
+            Map<String, List<List<String>>> all = new TreeMap<>();
+            for (TsvTable<?> table : tables.values()) {
+                all.put(table.name(), encodeRows(table));
+            }
+            UnitOfWork work = currentWork.get();
+            Properties sequences = new Properties();
+            sequences.putAll(work != null ? work.sequences() : storage.readSequences());
+            return new Dump(all, sequences);
+        } finally {
+            if (locked) {
+                lock.readLock().unlock();
+            }
+        }
+    }
+
+    /**
+     * Replaces the tables of a {@link Dump} (a restore) in one unit of work: all or nothing. Every row is parsed
+     * first, so a damaged copy changes nothing. Tables the dump does not hold are emptied, except those named in
+     * {@code keep}, which stay as they are. Rows go in as they are (ids kept, no validation hooks), and no
+     * sequence goes down (neither below what it is now nor below the largest id restored): an id is never handed out twice.
+     *
+     * @return the names of the tables written
+     */
+    public Set<String> replaceAll(Dump dump, Set<String> keep) {
+        return write(() -> {
+            UnitOfWork work = work();
+            Set<String> written = new LinkedHashSet<>();
+            // the sequences as they are now, raised to the backup's: an id handed out after the backup was made is
+            // not handed out again; the steps the backup records as done stay done
+            Properties sequences = new Properties();
+            sequences.putAll(work.sequences());
+            dump.sequences().forEach((k, v) -> {
+                String key = k.toString();
+                if (key.startsWith(DONE_PREFIX)) {
+                    sequences.putIfAbsent(key, v.toString());
+                } else if (!keep.contains(key)) {
+                    sequences.setProperty(key, Long.toString(Math.max(sequence(sequences, key), parseSequence(v.toString()))));
+                }
+            });
+            for (TsvTable<?> table : tables.values()) {
+                if (keep.contains(table.name())) {
+                    continue;
+                }
+                TreeMap<Long, ?> rows = table.parse(dump.tables().getOrDefault(table.name(), List.of()));
+                work.rows.put(table, rows);
+                work.dirty.add(table);
+                written.add(table.name());
+                if (!rows.isEmpty()) {
+                    sequences.setProperty(table.name(), Long.toString(Math.max(sequence(sequences, table.name()), rows.lastKey())));
+                }
+            }
+            work.sequences = sequences;
+            work.sequencesChanged = true;
+            return written;
+        });
+    }
+
+    private static long sequence(Properties sequences, String table) {
+        return parseSequence(sequences.getProperty(table, "0"));
+    }
+
+    private static long parseSequence(String value) {
+        try {
+            return Long.parseLong(value.strip());
+        } catch (NumberFormatException e) {
+            throw new StorageException("Not an id sequence: " + value, e);
+        }
+    }
+
+    private <T extends Identifiable> List<List<String>> encodeRows(TsvTable<T> table) {
+        return table.encode(rows(table).values());
+    }
+
     // ================================================================== transactions
 
     public boolean isInTransaction() {
@@ -192,6 +315,8 @@ public class TsvDataStore {
         }
         lock.writeLock().lock();
         try {
+            views.remove();
+            storage.forget();   // the unit of work reads what the storage holds now, never an earlier read
             currentWork.set(new UnitOfWork(lockFile()));
         } catch (RuntimeException e) {
             lock.writeLock().unlock();
@@ -209,14 +334,13 @@ public class TsvDataStore {
             if (!work.rollbackOnly) {
                 storeListeners.forEach(StoreListener::beforeCommit);
             }
-            if (!work.rollbackOnly) {
+            if (!work.rollbackOnly && (!work.dirty.isEmpty() || work.sequencesChanged)) {
+                Map<String, List<List<String>>> written = new LinkedHashMap<>();
                 for (TsvTable<?> table : work.dirty) {
-                    writeTable(table, work);
+                    written.put(table.name(), encode(table, work));
                     changed.add(table.name());
                 }
-                if (work.sequencesChanged) {
-                    writeSequences(work.sequences);
-                }
+                storage.write(written, work.sequencesChanged ? work.sequences : null);
             }
         } finally {
             end(work);
@@ -255,6 +379,7 @@ public class TsvDataStore {
     private void end(UnitOfWork work) {
         currentWork.remove();
         views.remove();
+        storage.forget();
         try {
             storeListeners.forEach(StoreListener::afterEnd);
             work.release();
@@ -287,11 +412,15 @@ public class TsvDataStore {
             return (TreeMap<Long, T>) rows.computeIfAbsent(table, t -> table.read());
         }
 
-        long nextId(TsvTable<?> table, TreeMap<Long, ?> current) {
+        Properties sequences() {
             if (sequences == null) {
-                sequences = readSequences();
+                sequences = storage.readSequences();
             }
-            long stored = Long.parseLong(sequences.getProperty(table.name(), "0"));
+            return sequences;
+        }
+
+        long nextId(TsvTable<?> table, TreeMap<Long, ?> current) {
+            long stored = Long.parseLong(sequences().getProperty(table.name(), "0"));
             long next = Math.max(stored, current.isEmpty() ? 0 : current.lastKey()) + 1;
             sequences.setProperty(table.name(), Long.toString(next));
             sequencesChanged = true;
@@ -311,7 +440,7 @@ public class TsvDataStore {
     // ================================================================== internals
 
     /** A table as read during the current request. */
-    private record View<T>(TsvTable.Stamp stamp, long generation, TreeMap<Long, T> rows) {
+    private record View<T>(Object stamp, long generation, TreeMap<Long, T> rows) {
     }
 
     @SuppressWarnings("unchecked")
@@ -325,7 +454,7 @@ public class TsvDataStore {
             lock.readLock().lock();   // never read a table while this process is half-way through a commit
         }
         try {
-            TsvTable.Stamp stamp = table.stamp();
+            Object stamp = table.stamp();
             long gen = generation.get();
             View<T> view = (View<T>) views.get().get(table);
             if (view != null && Objects.equals(view.stamp(), stamp) && view.generation() == gen) {
@@ -366,8 +495,8 @@ public class TsvDataStore {
     }
 
     @SuppressWarnings("unchecked")
-    private <T extends Identifiable> void writeTable(TsvTable<T> table, UnitOfWork work) {
-        table.write(((TreeMap<Long, T>) work.rows.get(table)).values());
+    private <T extends Identifiable> List<List<String>> encode(TsvTable<T> table, UnitOfWork work) {
+        return table.encode(((TreeMap<Long, T>) work.rows.get(table)).values());
     }
 
     @SuppressWarnings("unchecked")
@@ -539,41 +668,9 @@ public class TsvDataStore {
         }
     }
 
-    // ------------------------------------------------------------------ lock file and sequences
+    // ------------------------------------------------------------------ lock file
 
     private Path lockFile() {
         return dataDir.resolve(".lock");
-    }
-
-    private Properties readSequences() {
-        Properties p = new Properties();
-        Path file = dataDir.resolve(SEQUENCE_FILE);
-        if (Files.exists(file)) {
-            try (InputStream in = Files.newInputStream(file)) {
-                p.load(in);
-            } catch (IOException e) {
-                throw new StorageException("Cannot read " + file, e);
-            }
-        }
-        return p;
-    }
-
-    private void writeSequences(Properties sequences) {
-        Path file = dataDir.resolve(SEQUENCE_FILE);
-        Path temp = dataDir.resolve(SEQUENCE_FILE + ".tmp");
-        try (OutputStream out = Files.newOutputStream(temp)) {
-            sequences.store(out, "Last id handed out per table; ids are never reused");
-        } catch (IOException e) {
-            throw new StorageException("Cannot write " + temp, e);
-        }
-        try {
-            try {
-                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (IOException e) {
-            throw new StorageException("Cannot replace " + file, e);
-        }
     }
 }

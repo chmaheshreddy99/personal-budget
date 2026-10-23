@@ -1,13 +1,14 @@
 /**
  * Settings: categories (add, rename, switch off), the dashboard layout, view preferences, the
- * keyboard shortcut list, the mobile version and the household's e-mail account. Routes: #/settings, #/settings/<section>.
+ * keyboard shortcut list, the mobile version, the household's e-mail account, the organization's time zone and (super
+ * admins) backups of the whole data. Routes: #/settings, #/settings/<section>.
  */
 import { api } from '../core/api.js';
 import { loadCategories, can, state } from '../core/store.js';
 import { qrSvg } from '../core/qr.js';
 import { esc, panel, emptyState, toast, confirmDialog, openModal } from '../core/ui.js';
 import { icon, categoryIcon } from '../core/icons.js';
-import { moneyShort } from '../core/format.js';
+import { moneyShort, dateTime, setTimeZone, orgNow } from '../core/format.js';
 import { getPref, setPref, clearPrefs } from '../core/prefs.js';
 import { SHORTCUTS, setPageKeys, listNavigator } from '../core/keys.js';
 import { customizerHtml, bindCustomizer } from '../components/dashboard-customizer.js';
@@ -20,14 +21,17 @@ const SECTIONS = [
     { id: 'mobile', label: 'Mobile app', iconName: 'phone', hint: 'Address and who can use it' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },
     { id: 'chits', label: 'Host a Chit', iconName: 'hand-coins', hint: 'Company name for new chits' },
+    { id: 'organization', label: 'Organization', iconName: 'clock', hint: 'Time zone for dates and times' },
+    { id: 'backup', label: 'Backup', iconName: 'database', hint: 'Save and restore all data', permission: 'MANAGE_TENANTS' },
 ];
+const sections = () => SECTIONS.filter(s => !s.permission || can(s.permission));
 
 export async function render(container, params, isCurrent) {
-    const section = SECTIONS.some(s => s.id === params[0]) ? params[0] : 'categories';
+    const section = sections().some(s => s.id === params[0]) ? params[0] : 'categories';
     container.innerHTML = `
     <div class="page settings-page">
         ${panel({ title: 'Settings', iconName: 'settings', cls: 'p-set-nav', bodyClass: 'flush',
-            body: `<div class="set-nav" id="set-nav">${SECTIONS.map(s => `
+            body: `<div class="set-nav" id="set-nav">${sections().map(s => `
                 <a class="set-item ${s.id === section ? 'selected' : ''}" href="#/settings/${s.id}" data-section="${s.id}">
                     <span class="chip-icon sm">${icon(s.iconName)}</span><span class="min-0"><b>${s.label}</b><small>${s.hint}</small></span></a>`).join('')}
                 <a class="set-item" href="#/admin/profile"><span class="chip-icon sm">${icon('user')}</span><span class="min-0"><b>Profile &amp; users</b><small>Password, roles</small></span></a>
@@ -56,11 +60,139 @@ export async function render(container, params, isCurrent) {
     if (section === 'mobile') await renderMobile(body, () => render(container, params, isCurrent));
     if (section === 'email') await renderMail(body, () => render(container, params, isCurrent));
     if (section === 'chits') await renderChitSettings(body, () => render(container, params, isCurrent));
+    if (section === 'organization') await renderOrganization(body, () => render(container, params, isCurrent));
+    if (section === 'backup') await renderBackup(body, () => render(container, params, isCurrent));
     if (section === 'shortcuts') {
         body.innerHTML = panel({ title: 'Keyboard shortcuts', iconName: 'keyboard',
             body: `<div class="shortcut-map">${SHORTCUTS.map(g => `<section><div class="section-title">${esc(g.group)}</div>
                 ${g.keys.map(([k, l]) => `<div class="sc-row">${k.split(' ').map(x => `<span class="kbd">${esc(x)}</span>`).join('')}<span>${esc(l)}</span></div>`).join('')}</section>`).join('')}</div>` });
     }
+}
+
+// ===================================================================== organization
+
+/**
+ * The organization's time zone: dates and times are recorded and shown in it, whatever zone the server runs in.
+ * Everyone sees it; an admin changes it.
+ */
+async function renderOrganization(body, reload) {
+    const admin = can('MANAGE_USERS');
+    const [tz, zones] = admin
+        ? await Promise.all([api.get('/admin/organization/time-zone'), api.get('/admin/time-zones')])
+        : [{ effective: state.user?.timeZone, timeZone: state.user?.timeZone }, []];
+    const current = tz.timeZone || '';
+    body.innerHTML = panel({ title: 'Organization', iconName: 'clock', sub: esc(state.user?.tenantName || ''),
+        body: `<form class="form-grid one" id="tz-form" style="max-width:620px">
+            <label class="field"><span>Time zone</span>
+                ${admin ? `<select name="timeZone" data-plain>
+                    <option value="" ${current ? '' : 'selected'}>The server's time zone (${esc(tz.serverTimeZone)})</option>
+                    ${zones.map(z => `<option value="${esc(z.id)}" ${z.id === current ? 'selected' : ''}>${esc(z.label)}</option>`).join('')}
+                </select>` : `<input value="${esc(tz.effective || '')}" readonly data-plain>`}
+                <small>Dates and times are recorded and shown in this zone: "today", when an entry was made, sign-ins, due dates.</small></label>
+            ${admin ? `<div class="book-note">${icon('clock')}<span>Now in <b>${esc(tz.effectiveLabel)}</b>: <b>${esc(dateTime(tz.now))}</b>.
+                The server runs in ${esc(tz.serverTimeZone)}. Times saved before a change keep the clock time they were saved with.</span></div>
+                <div class="row"><button class="btn primary" type="submit">${icon('check')}Save time zone</button></div>`
+                : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
+        </form>` });
+    body.querySelector('#tz-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!admin) return;
+        try {
+            const saved = await api.put('/admin/organization/time-zone', { timeZone: e.target.timeZone.value || null });
+            if (state.user) state.user.timeZone = saved.effective;
+            setTimeZone(saved.effective);
+            toast(`Time zone saved: ${saved.effective}`);
+            reload();
+        } catch (error) { toast(error.message, 'error'); }
+    });
+}
+
+// ===================================================================== backup
+
+const fileSize = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/**
+ * Backups of the whole installation (every organization): a JSON file written to the server's backup folder, to
+ * download and keep somewhere safe; one on the server or an uploaded one restores the data. Super admins only.
+ */
+async function renderBackup(body, reload) {
+    const { folder, backups } = await api.get('/admin/backups');
+    const kind = name => name.startsWith('before-restore') ? ['warning', 'Before a restore']
+        : name.startsWith('uploaded') ? ['aqua', 'Uploaded'] : ['good', 'Backup'];
+    body.innerHTML = `
+        ${panel({ title: 'Backup', iconName: 'database', sub: 'Every organization, every table',
+            body: `<div class="form-grid one" style="max-width:720px">
+                <p class="hint" style="margin:0">A backup is one JSON file with all the data, whichever storage holds it (files or Google Sheets).
+                    It is saved on the server in <code>${esc(folder)}</code> and can be downloaded. Restoring one replaces all the data with
+                    the backup's, after saving the current data as a backup first, so a restore can be undone.</p>
+                <label class="pref-row"><div class="grow"><b>Include evidence files</b><small>Photos and scans attached to entries (the file gets bigger)</small></div>
+                    <span class="switch"><input type="checkbox" id="bk-files"><span></span></span></label>
+                <div class="row">
+                    <button class="btn primary" type="button" id="bk-create">${icon('database')}Back up now</button>
+                    <button class="btn" type="button" id="bk-pick">${icon('upload')}Restore from a file…</button>
+                    <input type="file" id="bk-upload" accept=".json,application/json" hidden>
+                </div>
+            </div>` })}
+        ${panel({ title: 'Backups on the server', iconName: 'history', sub: `${backups.length}`, bodyClass: 'flush',
+            body: backups.length ? `<div class="cat-list">${backups.map(b => {
+                const [tone, label] = kind(b.name);
+                return `<div class="cat-row" data-name="${esc(b.name)}">
+                    <span class="chip-icon sm">${icon('database')}</span>
+                    <span class="grow min-0"><b class="ellipsis">${esc(b.name)}</b><small>${esc(dateTime(b.createdAt))} · ${fileSize(b.bytes)}</small></span>
+                    <span class="badge ${tone}">${label}</span>
+                    <span class="cat-actions bk-actions">
+                        <button class="btn sm" data-download title="Download">${icon('download')}Download</button>
+                        <button class="btn sm" data-restore title="Replace all data with this backup">${icon('undo')}Restore</button>
+                        <button class="btn sm ghost icon danger" data-delete title="Delete">${icon('trash')}</button></span>
+                </div>`;
+            }).join('')}</div>` : emptyState('No backups yet', 'database') })}`;
+
+    const restored = r => {
+        toast(`Restored ${r.restored}: ${r.tables} tables, ${r.rows} rows${r.files ? `, ${r.files} files` : ''}. The data before it is in ${r.safetyBackup}.`);
+        setTimeout(() => location.reload(), 1500);   // every page and cache starts again from the restored data
+    };
+    const sure = what => confirmDialog(`Replace ALL the data, of every organization, with ${what}? The current data is backed up first.`,
+        { title: 'Restore a backup', confirmLabel: 'Restore' });
+
+    body.querySelector('#bk-create').addEventListener('click', async () => {
+        try {
+            const b = await api.post('/admin/backups', { includeFiles: body.querySelector('#bk-files').checked });
+            toast(`Backup saved: ${b.name} (${fileSize(b.bytes)})`);
+            reload();
+        } catch (error) { toast(error.message, 'error'); }
+    });
+    body.querySelector('#bk-pick').addEventListener('click', () => body.querySelector('#bk-upload').click());
+    body.querySelector('#bk-upload').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file || !await sure(`the backup "${file.name}"`)) return;
+        const form = new FormData();
+        form.append('file', file);
+        try { restored(await api.upload('/admin/backups/upload', form)); } catch (error) { toast(error.message, 'error'); }
+    });
+    body.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-download], [data-restore], [data-delete]');
+        if (!btn) return;
+        const name = btn.closest('[data-name]').dataset.name;
+        try {
+            if (btn.hasAttribute('data-download')) {
+                const url = URL.createObjectURL(await api.blob(`/admin/backups/${encodeURIComponent(name)}`));
+                const a = Object.assign(document.createElement('a'), { href: url, download: name });
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            }
+            if (btn.hasAttribute('data-restore') && await sure(`the backup "${name}"`)) {
+                restored(await api.post(`/admin/backups/${encodeURIComponent(name)}/restore`));
+            }
+            if (btn.hasAttribute('data-delete') && await confirmDialog(`Delete the backup "${name}" from the server?`, { confirmLabel: 'Delete' })) {
+                await api.del(`/admin/backups/${encodeURIComponent(name)}`);
+                toast('Backup deleted');
+                reload();
+            }
+        } catch (error) { toast(error.message, 'error'); }
+    });
 }
 
 // ===================================================================== mobile version
@@ -76,7 +208,7 @@ async function renderMobile(body, reload) {
         body: `<div class="mobile-settings">
             <div class="ms-qr">${qrSvg(url, { size: 168 })}<small>Scan with the phone camera</small></div>
             <div class="ms-main">
-                <p class="hint">A lighter version for phones: the money at a glance, expenses (add one in seconds), accounts, chits, budgets and income.
+                <p class="hint">A lighter version for phones with every section: the money at a glance, expenses (add one in seconds), accounts, chits, budgets, income and a simple view of the rest. Phones that open the full site are taken to it automatically (they can still choose the full site).
                     It signs in separately and shows only the sections an admin shared for mobile.</p>
                 <form id="mobile-path-form" class="ms-path">
                     <label class="field"><span>Address</span>
@@ -270,7 +402,7 @@ async function renderChitSettings(body, reload) {
     const admin = can('MANAGE_USERS');
     const cfg = await api.get('/hosted-chits/settings').catch(() => ({}));
     const sample = name => {
-        const d = new Date();
+        const d = orgNow();
         const tag = (plus) => { const x = new Date(d.getFullYear(), d.getMonth() + plus, 1); return x.toLocaleDateString('en-GB', { month: 'short' }).slice(0, 3) + String(x.getFullYear()).slice(2); };
         return `${(name || cfg.householdName || 'Chit').trim()} 5L (${tag(0)}–${tag(19)})`;
     };

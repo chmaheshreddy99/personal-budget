@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.web;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.dto.JournalDtos.ExpenseRequest;
 import com.aditya.personalbudget.exception.BusinessException;
@@ -94,7 +95,7 @@ public class AccessController {
     @RequiresPermission(Permission.MANAGE_USERS)
     public Map<String, Object> clearActivity(@Valid @RequestBody ClearRequest request) {
         int days = request.olderThanDays() == null ? 0 : request.olderThanDays();
-        LocalDate before = days <= 0 ? null : LocalDate.now().minusDays(days);
+        LocalDate before = days <= 0 ? null : OrgClock.today().minusDays(days);
         long count = activity.clear(before, request.dryRun());
         Map<String, Object> result = new java.util.LinkedHashMap<>();
         result.put("count", count);

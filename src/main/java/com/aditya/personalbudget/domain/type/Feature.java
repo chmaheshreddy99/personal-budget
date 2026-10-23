@@ -20,18 +20,18 @@ public enum Feature {
     JOURNAL("Journal", true),
     ACCOUNTS("Accounts", true),
     CHITS("Chits", true),
-    /** Host a Chit: chits the organization runs as organiser (desktop only). */
-    HOST_CHITS("Host a Chit", false),
+    /** Host a Chit: chits the organization runs as organiser (on mobile: a lite view of them). */
+    HOST_CHITS("Host a Chit", true),
     BUDGETS("Budgets", true),
     BALANCE_SHEET("Balance sheet", true),
     REPORTS("Reports", true),
     FORECAST("Forecast", true),
     GIFTS("Gifts", true),
     DOCUMENTS("Documents", true),
-    /** The construction business: projects, their money, sales and agreements (desktop only). */
-    CONSTRUCTION("Construction", false),
+    /** The construction business: projects, their money, sales and agreements (on mobile: a lite view of them). */
+    CONSTRUCTION("Construction", true),
     /** Who changed what, approvals and access links (also needs a role that approves entries). */
-    ACTIVITY("Activity", false);
+    ACTIVITY("Activity", true);
 
     private final String label;
     private final boolean mobile;

@@ -109,7 +109,7 @@ public class ClaimShareService {
         byte[] bytes = new byte[24];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         ClaimShare s = new ClaimShare();
         s.setTenantId(c.getTenantId());
         s.setClaimId(c.getId());
@@ -134,7 +134,7 @@ public class ClaimShareService {
                 .filter(x -> x.getClaimId().equals(claimId))
                 .orElseThrow(() -> new NotFoundException("Statement link", shareId));
         if (s.getRevokedAt() == null) {
-            s.setRevokedAt(LocalDateTime.now());
+            s.setRevokedAt(OrgClock.now());
             s = shares.save(s);
             activity.record("REVOKED", "Money owed", "Stopped the statement link of " + c.getNarration()
                     + (s.getSharedWith() != null ? " for " + s.getSharedWith() : ""));
@@ -149,7 +149,7 @@ public class ClaimShareService {
         Organization tenant = tenants.findById(s.getTenantId()).filter(t -> Boolean.TRUE.equals(t.getActive()))
                 .orElseThrow(() -> new BusinessException("This statement is no longer shared"));
         s.setViews((s.getViews() == null ? 0 : s.getViews()) + 1);
-        s.setLastViewedAt(LocalDateTime.now());
+        s.setLastViewedAt(OrgClock.now());
         shares.save(s);
         CurrentUser previous = UserContext.current().orElse(null);
         UserContext.set(new CurrentUser(null, "statement", "Statement link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
@@ -179,7 +179,7 @@ public class ClaimShareService {
                         compound ? p.cumulativeCompound() : p.cumulativeSimple(), p.status()))
                 .toList();
         return new Statement(c.kind().name(), c.kindLabel(), owedByViewer, c.party(), s.getSharedWith(), s.getCreatedByName(),
-                t.getName(), t.getCurrency(), c.narration(), s.getMessage(), LocalDate.now(), s.getExpiresAt(),
+                t.getName(), t.getCurrency(), c.narration(), s.getMessage(), OrgClock.today(), s.getExpiresAt(),
                 c.amount(), c.startDate(), c.dueDate(), c.overdue(), c.daysToDue(), c.status().name(), c.statusLabel(),
                 c.daysOutstanding(), c.repaid(), c.writtenOff(), c.outstanding(), c.repaidPercent(),
                 rate ? c.interestRate() : null, rate ? c.interestTypeLabel() : null,
@@ -197,7 +197,7 @@ public class ClaimShareService {
         if (s.getRevokedAt() != null) {
             throw new BusinessException("This statement link was switched off");
         }
-        if (!s.getExpiresAt().isAfter(LocalDateTime.now())) {
+        if (!s.getExpiresAt().isAfter(OrgClock.now())) {
             throw new BusinessException("This statement link has expired. Ask for a new one.");
         }
         return s;
@@ -209,7 +209,7 @@ public class ClaimShareService {
     }
 
     private static ShareView view(ClaimShare s) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String status = s.getRevokedAt() != null ? "REVOKED" : s.getExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         return new ShareView(s.getId(), s.getClaimId(), s.getSharedWith(), Boolean.TRUE.equals(s.getShowSchedule()), s.getMessage(),
                 s.getCreatedByName(), s.getCreatedAt(), s.getExpiresAt(), s.getRevokedAt(),

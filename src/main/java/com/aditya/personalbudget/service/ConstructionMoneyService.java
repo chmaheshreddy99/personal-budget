@@ -117,7 +117,7 @@ public class ConstructionMoneyService {
         x.setTenantId(p.getTenantId());
         x.setProjectId(p.getId());
         x.setCreatedBy(UserContext.username());
-        x.setCreatedAt(LocalDateTime.now());
+        x.setCreatedAt(OrgClock.now());
         x.setReceiptNo(nextReceiptNo(p));
         fill(p, x, r);
         x = core.receipts().save(x);
@@ -212,7 +212,7 @@ public class ConstructionMoneyService {
         x.setTenantId(p.getTenantId());
         x.setProjectId(p.getId());
         x.setCreatedBy(UserContext.username());
-        x.setCreatedAt(LocalDateTime.now());
+        x.setCreatedAt(OrgClock.now());
         fill(p, x, r);
         x = core.costs().save(x);
         x.setJournalEntryId(core.post(costDraft(p, x)).getId());
@@ -384,7 +384,7 @@ public class ConstructionMoneyService {
         c.setFromAccountId(mine == null ? null : mine.getId());
         c.setNote(ConstructionService.blank(r.note()));
         c.setCreatedBy(UserContext.username());
-        c.setCreatedAt(LocalDateTime.now());
+        c.setCreatedAt(OrgClock.now());
         c = core.capital().save(c);
         Long other = me ? mine.getId() : core.partnerAccount(p, partner).getId();
         boolean in = "INVEST".equals(kind);
@@ -426,7 +426,7 @@ public class ConstructionMoneyService {
             l.setTenantId(p.getTenantId());
             l.setProjectId(p.getId());
             l.setStatus("ACTIVE");
-            l.setCreatedAt(LocalDateTime.now());
+            l.setCreatedAt(OrgClock.now());
             Account a = core.newAccount(p, "loan · " + r.lender().trim(), AccountType.LOAN, "LOAN", "Loan from " + r.lender().trim() + " for " + p.getName());
             a.setInstitution(ActivityService.cut(r.lender().trim(), 100));
             l.setAccountId(core.accounts().save(a).getId());
@@ -479,7 +479,7 @@ public class ConstructionMoneyService {
         t.setAccountId(bank.getId());
         t.setNote(ConstructionService.blank(r.note()));
         t.setCreatedBy(UserContext.username());
-        t.setCreatedAt(LocalDateTime.now());
+        t.setCreatedAt(OrgClock.now());
         t = core.loanTxns().save(t);
         String what = switch (kind) {
             case "DISBURSE" -> "Loan disbursed by ";
@@ -554,11 +554,11 @@ public class ConstructionMoneyService {
         a = core.accounts().save(a);
         if (Money.nz(r.openingBalance()).signum() > 0) {
             Account equity = core.ledger().systemAccount(DefaultChartOfAccounts.OPENING_BALANCE_EQUITY);
-            core.post(JournalDraft.of(r.openingDate() != null ? r.openingDate() : LocalDate.now(), VoucherType.OPENING, "Opening balance - " + a.getName())
+            core.post(JournalDraft.of(r.openingDate() != null ? r.openingDate() : OrgClock.today(), VoucherType.OPENING, "Opening balance - " + a.getName())
                     .debit(a.getId(), Money.round(r.openingBalance())).credit(equity.getId(), Money.round(r.openingBalance()))
                     .source(LedgerService.SOURCE_ACCOUNT_OPENING, a.getId()));
             a.setOpeningBalance(Money.round(r.openingBalance()));
-            a.setOpeningDate(r.openingDate() != null ? r.openingDate() : LocalDate.now());
+            a.setOpeningDate(r.openingDate() != null ? r.openingDate() : OrgClock.today());
             core.accounts().save(a);
         }
         core.activity().record("ADDED", ConstructionService.AREA, "Common business account " + a.getName());

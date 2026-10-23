@@ -127,7 +127,7 @@ async function openUserForm(user, reload) {
                 <div class="access-head"><label class="switch"><input type="checkbox" name="mobileAccessToggle" ${u.mobileAccess ? 'checked' : ''} ${self ? 'disabled' : ''}><span></span>${icon('phone')} Mobile version</label>
                     <span class="small muted">a lighter app for phones, at the address set in Settings</span></div>
                 <div class="access-grid mobile ${u.mobileAccess ? '' : 'off'}">${FEATURES.filter(f => f.mobile).map(f => box('mobile', f, u.mobileFeatures.includes(f.key))).join('')}</div>
-                <p class="small muted access-foot">${FEATURES.filter(f => !f.mobile).map(f => esc(f.label)).join(', ')} are on the full site only.</p>
+                ${FEATURES.some(f => !f.mobile) ? `<p class="small muted access-foot">${FEATURES.filter(f => !f.mobile).map(f => esc(f.label)).join(', ')} are on the full site only.</p>` : ''}
             </div>
         </form>`,
         onOpen: m => {

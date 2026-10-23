@@ -545,7 +545,7 @@ public class HostedChitService {
         c.setStatus(HostedChit.ACTIVE);
         c.setDemo(false);
         c.setCreatedBy(UserContext.username());
-        c.setCreatedAt(LocalDateTime.now());
+        c.setCreatedAt(OrgClock.now());
         c.setStartMonth(r.startMonth().withDayOfMonth(1));
         c.setMemberCount(r.memberCount());
         c.setMonths(r.months());
@@ -622,7 +622,7 @@ public class HostedChitService {
             throw new BusinessException(String.join("; ", open) + ". Confirm to close the chit anyway: it can be re-opened to settle them.");
         }
         c.setStatus(HostedChit.CLOSED);
-        c.setClosedAt(LocalDateTime.now());
+        c.setClosedAt(OrgClock.now());
         c.setClosedBy(UserContext.get().fullName());
         c.setCloseNote(r == null ? null : blank(r.note()));
         chits.save(c);
@@ -931,13 +931,13 @@ public class HostedChitService {
         p.setLateFee(lateFee.signum() > 0 ? lateFee : null);
         p.setLateFeeWaived(waived.signum() > 0 ? waived : null);
         p.setReference(blank(r.reference()));
-        p.setPaidDate(r.paidDate() != null ? r.paidDate() : LocalDate.now());
+        p.setPaidDate(r.paidDate() != null ? r.paidDate() : OrgClock.today());
         p.setMode(mode(r.mode()));
         p.setNote(blank(r.note()));
         p.setPaidToMemberId(paidTo == null ? null : paidTo.getId());
         p.setAccountId(paidTo != null && Boolean.TRUE.equals(c.getPostToBooks()) ? book.directAccount().getId() : receivedInto(c, r.accountId()));
         p.setCreatedBy(UserContext.username());
-        p.setCreatedAt(LocalDateTime.now());
+        p.setCreatedAt(OrgClock.now());
         p = payments.save(p);
         p.setReceiptNo(String.format("RC-%06d", p.getId()));
         if (Boolean.TRUE.equals(c.getPostToBooks()) && amount.add(lateFee).signum() > 0) {
@@ -1065,7 +1065,7 @@ public class HostedChitService {
      * its terms (amounts, percentages, dates and, for planned chits, the chit table) are what the members agreed to.
      */
     boolean started(HostedChit c) {
-        return !LocalDate.now().isBefore(c.getStartMonth()) || structureLocked(c);
+        return !OrgClock.today().isBefore(c.getStartMonth()) || structureLocked(c);
     }
 
     /** The terms the request would change, in words ("the commission", "late interest" ...). */
@@ -1199,7 +1199,7 @@ public class HostedChitService {
         requireMonthNo(c, monthNo);
         Calc calc = new Calc(c);
         requireAuctionDone(c, calc, monthNo);
-        LocalDate date = r != null && r.paidDate() != null ? r.paidDate() : LocalDate.now();
+        LocalDate date = r != null && r.paidDate() != null ? r.paidDate() : OrgClock.today();
         checkPaidDate(c, date);
         String mode = mode(r == null ? null : r.mode());
         boolean direct = r != null && Boolean.TRUE.equals(r.direct());
@@ -1229,7 +1229,7 @@ public class HostedChitService {
             p.setBatchId(batch);
             p.setNote(direct ? "Paid the winner directly (everyone at once)" : "Marked paid for the month");
             p.setCreatedBy(UserContext.username());
-            p.setCreatedAt(LocalDateTime.now());
+            p.setCreatedAt(OrgClock.now());
             p = payments.save(p);
             p.setReceiptNo(String.format("RC-%06d", p.getId()));
             payments.save(p);
@@ -1263,7 +1263,7 @@ public class HostedChitService {
     /** A payment date cannot be in the future, nor before the chit starts. */
     private static void checkPaidDate(HostedChit c, LocalDate date) {
         if (date == null) return;
-        if (date.isAfter(LocalDate.now())) {
+        if (date.isAfter(OrgClock.today())) {
             throw new BusinessException("The payment date cannot be in the future");
         }
         if (date.isBefore(c.getStartMonth().minusMonths(1))) {
@@ -1419,7 +1419,7 @@ public class HostedChitService {
             HostedChit c = chits.findById(month.getChitId()).orElse(null);
             if (c == null || !separateCommission(c) || month.getCommissionAmount() == null) continue;
             BigDecimal commission = month.getCommissionAmount();
-            LocalDate date = month.getPayoutDate() != null ? month.getPayoutDate() : LocalDate.now();
+            LocalDate date = month.getPayoutDate() != null ? month.getPayoutDate() : OrgClock.today();
             ledger.repost(month.getCommissionEntryId(), commissionDraft(c, month, date, commission));
             month.setCommissionTransferEntryId(ledger.post(commissionTransferDraft(c, month, date, commission)).getId());
             months.save(month);
@@ -1602,7 +1602,7 @@ public class HostedChitService {
                     + " in full (" + ActivityService.money(dues) + " due). Confirm to close the month anyway.");
         }
         HostedChitMember winner = requireMember(c, month.getWinnerMemberId());
-        if (r.payoutDate() != null && r.payoutDate().isAfter(LocalDate.now())) {
+        if (r.payoutDate() != null && r.payoutDate().isAfter(OrgClock.today())) {
             throw new BusinessException("The payout date cannot be in the future");
         }
         if (r.payoutDate() != null && r.payoutDate().isBefore(c.getStartMonth())) {
@@ -1612,7 +1612,7 @@ public class HostedChitService {
         BigDecimal payout = payoutOf(c, calc, month);
         // planned chits: what was collected less the payout, negative when the payout is more than the collection
         BigDecimal commission = planned(c) ? value.subtract(payout) : c.getCommission().min(value);
-        LocalDate date = r.payoutDate() != null ? r.payoutDate() : LocalDate.now();
+        LocalDate date = r.payoutDate() != null ? r.payoutDate() : OrgClock.today();
         List<HostedChitLeg> parts = payoutLegs(c, month, payout, r, commission, Map.of());
         if (Boolean.TRUE.equals(r.gathered())) {
             requireGathered(c, calc, month, parts, commission);
@@ -1620,7 +1620,7 @@ public class HostedChitService {
         month.setPayoutAmount(payout);
         month.setCommissionAmount(commission);
         month.setPayoutDate(date);
-        month.setPayoutRecordedAt(LocalDateTime.now());
+        month.setPayoutRecordedAt(OrgClock.now());
         // members pointed at this winner pay into the chit again from now on
         members.findByChitId(c.getId()).stream().filter(x -> month.getWinnerMemberId() != null && month.getWinnerMemberId().equals(x.getPayToMemberId()))
                 .forEach(x -> { x.setPayToMemberId(null); members.save(x); });
@@ -1849,8 +1849,8 @@ public class HostedChitService {
         if (!separateCommission(c)) {
             throw new BusinessException(c.getName() + " keeps its commission in the collections account");
         }
-        LocalDate date = r != null && r.date() != null ? r.date() : LocalDate.now();
-        if (date.isAfter(LocalDate.now())) throw new BusinessException("The date cannot be in the future");
+        LocalDate date = r != null && r.date() != null ? r.date() : OrgClock.today();
+        if (date.isAfter(OrgClock.today())) throw new BusinessException("The date cannot be in the future");
         if (date.isBefore(month.getPayoutDate())) throw new BusinessException("The commission is moved on or after the payout (" + month.getPayoutDate() + ")");
         String mode = HostedChitBookService.mode(r == null ? null : r.mode());
         String reference = r == null ? null : blank(r.reference());
@@ -1950,7 +1950,7 @@ public class HostedChitService {
             throw new BusinessException(winner.getName() + " has " + ag.getStatus().toLowerCase() + " the agreement " + ag.getAgreementNo()
                     + ", which records this payout (amount, date and references), so it cannot change");
         }
-        if (r.payoutDate() != null && r.payoutDate().isAfter(LocalDate.now())) {
+        if (r.payoutDate() != null && r.payoutDate().isAfter(OrgClock.today())) {
             throw new BusinessException("The payout date cannot be in the future");
         }
         if (r.payoutDate() != null && r.payoutDate().isBefore(c.getStartMonth())) {
@@ -2112,7 +2112,7 @@ public class HostedChitService {
         }
         a.setStatus(HostedChitAgreement.SIGNED);
         a.setAcceptedName(blank(signedBy) != null ? ActivityService.cut(signedBy.trim(), 100) : members.findById(a.getMemberId()).map(HostedChitMember::getName).orElse(null));
-        a.setAcceptedAt(LocalDateTime.now());
+        a.setAcceptedAt(OrgClock.now());
         a.setAcceptedFrom("Signed in person, recorded by " + UserContext.get().fullName());
         agreements.save(a);
         activity.record("CHANGED", AREA, "Agreement signed in person · " + a.getAgreementNo() + " · " + c.getName() + " month " + a.getMonthNo());
@@ -2134,7 +2134,7 @@ public class HostedChitService {
             a.setTerms("pending");          // filled in below, once the number is known
             a.setContentHash("pending");
             a.setCreatedBy(UserContext.username());
-            a.setCreatedAt(LocalDateTime.now());
+            a.setCreatedAt(OrgClock.now());
             // the stamp-paper copy carries the organiser's receipt signature until another is drawn for it
             a.setOrganiserName(c.getReceiptSigner() != null ? c.getReceiptSigner() : UserContext.get().fullName());
             a.setOrganiserSignature(c.getReceiptSignature());
@@ -2429,9 +2429,9 @@ public class HostedChitService {
     }
 
     public Report report(LocalDate from, LocalDate to) {
-        LocalDate start = from != null ? from : LocalDate.now().withDayOfMonth(1).minusMonths(11);
-        LocalDate end = to != null ? to : LocalDate.now();
-        LocalDate today = LocalDate.now();
+        LocalDate start = from != null ? from : OrgClock.today().withDayOfMonth(1).minusMonths(11);
+        LocalDate end = to != null ? to : OrgClock.today();
+        LocalDate today = OrgClock.today();
         Map<String, BigDecimal[]> byMonth = new java.util.LinkedHashMap<>();
         for (YearMonth ym = YearMonth.from(start); !ym.isAfter(YearMonth.from(end)); ym = ym.plusMonths(1)) {
             byMonth.put(ym.toString(), new BigDecimal[] {Money.ZERO, Money.ZERO, Money.ZERO, Money.ZERO});
@@ -2823,7 +2823,7 @@ public class HostedChitService {
         final int completedMonths;
         /** The first month not paid out (months + 1 when all are). */
         final int currentMonth;
-        final LocalDate today = LocalDate.now();
+        final LocalDate today = OrgClock.today();
 
         Calc(HostedChit c) {
             this.c = c;

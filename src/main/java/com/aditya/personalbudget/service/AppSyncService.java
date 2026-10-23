@@ -141,8 +141,8 @@ public class AppSyncService {
                 .sorted(Comparator.comparing((AppCategory c) -> !"EXPENSE".equals(c.kind())).thenComparing(AppCategory::system)
                         .thenComparing(AppCategory::uses, Comparator.reverseOrder()).thenComparing(AppCategory::name))
                 .toList();
-        LocalDate from = LocalDate.now().minusDays(Math.max(1, Math.min(days, 730)));
-        List<AppExpense> recent = expenses.list(from, LocalDate.now().plusDays(1)).stream()
+        LocalDate from = OrgClock.today().minusDays(Math.max(1, Math.min(days, 730)));
+        List<AppExpense> recent = expenses.list(from, OrgClock.today().plusDays(1)).stream()
                 .map(r -> new AppExpense(r.entryId(), r.entryNo(), r.date(), r.narration(), r.party(), r.reference(), r.categoryId(), r.categoryName(),
                         r.netAmount() != null ? r.netAmount() : r.amount(), r.paidFromId(), r.paidFrom(), r.status())).toList();
         var me = UserContext.get();
@@ -158,14 +158,14 @@ public class AppSyncService {
                     c.organizerUpi(), c.upiNote());
         }).toList();
         boolean canPay = seesChits && com.aditya.personalbudget.security.RolePolicy.allows(me.role(), com.aditya.personalbudget.security.Permission.MANAGE_CHITS);
-        return new Snapshot(LocalDateTime.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay);
+        return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay);
     }
 
     /** An account's statement for the app (newest last), over the last {@code days} days. */
     public Statement statement(Long accountId, int days) {
-        LocalDate from = LocalDate.now().minusDays(Math.max(1, Math.min(days, 1825)));
+        LocalDate from = OrgClock.today().minusDays(Math.max(1, Math.min(days, 1825)));
         AccountLedger l = reports.accountLedger(accountId, from, LocalDate.of(9999, 12, 31));
-        return new Statement(l.accountId(), l.name(), l.accountClass().name(), l.from(), LocalDate.now(), l.openingBalance(), l.closingBalance(),
+        return new Statement(l.accountId(), l.name(), l.accountClass().name(), l.from(), OrgClock.today(), l.openingBalance(), l.closingBalance(),
                 l.rows().stream().map(r -> new StatementRow(r.entryId(), r.entryNo(), r.date(), r.voucherLabel(), r.narration(), r.counterAccounts(),
                         r.debit(), r.credit(), r.balance())).toList());
     }

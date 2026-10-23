@@ -76,7 +76,7 @@ public class AuthService {
     public SessionView login(LoginRequest request, String userAgent) {
         AppUser user = users.findByUsername(request.username().trim())
                 .orElseThrow(() -> new UnauthorizedException("Invalid username or password"));
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.nowIn(user.getTenantId());   // no one is signed in yet: the user's organization
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now)) {
             throw new UnauthorizedException("Too many wrong passwords. Try again after "
                     + user.getLockedUntil().toLocalTime().withNano(0) + ".");
@@ -169,7 +169,7 @@ public class AuthService {
                 RolePolicy.permissionsOf(user.getRole()), true,
                 FeaturePolicy.granted(user, tenant, mobile), mobile, !Boolean.FALSE.equals(user.getMobileAccess()),
                 FeaturePolicy.granted(user, tenant, true), appSettings.get().mobilePath(), null, null, approvals.forUser(user, tenant), null,
-                Boolean.TRUE.equals(user.getMustChangePassword()));
+                Boolean.TRUE.equals(user.getMustChangePassword()), OrgClock.zoneOf(tenant.getId()).getId());
     }
 
     /** Someone opened an access link: a session with only what the link allows. */
@@ -191,6 +191,6 @@ public class AuthService {
         return new MeView(c.userId(), c.username(), c.fullName(), null, c.role(), c.role() == UserRole.VIEWER ? "View only" : "Recorder",
                 c.tenantId(), c.tenantCode(), c.tenantName(), c.currency(), RolePolicy.permissionsOf(c.role()), true,
                 c.features(), c.mobile(), true, c.features(), appSettings.get().mobilePath(),
-                link.getId(), link.getMode(), c.approval(), link.getExpiresAt(), false);
+                link.getId(), link.getMode(), c.approval(), link.getExpiresAt(), false, OrgClock.zoneOf(c.tenantId()).getId());
     }
 }

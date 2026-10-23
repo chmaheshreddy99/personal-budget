@@ -11,6 +11,9 @@
  *   Journal, Balance sheet, Reports, Forecast, Gifts: the same sections as the full site, kept to one simple
  *              screen each (entries by day, net worth by group, the period's highlights, six months of cash ahead,
  *              the give-and-take)
+ *   Host a Chit, Construction, Activity: a lite view of each (the chits run, the projects, who changed what), a tap
+ *              shows the details; they are recorded on the full site
+ *   Settings   (admins) the organization's time zone; backups of the whole data (super admins)
  * The bar holds the first four sections and "More", which lists every shared section.
  * Only the sections an admin shared for mobile appear (the server enforces the same). The session is separate
  * from the full site's (its own sign-in, its own stored token).
@@ -21,7 +24,7 @@
  */
 import { api, session, useTokenKey, setUnauthorizedHandler, newRequestKey } from '../core/api.js';
 import { icon, hydrateIcons, categoryIcon, accountTypeIcon } from '../core/icons.js';
-import { money, moneyShort, percent, date, shortDate, isoDate, setCurrency, daysFromToday } from '../core/format.js';
+import { money, moneyShort, percent, date, shortDate, isoDate, setCurrency, setTimeZone, daysFromToday, dateTime, orgNow } from '../core/format.js';
 import { kindChip } from '../core/entry-kind.js';
 import { evidenceFieldHtml, bindEvidenceField, openViewer, fileUrl } from '../components/evidence.js';
 import { DOC_TYPES } from '../views/documents.js';
@@ -44,6 +47,10 @@ const TABS = [
     { key: 'reports', label: 'Reports', iconName: 'report', feature: 'REPORTS', view: reports, note: 'the period at a glance' },
     { key: 'forecast', label: 'Forecast', iconName: 'trending', feature: 'FORECAST', view: forecast, note: 'cash for the next months' },
     { key: 'gifts', label: 'Gifts', iconName: 'gift', feature: 'GIFTS', view: gifts, note: 'given, received, to return' },
+    { key: 'hostchits', label: 'Host a Chit', short: 'Host', iconName: 'hand-coins', feature: 'HOST_CHITS', view: hostChits, note: 'members, months, dues' },
+    { key: 'construction', label: 'Construction', short: 'Build', iconName: 'hard-hat', feature: 'CONSTRUCTION', view: construction, note: 'projects, money, progress' },
+    { key: 'activity', label: 'Activity', iconName: 'activity', feature: 'ACTIVITY', permission: 'APPROVE_ENTRIES', view: activity, note: 'who changed what' },
+    { key: 'settings', label: 'Settings', iconName: 'settings', feature: null, permission: 'MANAGE_USERS', view: settings, note: 'time zone, backup' },
 ];
 const NOTES = { home: 'money at a glance', expenses: 'by day, add in seconds', accounts: 'balances and statements', chits: 'progress and dues',
     budgets: 'this month against the plan', income: 'what came in', documents: 'scans, ready to share' };
@@ -55,7 +62,7 @@ const barTabs = () => (tabs().length > 5 ? [...tabs().slice(0, 4), MORE] : tabs(
 let me = null;
 const has = f => !f || me?.features?.includes(f);
 const can = p => me?.permissions?.includes(p);
-const tabs = () => TABS.filter(t => has(t.feature));
+const tabs = () => TABS.filter(t => has(t.feature) && (!t.permission || can(t.permission)) && !(t.permission && me?.linkId));
 
 // ===================================================================== start
 
@@ -117,6 +124,7 @@ async function enter() {
         return;
     }
     setCurrency(me.currency);
+    setTimeZone(me.timeZone);
     $('m-login').hidden = true;
     $('m-app').hidden = false;
     $('m-tenant').textContent = me.tenantName;
@@ -432,7 +440,7 @@ const monthRange = offset => {
     return [isoDate(from), isoDate(to)];
 };
 const PERIOD_CHIPS = { month: ['This month', () => monthRange(0)], last: ['Last month', () => monthRange(-1)],
-    m3: ['3 months', () => [monthRange(-2)[0], isoDate()]], year: ['This year', () => [`${new Date().getFullYear()}-01-01`, isoDate()]] };
+    m3: ['3 months', () => [monthRange(-2)[0], isoDate()]], year: ['This year', () => [`${orgNow().getFullYear()}-01-01`, isoDate()]] };
 const periodChips = (current, attr) => `<div class="m-chips">${Object.entries(PERIOD_CHIPS).map(([k, [l]]) =>
     `<button class="m-chip ${current === k ? 'on' : ''}" ${attr}="${k}">${l}</button>`).join('')}</div>`;
 
@@ -630,6 +638,186 @@ async function documentSheet(d) {
     });
 }
 
+// ---- Host a Chit: the chits the household runs; a tap shows the members and the months
+async function hostChits(params) {
+    if (params[0]) return hostChitDetail(Number(params[0]));
+    const [list, s] = await Promise.all([api.get('/hosted-chits'), api.get('/hosted-chits/summary').catch(() => null)]);
+    return `${s ? `<section class="m-total"><small>${s.running} running of ${s.chits}</small><b>${money(s.pendingDues)}</b>
+            <span>to collect${s.pendingCount ? ` from ${s.pendingCount}` : ''} · this month ${moneyShort(s.collectedThisMonth)} of ${moneyShort(s.expectedThisMonth)}
+                · commission ${moneyShort(s.commissionEarned)}</span></section>` : ''}
+        ${list.map(c => {
+            const pct = c.months ? (c.completedMonths / c.months) * 100 : 0;
+            const done = c.closed || c.status === 'COMPLETED' || c.status === 'CLOSED';
+            return `<a class="m-chit ${done ? 'done' : ''}" href="#hostchits/${c.id}">
+                <div class="m-chit-head"><span class="chip-icon sm gold">${icon('hand-coins')}</span><div class="m-row-main"><b>${esc(c.name)}</b>
+                    <small>${c.memberCount} members · month ${c.currentMonth || 0}/${c.months}${c.closed ? ' · closed' : ''}</small></div>
+                    <b class="m-amt">${moneyShort(c.currentChitValue ?? c.baseValue)}</b></div>
+                <i class="m-bar"><em style="width:${pct}%"></em></i>
+                <div class="m-chit-figs">
+                    <span><small>This month</small><b>${moneyShort(c.collectedThisMonth)} / ${moneyShort(c.expectedThisMonth)}</b></span>
+                    <span><small>To collect</small><b class="${Number(c.pendingDues) ? 'neg' : ''}">${moneyShort(c.pendingDues)}</b></span>
+                    <span><small>Commission</small><b class="pos">${moneyShort(c.commissionEarned)}</b></span>
+                    <span><small>Next due</small><b>${c.nextDueDate ? shortDate(c.nextDueDate) : '—'}</b></span>
+                </div></a>`;
+        }).join('') || empty('No chits hosted yet. Start one on the full site.', 'hand-coins')}`;
+}
+
+async function hostChitDetail(id) {
+    const { chit: c, members, schedule } = await api.get(`/hosted-chits/${id}`);
+    const owing = members.filter(m => Number(m.balanceDue) > 0).sort((a, b) => Number(b.balanceDue) - Number(a.balanceDue));
+    return `<a class="m-back" href="#hostchits">${icon('chevron-left')}Host a Chit</a>
+        <section class="m-total"><small>${esc(c.name)}</small><b>${money(c.currentChitValue ?? c.baseValue)}</b>
+            <span>${c.memberCount} × ${money(c.installment)} · month ${c.currentMonth || 0} of ${c.months} · due on day ${c.dueDay}</span></section>
+        <section class="m-tiles">
+            ${tile('arrow-in', 'Collected', money(c.totalCollected), `this month ${moneyShort(c.collectedThisMonth)}`)}
+            ${tile('arrow-out', 'Paid out', money(c.totalPaidOut), `${c.completedMonths} months done`)}
+            ${tile('hourglass', 'To collect', money(c.pendingDues), c.pendingCount ? `<span class="neg">${c.pendingCount} pending</span>` : 'all paid')}
+            ${tile('piggy', 'Commission', money(c.commissionEarned), Number(c.lateFeesCollected) ? `late fees ${moneyShort(c.lateFeesCollected)}` : 'earned')}
+        </section>
+        ${owing.length ? `<div class="m-day"><b>Still to pay</b><span>${owing.length}</span></div>
+            <div class="m-list card">${owing.map(m => `<div class="m-row"><span class="m-no late">${m.slot}</span>
+                <div class="m-row-main"><b>${esc(m.name)}</b><small>${esc(m.phone || '')}${m.wonMonth ? ` · won month ${m.wonMonth}` : ''}</small></div>
+                <b class="m-amt neg">${money(m.balanceDue)}</b></div>`).join('')}</div>` : ''}
+        <div class="m-day"><b>Months</b><span>${c.completedMonths}/${c.months}</span></div>
+        <div class="m-list card">${schedule.map(mo => `<div class="m-row ${mo.status === 'COMPLETED' ? '' : 'pending'}">
+            <span class="m-no ${mo.status === 'COMPLETED' ? 'paid' : mo.due ? 'late' : ''}">${mo.monthNo}</span>
+            <div class="m-row-main"><b>${date(mo.dueDate)}</b><small>${mo.winnerName ? `${esc(mo.winnerName)} · payout ${moneyShort(mo.payout)}${mo.estimated ? ' (up to)' : ''}` : mo.status === 'ONGOING' ? 'this month' : 'upcoming'}
+                · ${mo.paidCount}/${c.memberCount} paid</small></div>
+            <b class="m-amt">${money(mo.collected)} <small>/ ${moneyShort(mo.expected)}</small></b></div>`).join('')}</div>
+        <p class="m-foot">Record payments, auctions and payouts on the full site.</p>`;
+}
+
+// ---- Construction: every project's money and progress; a tap shows its stages, dues and latest money
+async function construction(params) {
+    if (params[0]) return projectDetail(Number(params[0]));
+    const o = await api.get('/construction');
+    return `<section class="m-total"><small>${o.projects.length} project${o.projects.length === 1 ? '' : 's'}</small><b>${money(o.received)}</b>
+            <span>received · costs ${moneyShort(o.costs)} · due ${moneyShort(o.due)}${Number(o.overdue) ? ` · <span class="neg">overdue ${moneyShort(o.overdue)}</span>` : ''}</span></section>
+        ${o.projects.map(p => {
+            const f = p.figures;
+            return `<a class="m-chit ${p.status === 'CLOSED' || p.status === 'COMPLETED' ? 'done' : ''}" href="#construction/${p.id}">
+                <div class="m-chit-head"><span class="chip-icon sm">${icon('hard-hat')}</span><div class="m-row-main"><b>${esc(p.name)}</b>
+                    <small>${esc([p.code, p.city, p.clientName].filter(Boolean).join(' · '))}</small></div>
+                    <b class="m-amt">${moneyShort(f.totalValue)}</b></div>
+                <i class="m-bar"><em style="width:${Math.min(100, f.progressPercent || 0)}%"></em></i>
+                <div class="m-chit-figs">
+                    <span><small>Progress</small><b>${f.progressPercent || 0}% · ${f.stagesDone}/${f.stagesTotal}</b></span>
+                    <span><small>Received</small><b class="pos">${moneyShort(f.received)}</b></span>
+                    <span><small>Due</small><b class="${Number(f.overdue) ? 'neg' : ''}">${moneyShort(f.due)}</b></span>
+                    <span><small>Costs</small><b>${moneyShort(f.totalCost)}</b></span>
+                </div></a>`;
+        }).join('') || empty('No projects yet. Add one on the full site.', 'hard-hat')}`;
+}
+
+async function projectDetail(id) {
+    const d = await api.get(`/construction/${id}`);
+    const p = d.project, f = d.figures;
+    const dues = (d.schedule || []).filter(r => Number(r.balance) > 0).slice(0, 12);
+    const money_ = [...(d.receipts || []).map(r => ({ on: r.receivedOn, what: r.payerName || r.towards || 'Receipt', amount: Number(r.amount), sign: 1 })),
+        ...(d.costs || []).map(c => ({ on: c.spentOn, what: c.description || c.head, amount: Number(c.amount), sign: -1 }))]
+        .sort((a, b) => String(b.on).localeCompare(String(a.on))).slice(0, 15);
+    return `<a class="m-back" href="#construction">${icon('chevron-left')}Construction</a>
+        <section class="m-total"><small>${esc(p.name)}${p.city ? ` · ${esc(p.city)}` : ''}</small><b>${money(f.totalValue)}</b>
+            <span>${f.progressPercent || 0}% done${f.revisedEndDate ? ` · ends ${date(f.revisedEndDate)}` : ''}${f.daysLeft !== null && f.daysLeft !== undefined ? ` · ${f.daysLeft} days left` : ''}</span></section>
+        <section class="m-tiles">
+            ${tile('arrow-in', 'Received', money(f.received), `due ${moneyShort(f.due)}`)}
+            ${tile('arrow-out', 'Costs', money(f.totalCost), `estimate ${moneyShort(f.estimatedCost)}`)}
+            ${tile('trending', 'Profit', money(f.profit), `expected ${moneyShort(f.expectedProfit)}`)}
+            ${tile('bank', 'Money in hand', money(f.moneyBalance), Number(f.loanOutstanding) ? `loan ${moneyShort(f.loanOutstanding)}` : 'no loan')}
+        </section>
+        ${d.stages?.length ? `<div class="m-day"><b>Stages</b><span>${f.stagesDone}/${f.stagesTotal}</span></div>
+            <div class="m-list card">${d.stages.map(s => `<div class="m-row ${s.completedOn ? '' : 'pending'}">
+                <span class="m-no ${s.completedOn ? 'paid' : ''}">${s.position ?? ''}</span>
+                <div class="m-row-main"><b>${esc(s.name)}</b><small>${s.completedOn ? `done ${shortDate(s.completedOn)}` : s.dueDate ? `due ${shortDate(s.dueDate)}` : esc(s.status || '')}</small></div>
+                <b class="m-amt">${s.amount !== null ? moneyShort(s.amount) : ''}</b></div>`).join('')}</div>` : ''}
+        ${dues.length ? `<div class="m-day"><b>Still to receive</b><span>${dues.length}</span></div>
+            <div class="m-list card">${dues.map(r => `<div class="m-row"><span class="m-no ${r.daysLate > 0 ? 'late' : ''}">${icon('calendar')}</span>
+                <div class="m-row-main"><b>${esc(r.label)}</b><small>${r.dueDate ? `due ${shortDate(r.dueDate)}` : ''}${r.daysLate > 0 ? ` · <span class="neg">${r.daysLate} days late</span>` : ''}</small></div>
+                <b class="m-amt ${r.daysLate > 0 ? 'neg' : ''}">${money(r.balance)}</b></div>`).join('')}</div>` : ''}
+        ${money_.length ? `<div class="m-day"><b>Latest money</b></div>
+            <div class="m-list card">${money_.map(m => `<div class="m-row">
+                <div class="m-row-main"><b>${esc(m.what)}</b><small>${shortDate(m.on)}</small></div>
+                <b class="m-amt ${m.sign > 0 ? 'pos' : 'neg'}">${m.sign > 0 ? '+' : '−'}${money(m.amount)}</b></div>`).join('')}</div>` : ''}
+        <p class="m-foot">Record receipts, costs and sales on the full site.</p>`;
+}
+
+// ---- Activity: who changed what, by day
+async function activity() {
+    const list = await api.get('/activity', { limit: 200 });
+    if (!list.length) return empty('Nothing recorded yet', 'activity');
+    const days = new Map();
+    list.forEach(a => {
+        const day = String(a.at).slice(0, 10);
+        if (!days.has(day)) days.set(day, []);
+        days.get(day).push(a);
+    });
+    return [...days.entries()].map(([day, rows]) => `<div class="m-day"><b>${dayLabel(day)}</b><span>${rows.length}</span></div>
+        <div class="m-list card">${rows.map(a => `<div class="m-row">
+            <span class="m-ava">${esc(initials(a.actor))}</span>
+            <div class="m-row-main"><b>${esc(a.summary || a.action)}</b><small>${esc(a.actor)}${a.via ? ` · ${esc(a.via)}` : ''} · ${esc(a.area || '')} · ${String(a.at).slice(11, 16)}</small></div></div>`).join('')}</div>`).join('');
+}
+
+// ---- Settings: the organization's time zone; backups of the whole data (super admins)
+let backupList = [];
+async function settings() {
+    const admin = can('MANAGE_USERS');
+    const superAdmin = can('MANAGE_TENANTS');
+    const [tz, zones, backups] = await Promise.all([
+        admin ? api.get('/admin/organization/time-zone') : null,
+        admin ? api.get('/admin/time-zones') : [],
+        superAdmin ? api.get('/admin/backups') : null,
+    ]);
+    backupList = backups?.backups || [];
+    const size = b => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+    return `<section class="m-card"><div class="m-card-head">${icon('clock')}<b>Time zone</b></div>
+            ${admin ? `<form class="m-form" id="m-tz-form">
+                <label><span>Dates and times are kept and shown in</span><select name="timeZone">
+                    <option value="" ${tz.timeZone ? '' : 'selected'}>The server's (${esc(tz.serverTimeZone)})</option>
+                    ${zones.map(z => `<option value="${esc(z.id)}" ${z.id === tz.timeZone ? 'selected' : ''}>${esc(z.label)}</option>`).join('')}</select></label>
+                <p class="m-note">${icon('clock')} Now: ${esc(dateTime(tz.now))} (${esc(tz.effective)})</p>
+                <button class="m-btn primary block" type="submit">${icon('check')}Save time zone</button></form>`
+                : `<p class="m-note">${icon('clock')} ${esc(me.timeZone || '')}. An admin can change it.</p>`}
+        </section>
+        ${superAdmin ? `<section class="m-card"><div class="m-card-head">${icon('database')}<b>Backup</b><span class="spacer"></span><small>${backupList.length}</small></div>
+            <p class="m-note">All the data of every organization in one file, kept on the server; download it to keep a copy.</p>
+            <button class="m-btn primary block" id="m-backup-now">${icon('database')}Back up now</button>
+            <div class="m-list">${backupList.map(b => `<div class="m-row">
+                <div class="m-row-main"><b>${esc(b.name)}</b><small>${esc(dateTime(b.createdAt))} · ${size(b.bytes)}</small></div>
+                <button class="m-icon-btn light" data-backup-get="${esc(b.name)}" aria-label="Download">${icon('download')}</button></div>`).join('')}</div>
+            <p class="m-note">${icon('info')} Restore a backup on the full site (Settings, Backup).</p></section>` : ''}`;
+}
+
+function bindSettings(view) {
+    view.querySelector('#m-tz-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        try {
+            const saved = await api.put('/admin/organization/time-zone', { timeZone: e.target.timeZone.value || null });
+            me.timeZone = saved.effective;
+            setTimeZone(saved.effective);
+            toast(`Time zone: ${saved.effective}`);
+            route();
+        } catch (error) { toast(error.message); }
+    });
+    view.querySelector('#m-backup-now')?.addEventListener('click', async () => {
+        try {
+            const b = await api.post('/admin/backups', { includeFiles: false });
+            toast(`Saved ${b.name}`);
+            route();
+        } catch (error) { toast(error.message); }
+    });
+    view.querySelectorAll('[data-backup-get]').forEach(b => b.addEventListener('click', async () => {
+        try {
+            const name = b.dataset.backupGet;
+            const url = URL.createObjectURL(await api.blob(`/admin/backups/${encodeURIComponent(name)}`));
+            const a = Object.assign(document.createElement('a'), { href: url, download: name });
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        } catch (error) { toast(error.message); }
+    }));
+}
+
 // ===================================================================== interactions
 
 function bind(key) {
@@ -671,6 +859,7 @@ function bind(key) {
             again?.focus(); again?.setSelectionRange(pos, pos);
         }, 300); });
     }
+    if (key === 'settings') bindSettings(view);
     if (key === 'expenses') {
         view.querySelectorAll('[data-xp-period]').forEach(b => b.addEventListener('click', () => {
             xpPeriod = b.dataset.xpPeriod;
@@ -708,7 +897,7 @@ async function addExpense({ resubmit = null } = {}) {
     const { categories, payers: payerOptions, recent } = await api.get('/expenses/form-options');
     const payers = payerOptions.map(a => ({ ...a, accountType: a.type }));
     const past = recent.slice(0, 40);
-    const day = n => { const d = new Date(); d.setDate(d.getDate() - n); return isoDate(d); };
+    const day = n => { const d = orgNow(); d.setDate(d.getDate() - n); return isoDate(d); };
     const el = sheet(`<form class="m-form" id="m-xp-form" autocomplete="off">
         <div class="m-sheet-title">${icon(resubmit ? 'edit' : 'receipt')}<b>${resubmit ? 'Fix and send again' : 'Add expense'}</b>${me.approval || resubmit ? '<span class="m-tag">needs approval</span>' : ''}</div>
         ${resubmit?.reviewNote ? `<p class="m-note m-sent-back">${icon('x')} Sent back${resubmit.reviewedBy ? ` by ${esc(resubmit.reviewedBy)}` : ''}: “${esc(resubmit.reviewNote)}”</p>` : ''}
@@ -821,7 +1010,7 @@ function userSheet() {
     sheet(`<div class="m-sheet-head"><span class="m-ava lg">${esc(initials(me.fullName))}</span><div class="m-row-main"><b>${esc(me.fullName)}</b>
             <small>${esc(me.username)} · ${esc(me.roleLabel)} · ${esc(me.tenantName)}</small></div></div>
         <p class="m-note">${icon('eye')} On mobile: ${tabs().map(t => t.label).join(', ')}</p>
-        ${me.linkId ? linkBanner() : `<a class="m-btn block" href="/">${icon('dashboard')}Open the full site</a>`}
+        ${me.linkId ? linkBanner() : `<a class="m-btn block" href="/?ui=full">${icon('dashboard')}Open the full site</a>`}
         <button class="m-btn block danger" id="m-logout">${icon('log-out')}Sign out</button>`)
         .querySelector('#m-logout').addEventListener('click', async () => {
             try { await api.post('/auth/logout'); } catch { /* already signed out */ }

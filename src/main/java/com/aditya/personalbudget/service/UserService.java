@@ -71,7 +71,7 @@ public class UserService {
         }
         AppUser user = new AppUser();
         user.setTenantId(UserContext.tenantId());
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(OrgClock.now());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setMustChangePassword(true);   // a password given by the admin: the user picks their own at the first sign-in
         apply(user, request);

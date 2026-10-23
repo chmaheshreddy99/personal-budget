@@ -1,0 +1,65 @@
+/* =====================================================================
+   Waiting for the server (js/core/busy.js):
+   - #pb-progress   a thin bar along the top while any call is slow
+   - .pb-locked     the element that started a call: no more clicks until it is answered
+   - .pb-busy       ... and, once the call is slow (a save at once), a spinner on it
+   ===================================================================== */
+
+#pb-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10000;
+    pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .2s;
+}
+#pb-progress.on { opacity: 1; }
+#pb-progress span {
+    position: absolute; top: 0; bottom: 0; left: -40%; width: 40%;
+    background: linear-gradient(90deg, transparent, var(--link, #0b6aa6), var(--brand-accent, #19a1b8), transparent);
+    animation: pb-slide 1.1s ease-in-out infinite;
+}
+@keyframes pb-slide { to { left: 100%; } }
+html.pb-waiting, html.pb-waiting * { cursor: progress; }
+
+.pb-locked { pointer-events: none; }
+
+@keyframes pb-spin { to { transform: rotate(360deg); } }
+
+/* the spinner itself: a ring in the element's own text colour (::before on controls, whose ::after is often taken) */
+.pb-busy::after,
+button.pb-busy::before, .btn.pb-busy::before, [role="button"].pb-busy::before, .seg-chip.pb-busy::before, .m-btn.pb-busy::before {
+    content: ''; display: inline-block; box-sizing: border-box;
+    width: 1em; height: 1em; min-width: 12px; min-height: 12px;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+    animation: pb-spin .7s linear infinite; opacity: .85; flex: none;
+}
+
+/* buttons, chips and links: the spinner before the label, the label a little dimmed */
+button.pb-busy, .btn.pb-busy, [role="button"].pb-busy, .seg-chip.pb-busy, .m-btn.pb-busy { opacity: .8; }
+button.pb-busy::after, .btn.pb-busy::after, [role="button"].pb-busy::after, .seg-chip.pb-busy::after, .m-btn.pb-busy::after {
+    content: none;
+}
+.btn.primary.pb-busy::after, .btn.glossy.pb-busy::after { content: ""; animation: none; border: 0; border-radius: 7px 7px 3px 3px; width: auto; height: auto; min-width: 0; min-height: 0; }
+button.pb-busy::before, .m-btn.pb-busy::before { margin-right: 6px; vertical-align: -2px; }
+button.pb-busy:disabled, .btn.pb-busy:disabled { opacity: .8; }
+
+/* a table row being expanded: dimmed, the spinner at the end of the row */
+tr.pb-busy { opacity: .75; }
+tr.pb-busy::after { display: none; }
+tr.pb-busy > :last-child { position: relative; }
+tr.pb-busy > :last-child::after {
+    content: ''; position: absolute; right: 6px; top: 50%; margin-top: -7px;
+    width: 14px; height: 14px; box-sizing: border-box;
+    border: 2px solid var(--link, #0b6aa6); border-right-color: transparent; border-radius: 50%;
+    animation: pb-spin .7s linear infinite;
+}
+
+/* cards, list rows and menu items (desktop and mobile): the spinner on the right */
+.clickable.pb-busy:not(tr), .m-row.pb-busy, .m-card.pb-busy, .m-tile.pb-busy, .set-item.pb-busy, [data-action].pb-busy:not(button) {
+    position: relative; opacity: .8;
+}
+.clickable.pb-busy:not(tr)::after, .m-row.pb-busy::after, .m-card.pb-busy::after, .m-tile.pb-busy::after,
+.set-item.pb-busy::after, [data-action].pb-busy:not(button)::after {
+    position: absolute; right: 10px; top: 50%; margin-top: -.5em; color: var(--link, #0b6aa6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #pb-progress span, .pb-busy::after, .pb-busy::before, tr.pb-busy > :last-child::after { animation-duration: 2.4s; }
+}

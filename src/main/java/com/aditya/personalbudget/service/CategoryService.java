@@ -54,7 +54,7 @@ public class CategoryService {
     public List<CategoryView> list() {
         Long tenantId = UserContext.tenantId();
         LedgerSnapshot books = ledger.snapshot();
-        YearMonth month = YearMonth.now();
+        YearMonth month = OrgClock.month();
         // as the budget sees them: Chit Payments shows the cash paid into chits
         Map<Long, BigDecimal> thisMonth = books.budgetMovements(month.atDay(1), month.atEndOfMonth());
         Map<Long, BigDecimal> lastMonth = books.budgetMovements(month.minusMonths(1).atDay(1), month.minusMonths(1).atEndOfMonth());
@@ -115,7 +115,7 @@ public class CategoryService {
         c.setDescription(blankToNull(request.description()));
         c.setCode(request.code() != null && !request.code().isBlank() ? request.code().trim() : nextCode(tenantId, request.kind()));
         c.setActive(request.active() == null || request.active());
-        c.setCreatedAt(LocalDateTime.now());
+        c.setCreatedAt(OrgClock.now());
         c = categories.save(c);
         return view(c.getId());
     }

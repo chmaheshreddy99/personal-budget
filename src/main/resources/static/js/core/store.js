@@ -72,15 +72,15 @@ export const FEATURES = [
     { key: 'JOURNAL', label: 'Journal', path: 'transactions', iconName: 'journal', mobile: true },
     { key: 'ACCOUNTS', label: 'Accounts', path: 'accounts', iconName: 'wallet', mobile: true },
     { key: 'CHITS', label: 'Chits', path: 'chits', iconName: 'chit', mobile: true },
-    { key: 'HOST_CHITS', label: 'Host a Chit', path: 'host-chits', iconName: 'hand-coins', mobile: false },
+    { key: 'HOST_CHITS', label: 'Host a Chit', path: 'host-chits', iconName: 'hand-coins', mobile: true },
     { key: 'BUDGETS', label: 'Budgets', path: 'planning', iconName: 'target', mobile: true },
     { key: 'BALANCE_SHEET', label: 'Balance sheet', path: 'balance-sheet', iconName: 'scale', mobile: true },
     { key: 'REPORTS', label: 'Reports', path: 'reports', iconName: 'report', mobile: true },
     { key: 'FORECAST', label: 'Forecast', path: 'forecast', iconName: 'trending', mobile: true },
     { key: 'GIFTS', label: 'Gifts', path: 'gifts', iconName: 'gift', mobile: true },
     { key: 'DOCUMENTS', label: 'Documents', path: 'documents', iconName: 'file-text', mobile: true },
-    { key: 'CONSTRUCTION', label: 'Construction', path: 'construction', iconName: 'hard-hat', mobile: false },
-    { key: 'ACTIVITY', label: 'Activity', path: 'activity', iconName: 'history', mobile: false, needs: 'APPROVE_ENTRIES' },
+    { key: 'CONSTRUCTION', label: 'Construction', path: 'construction', iconName: 'hard-hat', mobile: true },
+    { key: 'ACTIVITY', label: 'Activity', path: 'activity', iconName: 'history', mobile: true, needs: 'APPROVE_ENTRIES' },
 ];
 
 /** Menu items that go by role, not by sharing: listed in the access grids so every menu item is accounted for. */

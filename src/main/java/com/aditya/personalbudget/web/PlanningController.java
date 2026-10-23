@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.web;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.domain.entity.Budget;
 import com.aditya.personalbudget.domain.entity.RecurringTransaction;
 import com.aditya.personalbudget.dto.JournalDtos.EntryView;
@@ -49,7 +50,7 @@ public class PlanningController {
     @GetMapping("/budgets")
     @RequiresPermission(Permission.VIEW)
     public BudgetSummary budgets(@RequestParam(required = false) String month) {
-        return budgets.summary(month == null || month.isBlank() ? YearMonth.now() : YearMonth.parse(month));
+        return budgets.summary(month == null || month.isBlank() ? OrgClock.month() : YearMonth.parse(month));
     }
 
     /** Chit installments paid between two dates, as the Chit Payments budget counts them. */

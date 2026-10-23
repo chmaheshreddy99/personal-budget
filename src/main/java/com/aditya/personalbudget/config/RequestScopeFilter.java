@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.config;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.storage.TsvDataStore;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -16,7 +17,8 @@ import java.io.IOException;
  * Brackets every API request for the data store:
  * <ul>
  *   <li>GET / HEAD requests are read-only: they see all tables as of one moment and cannot write;</li>
- *   <li>at the end of every request the tables it read are forgotten, so nothing stays in memory.</li>
+ *   <li>at the end of every request the tables it read (and the organization's time zone) are forgotten, so
+ *       nothing stays in memory.</li>
  * </ul>
  * The live-update stream is long-lived and reads nothing itself, so it is left out.
  */
@@ -47,6 +49,7 @@ public class RequestScopeFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
         } finally {
             store.endRequest();
+            OrgClock.forget();
         }
     }
 }

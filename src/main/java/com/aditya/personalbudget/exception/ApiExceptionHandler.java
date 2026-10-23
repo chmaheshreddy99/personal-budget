@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.exception;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import com.aditya.personalbudget.storage.DataIntegrityException;
 import org.slf4j.Logger;
@@ -90,6 +91,6 @@ public class ApiExceptionHandler {
 
     private static ResponseEntity<ApiError> respond(HttpStatus status, String message) {
         return ResponseEntity.status(status)
-                .body(new ApiError(status.value(), status.getReasonPhrase(), message, LocalDateTime.now()));
+                .body(new ApiError(status.value(), status.getReasonPhrase(), message, OrgClock.now()));
     }
 }

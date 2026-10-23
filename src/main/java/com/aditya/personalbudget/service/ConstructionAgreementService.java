@@ -186,14 +186,14 @@ public class ConstructionAgreementService {
             a.setFailedAttempts(0);
             a.setCompanySignature(p.getCompanySignature());
             a.setCreatedBy(UserContext.username());
-            a.setCreatedAt(LocalDateTime.now());
+            a.setCreatedAt(OrgClock.now());
         }
         // the other party: from the project (owner, seller, landowner, buyer, partner), or as typed
         String[] party = party(p, kind, ctx);
         a.setPartyName(ConstructionService.blank(r.partyName()) != null ? r.partyName().trim() : party[0]);
         a.setPartyRelation(ConstructionService.blank(r.partyRelation()) != null ? r.partyRelation().trim() : party[1]);
         String phone = ConstructionService.blank(r.partyPhone()) != null ? ConstructionService.phone(r.partyPhone(), a.getPartyName()) : party[2];
-        if (phone != null && a.getTokenHash() != null && !phone.equals(a.getPartyPhone())) a.setLinkRevokedAt(LocalDateTime.now());
+        if (phone != null && a.getTokenHash() != null && !phone.equals(a.getPartyPhone())) a.setLinkRevokedAt(OrgClock.now());
         a.setPartyPhone(phone);
         a.setPartyAddress(ConstructionService.blank(r.partyAddress()) != null ? r.partyAddress().trim() : party[3]);
         if ("TRIPARTITE".equals(kind)) {
@@ -201,7 +201,7 @@ public class ConstructionAgreementService {
             a.setThirdAddress(ctx.sale().getLoanBranch());
         }
         a.setPlace(ConstructionService.blank(r.place()) != null ? r.place().trim() : p.getCity());
-        a.setAgreementDate(r.agreementDate() != null ? r.agreementDate() : LocalDate.now());
+        a.setAgreementDate(r.agreementDate() != null ? r.agreementDate() : OrgClock.today());
         a.setStampDuty(r.stampDuty() == null || r.stampDuty().signum() == 0 ? null : Money.round(r.stampDuty()));
         a.setStampSerial(ConstructionService.blank(r.stampSerial()));
         a.setWitnessName(ConstructionService.blank(r.witnessName()));
@@ -280,7 +280,7 @@ public class ConstructionAgreementService {
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         a.setTokenHash(AccessLinkService.hash(token));
-        a.setLinkExpiresAt(LocalDateTime.now().plusHours(Math.min(r.hours(), MAX_LINK_HOURS)));
+        a.setLinkExpiresAt(OrgClock.now().plusHours(Math.min(r.hours(), MAX_LINK_HOURS)));
         a.setLinkRevokedAt(null);
         a.setFailedAttempts(0);
         a.setLockedAt(null);
@@ -296,7 +296,7 @@ public class ConstructionAgreementService {
         ConstructionProject p = core.require(projectId);
         ConstructionAgreement a = require(p, agreementId);
         if (a.getTokenHash() != null && a.getLinkRevokedAt() == null) {
-            a.setLinkRevokedAt(LocalDateTime.now());
+            a.setLinkRevokedAt(OrgClock.now());
             core.agreements().save(a);
         }
         return view(a);
@@ -310,9 +310,9 @@ public class ConstructionAgreementService {
         if (!"DRAFT".equals(a.getStatus())) throw new BusinessException("This agreement is already " + a.getStatus().toLowerCase());
         a.setStatus("SIGNED");
         a.setAcceptedName(ConstructionService.blank(r.name()) != null ? ActivityService.cut(r.name().trim(), 100) : a.getPartyName());
-        a.setAcceptedAt(r.on() != null ? r.on().atStartOfDay() : LocalDateTime.now());
+        a.setAcceptedAt(r.on() != null ? r.on().atStartOfDay() : OrgClock.now());
         a.setAcceptedUserAgent("Signed in person on paper, recorded by " + UserContext.get().fullName());
-        if (a.getTokenHash() != null && a.getLinkRevokedAt() == null) a.setLinkRevokedAt(LocalDateTime.now());
+        if (a.getTokenHash() != null && a.getLinkRevokedAt() == null) a.setLinkRevokedAt(OrgClock.now());
         core.agreements().save(a);
         afterSigned(p, a);
         core.activity().record("CHANGED", ConstructionService.AREA, a.getTitle() + " " + a.getAgreementNo() + " signed on paper · " + a.getPartyName() + " · " + p.getName());
@@ -361,7 +361,7 @@ public class ConstructionAgreementService {
         ConstructionAgreement a = active(token);
         Organization tenant = tenant(a);
         a.setViews((a.getViews() == null ? 0 : a.getViews()) + 1);
-        a.setLastViewedAt(LocalDateTime.now());
+        a.setLastViewedAt(OrgClock.now());
         core.agreements().save(a);
         String phone = r == null ? null : ConstructionService.blank(r.phone());
         if (phone == null) return gate(a, tenant, null);
@@ -414,7 +414,7 @@ public class ConstructionAgreementService {
         if (location != null && !location.matches("-?\\d{1,3}(\\.\\d+)?,-?\\d{1,3}(\\.\\d+)?(,\\d+(\\.\\d+)?)?")) location = null;
         if (Boolean.TRUE.equals(a.getRequireLocation()) && location == null) throw new BusinessException("Allow your location when your phone asks");
         String device = r.device() == null ? null : ActivityService.cut(r.device(), 2000);
-        LocalDateTime now = LocalDateTime.now().withNano(0);
+        LocalDateTime now = OrgClock.now().withNano(0);
         a.setStatus("ACCEPTED");
         a.setAcceptedName(ActivityService.cut(name, 100));
         a.setAcceptedAt(now);
@@ -564,7 +564,7 @@ public class ConstructionAgreementService {
 
     private AgreementView view(ConstructionAgreement a) {
         ConstructionProject p = core.projects().findById(a.getProjectId()).orElseThrow();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String link = a.getTokenHash() == null ? "NONE" : a.getLockedAt() != null ? "LOCKED" : a.getLinkRevokedAt() != null ? "REVOKED"
                 : a.getLinkExpiresAt() != null && a.getLinkExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         return new AgreementView(a.getId(), a.getProjectId(), a.getKind(), a.getRefId(), a.getAgreementNo(), a.getTitle(), a.getStatus(),
@@ -628,7 +628,7 @@ public class ConstructionAgreementService {
         if (!digits.equals(a.getPartyPhone())) {
             int failed = (a.getFailedAttempts() == null ? 0 : a.getFailedAttempts()) + 1;
             a.setFailedAttempts(failed);
-            if (failed >= MAX_ATTEMPTS) a.setLockedAt(LocalDateTime.now());
+            if (failed >= MAX_ATTEMPTS) a.setLockedAt(OrgClock.now());
             core.agreements().save(a);
             throw new VerificationFailed(failed >= MAX_ATTEMPTS ? "That is not the number this agreement was sent to. The link is now locked."
                     : "That is not the number this agreement was sent to (" + (MAX_ATTEMPTS - failed) + " tr" + (MAX_ATTEMPTS - failed == 1 ? "y" : "ies") + " left)");
@@ -640,7 +640,7 @@ public class ConstructionAgreementService {
         ConstructionAgreement a = token == null || token.isBlank() ? null : core.agreements().findByTokenHash(AccessLinkService.hash(token.trim())).orElse(null);
         if (a == null) throw new BusinessException("This link is not valid");
         if (a.getLinkRevokedAt() != null) throw new BusinessException("This link was switched off. Ask for a new one.");
-        if (a.getLinkExpiresAt() == null || !a.getLinkExpiresAt().isAfter(LocalDateTime.now())) throw new BusinessException("This link has expired. Ask for a new one.");
+        if (a.getLinkExpiresAt() == null || !a.getLinkExpiresAt().isAfter(OrgClock.now())) throw new BusinessException("This link has expired. Ask for a new one.");
         return a;
     }
 

@@ -73,13 +73,13 @@ public class ConstructionBookService {
         Map<Long, ConstructionProject> byId = ps.stream().collect(Collectors.toMap(ConstructionProject::getId, Function.identity()));
         List<Account> all = core.accounts().findByTenantId(tenant);
         Map<Long, ProjectTag> tagged = tags.forEntryIds(books.lines().stream().map(PostedLine::entryId).collect(Collectors.toSet()));
-        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDate monthStart = OrgClock.today().withDayOfMonth(1);
         Map<Long, BigDecimal[]> month = new HashMap<>();   // account -> {debits, credits} this month
         Map<Long, Integer> count = new HashMap<>();
         Map<Long, Map<Long, BigDecimal>> shares = new HashMap<>();   // account -> project -> natural amount
         for (PostedLine l : books.lines()) {
             count.merge(l.accountId(), 1, Integer::sum);
-            if (!l.date().isBefore(monthStart) && !l.date().isAfter(LocalDate.now())) {
+            if (!l.date().isBefore(monthStart) && !l.date().isAfter(OrgClock.today())) {
                 BigDecimal[] m = month.computeIfAbsent(l.accountId(), k -> new BigDecimal[]{Money.ZERO, Money.ZERO});
                 m[0] = m[0].add(l.debit());
                 m[1] = m[1].add(l.credit());

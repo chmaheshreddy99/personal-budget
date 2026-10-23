@@ -1,8 +1,10 @@
 /**
  * Thin wrapper around fetch() for the REST API.
  * Adds the bearer token, parses JSON and turns error responses into Error objects
- * whose message is the server's explanation.
+ * whose message is the server's explanation. Every call is reported to busy.js, which shows a progress bar and a
+ * spinner on the button or row that started it while it waits.
  */
+import { callStarted } from './busy.js';
 
 let TOKEN_KEY = 'pb.token';
 
@@ -66,6 +68,7 @@ async function request(method, path, { params, body, key } = {}) {
 
     const mutating = method !== 'GET';
     if (mutating) { mutationsInFlight++; lastOwnMutation = Date.now(); }
+    const finished = callStarted(mutating);
     let response;
     try {
         response = await fetch(buildUrl(path, params), {
@@ -73,6 +76,9 @@ async function request(method, path, { params, body, key } = {}) {
             headers,
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
+    } catch (error) {
+        finished();
+        throw error;
     } finally {
         if (mutating) { mutationsInFlight--; lastOwnMutation = Date.now(); }
     }
@@ -81,8 +87,9 @@ async function request(method, path, { params, body, key } = {}) {
         lastOwnMutation = Date.now();
         mutationListeners.forEach(listener => listener(path));
     }
-    if (response.status === 204) return null;
+    if (response.status === 204) { finished(); return null; }
     const data = await response.json().catch(() => null);
+    finished();
 
     if (!response.ok) {
         if (response.status === 401 && !path.startsWith('/auth/login')) onUnauthorized();
@@ -98,13 +105,25 @@ async function request(method, path, { params, body, key } = {}) {
 async function blob(path, params) {
     const headers = {};
     if (session.token) headers['Authorization'] = 'Bearer ' + session.token;
-    const response = await fetch(buildUrl(path, params), { headers });
+    const finished = callStarted(false);
+    let response;
+    try {
+        response = await fetch(buildUrl(path, params), { headers });
+    } catch (error) {
+        finished();
+        throw error;
+    }
     if (!response.ok) {
+        finished();
         if (response.status === 401) onUnauthorized();
         const data = await response.json().catch(() => null);
         throw Object.assign(new Error(data?.message || `Could not load the file (${response.status})`), { status: response.status });
     }
-    return response.blob();
+    try {
+        return await response.blob();
+    } finally {
+        finished();
+    }
 }
 
 /** Sends a multipart form (file uploads). */
@@ -113,14 +132,19 @@ async function upload(path, formData) {
     if (session.token) headers['Authorization'] = 'Bearer ' + session.token;
     mutationsInFlight++;
     lastOwnMutation = Date.now();
+    const finished = callStarted(true);
     let response;
     try {
         response = await fetch(buildUrl(path), { method: 'POST', headers, body: formData });
+    } catch (error) {
+        finished();
+        throw error;
     } finally {
         mutationsInFlight--;
         lastOwnMutation = Date.now();
     }
     const data = await response.json().catch(() => null);
+    finished();
     if (!response.ok) {
         if (response.status === 401) onUnauthorized();
         throw Object.assign(new Error(data?.message || `Upload failed (${response.status})`), { status: response.status });

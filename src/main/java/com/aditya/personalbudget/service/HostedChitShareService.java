@@ -340,7 +340,7 @@ public class HostedChitShareService {
                 .filter(x -> x.getChitId().equals(chitId))
                 .orElseThrow(() -> new NotFoundException("Share link", shareId));
         if (s.getRevokedAt() == null) {
-            s.setRevokedAt(LocalDateTime.now());
+            s.setRevokedAt(OrgClock.now());
             s = shares.save(s);
             activity.record("REVOKED", AREA, "Stopped a share link of " + c.getName()
                     + (s.getSharedWith() != null ? " for " + s.getSharedWith() : ""));
@@ -353,7 +353,7 @@ public class HostedChitShareService {
     public PublicChit open(String token) {
         HostedChitShare s = active(token);
         s.setViews((s.getViews() == null ? 0 : s.getViews()) + 1);
-        s.setLastViewedAt(LocalDateTime.now());
+        s.setLastViewedAt(OrgClock.now());
         shares.save(s);
         Organization tenant = tenant(s);
         return asTenant(tenant, () -> toPublic(service.detail(s.getChitId()), s, tenant));
@@ -440,7 +440,7 @@ public class HostedChitShareService {
             a.setPanMasked(Kyc.maskPan(pan));
             a.setPanHash(Kyc.hash(a.getAgreementNo(), pan));
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         a.setStatus(HostedChitAgreement.ACCEPTED);
         a.setAcceptedName(ActivityService.cut(name, 100));
         a.setAcceptedAt(now);
@@ -512,7 +512,7 @@ public class HostedChitShareService {
         }
         boolean full = CHIT.equals(kind) || MEMBER.equals(kind);
         return new PublicChit(kind, t.getName(), s.getCreatedByName(), s.getSharedWith(), s.getMessage(), t.getCurrency(),
-                LocalDate.now(), s.getExpiresAt(), c.name(), c.chitType(), c.memberCount(), c.months(), c.installment(), c.baseValue(),
+                OrgClock.today(), s.getExpiresAt(), c.name(), c.chitType(), c.memberCount(), c.months(), c.installment(), c.baseValue(),
                 c.winnerExtraAmount(), c.maxBid(), c.lateFeePercent(), c.lateGraceDays(), MEMBER.equals(kind) ? c.upiId() : null,
                 MEMBER.equals(kind) ? (c.payeeName() != null ? c.payeeName() : s.getCreatedByName()) : null,
                 c.currentMonth(), c.completedMonths(), c.status(), full ? c.totalCollected() : null, full ? c.totalPaidOut() : null,
@@ -550,7 +550,7 @@ public class HostedChitShareService {
         String toName = to == null ? null : to.getName();
         String toPhone = to == null ? null : to.getPhone();
         String signer = c.receiptSigner() != null ? c.receiptSigner() : c.payeeName() != null ? c.payeeName() : c.createdBy();
-        LocalDateTime at = LocalDateTime.now().withNano(0);
+        LocalDateTime at = OrgClock.now().withNano(0);
         String holder = bank ? (a.getHolderName() != null ? a.getHolderName() : payee) : null;
         String bankName = bank ? a.getInstitution() : null;
         String number = bank ? a.getAccountNumber().trim() : null;
@@ -674,7 +674,7 @@ public class HostedChitShareService {
     // ================================================================== helpers
 
     private HostedChitShare newShare(HostedChit c, String kind, HostedChitMember member, String token, int hours) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         HostedChitShare s = new HostedChitShare();
         s.setTenantId(c.getTenantId());
         s.setChitId(c.getId());
@@ -702,7 +702,7 @@ public class HostedChitShareService {
         if (s.getRevokedAt() != null) {
             throw new BusinessException("This link was switched off");
         }
-        if (!s.getExpiresAt().isAfter(LocalDateTime.now())) {
+        if (!s.getExpiresAt().isAfter(OrgClock.now())) {
             throw new BusinessException("This link has expired. Ask for a new one.");
         }
         return s;
@@ -733,7 +733,7 @@ public class HostedChitShareService {
     }
 
     private ShareView view(HostedChitShare s) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String status = s.getRevokedAt() != null ? "REVOKED" : s.getExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         String memberName = s.getMemberId() == null ? null : members.findById(s.getMemberId()).map(HostedChitMember::getName).orElse(null);
         return new ShareView(s.getId(), s.getChitId(), kind(s), s.getMemberId(), memberName, s.getPaymentId(), s.getAgreementId(),

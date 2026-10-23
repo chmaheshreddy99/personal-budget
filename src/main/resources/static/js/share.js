@@ -3,6 +3,7 @@
  * until when, and the scans: images inline (tap to enlarge), PDFs to open; downloads only when allowed. The token is
  * in the address fragment, so it is never sent to the server in a page request or kept in a referrer.
  */
+import { trackedFetch } from './core/busy.js';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const when = iso => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -15,7 +16,7 @@ async function start() {
     if (!token) { main.innerHTML = message('This link is incomplete.'); return; }
     let doc;
     try {
-        const r = await fetch(base, { method: 'POST', headers: { Accept: 'application/json' } });   // POST: the view is counted
+        const r = await trackedFetch(base, { method: 'POST', headers: { Accept: 'application/json' } });   // POST: the view is counted
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body.message || 'This link does not work any more.');
         doc = body;
@@ -23,7 +24,7 @@ async function start() {
 
     const files = await Promise.all(doc.files.map(async f => {
         if (!f.image) return { ...f, url: null };
-        const b = await fetch(`${base}/files/${f.id}`).then(r => r.ok ? r.blob() : null).catch(() => null);
+        const b = await trackedFetch(`${base}/files/${f.id}`).then(r => r.ok ? r.blob() : null).catch(() => null);
         return { ...f, url: b ? URL.createObjectURL(b) : null };
     }));
     document.title = `${doc.title} · shared document`;

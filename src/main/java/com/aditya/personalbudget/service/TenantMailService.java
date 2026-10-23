@@ -118,7 +118,7 @@ public class TenantMailService {
         s.setFromName(trim(r.fromName()));
         s.setReplyTo(trim(r.replyTo()));
         s.setUpdatedBy(UserContext.username());
-        s.setUpdatedAt(LocalDateTime.now());
+        s.setUpdatedAt(OrgClock.now());
         repository.save(s);
         activity.record("CHANGED", "Settings", "E-mail settings " + (enabled ? "switched on · " + host + " · " + from : "saved (off)"));
         return view();
@@ -144,7 +144,7 @@ public class TenantMailService {
         } catch (Exception e) {
             s.setTestResult(ActivityService.cut("Failed · " + rootMessage(e), 255));
         }
-        s.setTestedAt(LocalDateTime.now());
+        s.setTestedAt(OrgClock.now());
         repository.save(s);
         if (!s.getTestResult().startsWith("OK")) throw new BusinessException("The test e-mail did not go out: " + s.getTestResult().substring(9));
         return view();

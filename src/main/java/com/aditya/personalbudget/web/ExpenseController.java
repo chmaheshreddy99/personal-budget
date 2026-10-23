@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.web;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.dto.JournalDtos.EntryView;
 import com.aditya.personalbudget.dto.JournalDtos.ExpenseRequest;
 import com.aditya.personalbudget.security.Permission;
@@ -61,7 +62,7 @@ public class ExpenseController {
     public List<ExpenseRow> expenses(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         return expenses.list(from != null ? from : end.withDayOfMonth(1), end);
     }
 

@@ -243,7 +243,7 @@ export function openModal({ title, sub = '', iconName = 'droplet', body, size = 
         modal.setError('');
         button.disabled = true;
         try {
-            const keepOpen = await action.onClick?.(modal);
+            const keepOpen = await busyWhile(button, action.onClick?.(modal));   // a spinner while it saves
             if (!keepOpen) modal.close();
         } catch (error) {
             modal.setError(error.message);

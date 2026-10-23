@@ -56,7 +56,7 @@ public class ForecastService {
         BigDecimal incomeFactor = factor(incomeAdjust);
         BigDecimal expenseFactor = factor(expenseAdjust);
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         YearMonth current = YearMonth.from(today);
         LedgerSnapshot books = ledger.snapshot();
         Map<Long, BigDecimal> balances = books.balancesAsOf(today);

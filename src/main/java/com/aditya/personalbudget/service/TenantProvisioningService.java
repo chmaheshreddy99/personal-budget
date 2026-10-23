@@ -56,7 +56,7 @@ public class TenantProvisioningService {
         tenant.setName(request.name());
         tenant.setCurrency(request.currency() == null || request.currency().isBlank() ? "INR" : request.currency());
         tenant.setActive(true);
-        tenant.setCreatedAt(LocalDateTime.now());
+        tenant.setCreatedAt(OrgClock.now());
         tenant = tenants.save(tenant);
 
         AppUser admin = new AppUser();
@@ -67,7 +67,7 @@ public class TenantProvisioningService {
         admin.setPasswordHash(passwordEncoder.encode(request.adminPassword()));
         admin.setRole(request.adminRole());
         admin.setActive(true);
-        admin.setCreatedAt(LocalDateTime.now());
+        admin.setCreatedAt(OrgClock.now());
         admin = users.save(admin);
 
         seedChartOfAccounts(tenant.getId());
@@ -75,7 +75,7 @@ public class TenantProvisioningService {
     }
 
     private void seedChartOfAccounts(Long tenantId) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         List<Account> rows = DefaultChartOfAccounts.ACCOUNTS.stream().map(t -> {
             Account a = new Account();
             a.setTenantId(tenantId);
@@ -98,7 +98,7 @@ public class TenantProvisioningService {
      * {@code systemOnly} limits that to the ones the application posts to by itself.
      */
     public void seedCategories(Long tenantId, boolean systemOnly) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         List<Category> existing = categories.findByTenantId(tenantId);
         List<Category> rows = DefaultChartOfAccounts.CATEGORIES.stream()
                 .filter(t -> !systemOnly || t.systemKey() != null)

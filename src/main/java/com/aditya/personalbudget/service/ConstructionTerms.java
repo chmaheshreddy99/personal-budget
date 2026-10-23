@@ -498,7 +498,7 @@ final class ConstructionTerms {
     private static Wording possession(Context c) {
         ConstructionProject p = c.project();
         ConstructionSale s = c.sale();
-        LocalDate on = s.getHandedOverOn() != null ? s.getHandedOverOn() : LocalDate.now();
+        LocalDate on = s.getHandedOverOn() != null ? s.getHandedOverOn() : OrgClock.today();
         List<String> rec = List.of(
                 "the Promoter has sold to the Allottee the apartment described in the particulars (the \"Apartment\") in the project \"" + p.getName() + "\""
                         + (s.getDeedNo() != null ? " by a sale deed registered as document No. " + s.getDeedNo() + (s.getSubRegistrar() != null ? " in the office of the Sub-Registrar, " + s.getSubRegistrar() : "")

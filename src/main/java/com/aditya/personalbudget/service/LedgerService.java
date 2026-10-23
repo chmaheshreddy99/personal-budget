@@ -136,7 +136,7 @@ public class LedgerService {
         entry.setEntryNo(nextEntryNo(tenantId, draft.voucherType()));
         fillHeader(entry, draft, total);
         entry.setCreatedBy(UserContext.username());
-        entry.setCreatedAt(LocalDateTime.now());
+        entry.setCreatedAt(OrgClock.now());
         entry = entries.save(entry);
 
         saveLines(tenantId, entry.getId(), resolved);
@@ -357,7 +357,7 @@ public class LedgerService {
                     ? original.getEntryNo() + " is already reversed by " + view.reversedBy()
                     : view.lockReason() != null ? view.lockReason() : "Manual journals are edited directly");
         }
-        JournalDraft draft = JournalDraft.of(date != null ? date : LocalDate.now(), VoucherType.REVERSAL,
+        JournalDraft draft = JournalDraft.of(date != null ? date : OrgClock.today(), VoucherType.REVERSAL,
                         "Reversal of " + original.getEntryNo() + ": " + original.getNarration())
                 .party(original.getParty())
                 .reference(original.getReference())

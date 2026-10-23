@@ -11,6 +11,7 @@
  * Keyboard while open: arrows move a day / week, PageUp / PageDown a month (Shift: a year), Home today,
  * Enter picks, Esc closes. Alt+↓ (or F4) opens it from the box.
  */
+import { orgNow } from './format.js';
 import { icon } from './icons.js';
 
 const pop = document.createElement('div');
@@ -25,7 +26,7 @@ let monthView = false;  // showing the 12 months of a year instead of days
 const pad = n => String(n).padStart(2, '0');
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parse = s => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? new Date(s + 'T00:00:00') : null);
-const today = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
+const today = () => { const t = orgNow(); t.setHours(0, 0, 0, 0); return t; };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 /** Same day n months later, kept inside the month (31 Jan + 1 month = 28/29 Feb). */
 const addMonths = (d, n) => {

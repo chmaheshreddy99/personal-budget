@@ -102,7 +102,7 @@ public class GiftService {
         Gift g = new Gift();
         g.setTenantId(UserContext.tenantId());
         g.setCreatedBy(UserContext.username());
-        g.setCreatedAt(LocalDateTime.now());
+        g.setCreatedAt(OrgClock.now());
         apply(g, r);
         g = gifts.save(g);
         book(g, r);

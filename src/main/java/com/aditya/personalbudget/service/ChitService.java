@@ -92,7 +92,7 @@ public class ChitService {
         Chit chit = require(chitId);
         List<ChitInstallment> schedule = installments.findByChitIdOrderByInstallmentNo(chitId);
         LedgerSnapshot books = ledger.snapshot();
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         List<InstallmentView> rows = schedule.stream().map(i -> {
             Account from = i.getPaidFromAccountId() == null ? null : books.account(i.getPaidFromAccountId());
             return new InstallmentView(i.getId(), i.getInstallmentNo(), i.getDueDate(), i.getDueAmount(),
@@ -128,7 +128,7 @@ public class ChitService {
         Chit chit = new Chit();
         chit.setTenantId(tenantId);
         chit.setStatus(ChitStatus.ACTIVE);
-        chit.setCreatedAt(LocalDateTime.now());
+        chit.setCreatedAt(OrgClock.now());
         apply(chit, request);
 
         chit.setAccountId(chitFunds().getId());
@@ -325,11 +325,11 @@ public class ChitService {
         }
         List<ChitInstallment> pending = installments.findByChitIdOrderByInstallmentNo(chitId).stream()
                 .filter(i -> i.getStatus() == InstallmentStatus.PENDING).toList();
-        if (!closable(chit, pending, LocalDate.now())) {
+        if (!closable(chit, pending, OrgClock.today())) {
             throw new BusinessException("A chit can be closed after its payout, or once every installment is paid and it has matured");
         }
         chit.setStatus(ChitStatus.CLOSED);
-        chit.setClosedAt(LocalDateTime.now());
+        chit.setClosedAt(OrgClock.now());
         chits.save(chit);
         return detail(chitId);
     }
@@ -441,7 +441,7 @@ public class ChitService {
     }
 
     private ChitView toView(Chit c, List<ChitInstallment> schedule, LedgerSnapshot books) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         List<ChitInstallment> paid = schedule.stream().filter(i -> i.getStatus() == InstallmentStatus.PAID).toList();
         List<ChitInstallment> pending = schedule.stream().filter(i -> i.getStatus() == InstallmentStatus.PENDING).toList();
         List<ChitInstallment> overdue = pending.stream().filter(i -> i.getDueDate().isBefore(today)).toList();

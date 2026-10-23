@@ -195,7 +195,7 @@ public class ClaimAgreementService {
             a.setContentHash("pending");
             a.setStatus(ClaimAgreement.DRAFT);
             a.setCreatedBy(UserContext.username());
-            a.setCreatedAt(LocalDateTime.now());
+            a.setCreatedAt(OrgClock.now());
             a.setViews(0);
             a.setFailedAttempts(0);
         }
@@ -204,7 +204,7 @@ public class ClaimAgreementService {
         a.setBorrowerName(blank(r.borrowerName()) != null ? r.borrowerName().trim() : c.party());
         String phone = blank(r.borrowerPhone()) == null ? null : HostedChitService.cleanPhone(r.borrowerPhone(), "The borrower");
         if (phone != null && a.getTokenHash() != null && !phone.equals(a.getBorrowerPhone())) {
-            a.setLinkRevokedAt(LocalDateTime.now());   // the old link was for another number
+            a.setLinkRevokedAt(OrgClock.now());   // the old link was for another number
         }
         a.setBorrowerPhone(phone);
         a.setBorrowerAddress(blank(r.borrowerAddress()));
@@ -270,7 +270,7 @@ public class ClaimAgreementService {
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         a.setTokenHash(AccessLinkService.hash(token));
         a.setLinkExpiresAt(now.plusHours(Math.min(r.hours(), MAX_LINK_HOURS)));
         a.setLinkRevokedAt(null);
@@ -288,7 +288,7 @@ public class ClaimAgreementService {
     public AgreementView revokeLink(Long claimId) {
         ClaimAgreement a = require(claimId);
         if (a.getTokenHash() != null && a.getLinkRevokedAt() == null) {
-            a.setLinkRevokedAt(LocalDateTime.now());
+            a.setLinkRevokedAt(OrgClock.now());
             agreements.save(a);
             activity.record("REVOKED", AREA, "Stopped the agreement link of " + a.getAgreementNo() + " · " + a.getBorrowerName());
         }
@@ -304,9 +304,9 @@ public class ClaimAgreementService {
         }
         a.setStatus(ClaimAgreement.SIGNED);
         a.setAcceptedName(blank(r.name()) != null ? ActivityService.cut(r.name().trim(), 100) : a.getBorrowerName());
-        a.setAcceptedAt(LocalDateTime.now());
+        a.setAcceptedAt(OrgClock.now());
         a.setAcceptedUserAgent("Signed in person on paper, recorded by " + UserContext.get().fullName());
-        a.setLinkRevokedAt(a.getTokenHash() != null && a.getLinkRevokedAt() == null ? LocalDateTime.now() : a.getLinkRevokedAt());
+        a.setLinkRevokedAt(a.getTokenHash() != null && a.getLinkRevokedAt() == null ? OrgClock.now() : a.getLinkRevokedAt());
         agreements.save(a);
         activity.record("CHANGED", AREA, "Loan agreement signed on paper · " + a.getAgreementNo() + " · " + a.getBorrowerName());
         return view(a);
@@ -353,7 +353,7 @@ public class ClaimAgreementService {
         ClaimAgreement a = active(token);
         Organization tenant = tenant(a);
         a.setViews((a.getViews() == null ? 0 : a.getViews()) + 1);
-        a.setLastViewedAt(LocalDateTime.now());
+        a.setLastViewedAt(OrgClock.now());
         agreements.save(a);
         String phone = r == null ? null : blank(r.phone());
         if (phone == null) {
@@ -425,7 +425,7 @@ public class ClaimAgreementService {
             throw new BusinessException("Allow your location when your phone asks: " + a.getLenderName() + " needs it with the agreement");
         }
         String device = r.device() == null ? null : ActivityService.cut(r.device(), 2000);
-        LocalDateTime now = LocalDateTime.now().withNano(0);
+        LocalDateTime now = OrgClock.now().withNano(0);
         a.setStatus(ClaimAgreement.ACCEPTED);
         a.setAcceptedName(ActivityService.cut(name, 100));
         a.setAcceptedAt(now);
@@ -564,7 +564,7 @@ public class ClaimAgreementService {
         if (!digits.equals(a.getBorrowerPhone())) {
             int failed = (a.getFailedAttempts() == null ? 0 : a.getFailedAttempts()) + 1;
             a.setFailedAttempts(failed);
-            if (failed >= MAX_ATTEMPTS) a.setLockedAt(LocalDateTime.now());
+            if (failed >= MAX_ATTEMPTS) a.setLockedAt(OrgClock.now());
             agreements.save(a);
             throw new VerificationFailed(failed >= MAX_ATTEMPTS
                     ? "That is not the number this agreement was sent to. The link is now locked: ask " + a.getLenderName() + " for a new one."
@@ -600,7 +600,7 @@ public class ClaimAgreementService {
     }
 
     private AgreementView view(ClaimAgreement a) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String link = a.getTokenHash() == null ? "NONE" : a.getLockedAt() != null ? "LOCKED" : a.getLinkRevokedAt() != null ? "REVOKED"
                 : a.getLinkExpiresAt() != null && a.getLinkExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         return new AgreementView(a.getId(), a.getClaimId(), a.getAgreementNo(), a.getStatus(), a.getLenderName(), a.getLenderAddress(),
@@ -640,7 +640,7 @@ public class ClaimAgreementService {
         if (a.getLinkRevokedAt() != null) {
             throw new BusinessException("This link was switched off. Ask " + a.getLenderName() + " for a new one.");
         }
-        if (a.getLinkExpiresAt() == null || !a.getLinkExpiresAt().isAfter(LocalDateTime.now())) {
+        if (a.getLinkExpiresAt() == null || !a.getLinkExpiresAt().isAfter(OrgClock.now())) {
             throw new BusinessException("This link has expired. Ask " + a.getLenderName() + " for a new one.");
         }
         return a;

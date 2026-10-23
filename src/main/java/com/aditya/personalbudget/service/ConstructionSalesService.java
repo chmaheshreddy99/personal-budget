@@ -139,7 +139,7 @@ public class ConstructionSalesService {
             u = new ConstructionUnit();
             u.setTenantId(p.getTenantId());
             u.setProjectId(p.getId());
-            u.setCreatedAt(LocalDateTime.now());
+            u.setCreatedAt(OrgClock.now());
             u.setStatus("AVAILABLE");
         } else {
             u = requireUnit(p, unitId);
@@ -204,7 +204,7 @@ public class ConstructionSalesService {
         s.setStatus("BOOKED");
         s.setLoanStatus("NONE");
         s.setCreatedBy(UserContext.username());
-        s.setCreatedAt(LocalDateTime.now());
+        s.setCreatedAt(OrgClock.now());
         fill(s, r);
         s = core.sales().save(s);
         savePlan(p, s, r.plan());
@@ -261,7 +261,7 @@ public class ConstructionSalesService {
         ConstructionSale s = requireSale(p, saleId);
         ConstructionUnit u = requireUnit(p, s.getUnitId());
         String to = r.status().trim().toUpperCase();
-        LocalDate on = r.on() != null ? r.on() : LocalDate.now();
+        LocalDate on = r.on() != null ? r.on() : OrgClock.today();
         if ("CANCELLED".equals(s.getStatus())) throw new BusinessException("This sale was cancelled; book the flat again instead");
         switch (to) {
             case "BOOKED" -> {
@@ -291,12 +291,12 @@ public class ConstructionSalesService {
                 if (v.balance().signum() > 0) {
                     throw new BusinessException(s.getBuyerName() + " still owes " + ActivityService.money(v.balance()) + "; record the payment before closing");
                 }
-                s.setClosedAt(LocalDateTime.now());
+                s.setClosedAt(OrgClock.now());
             }
             case "CANCELLED" -> {
                 if (s.getRegisteredOn() != null) throw new BusinessException("A registered sale cannot be cancelled here: it needs a cancellation deed");
                 s.setCancelNote(ConstructionService.blank(r.note()));
-                s.setClosedAt(LocalDateTime.now());
+                s.setClosedAt(OrgClock.now());
             }
             default -> throw new BusinessException("Unknown step " + to);
         }

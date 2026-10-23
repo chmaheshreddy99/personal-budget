@@ -8,6 +8,7 @@
  * accept. Recorded with it: the time, IP address, this device's details, the location if allowed, and each photo's
  * fingerprint, sealed and digitally signed; the signature is checked here once accepted.
  */
+import { trackedFetch } from './core/busy.js';
 import { bondHtml, printBond, signaturePad, signatureSvg, deviceInfo, locate, openCamera, shrinkImage, verifyEvidence, loanRecitals } from './core/bond.js';
 
 const $ = id => document.getElementById(id);
@@ -24,7 +25,7 @@ let cam = null;
 let pad = null;
 
 async function call(path, body) {
-    const r = await fetch(base + path, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const r = await trackedFetch(base + path, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.message || 'This link does not work any more.');
     return data;
@@ -172,7 +173,7 @@ function bindOpen() {
         form.append('phone', phone);
         form.append('docType', type);
         form.append('file', blob, name);
-        const r = await fetch(`${base}/kyc`, { method: 'POST', body: form });
+        const r = await trackedFetch(`${base}/kyc`, { method: 'POST', body: form });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.message || 'The photo could not be added');
         const typed = keep();

@@ -68,7 +68,7 @@ public class DemoDataGenerator {
 
     @Transactional
     public void generate() {
-        today = LocalDate.now();
+        today = OrgClock.today();
         YearMonth first = YearMonth.from(today).minusMonths(6);
         LocalDate start = first.atDay(1);
 

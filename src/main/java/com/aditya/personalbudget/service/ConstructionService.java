@@ -452,7 +452,7 @@ public class ConstructionService {
             ConstructionPartner x = partnerRows.stream().filter(e -> e.getId().equals(ref)).findFirst().orElse(null);
             if (x != null) about = x.getSharePercent().stripTrailingZeros().toPlainString() + "% of the profit";
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String link = a.getTokenHash() == null ? "NONE" : a.getLinkRevokedAt() != null ? "REVOKED" : a.getLockedAt() != null ? "LOCKED"
                 : a.getLinkExpiresAt() != null && a.getLinkExpiresAt().isBefore(now) ? "EXPIRED" : "ACTIVE";
         return new AgreementSummary(a.getId(), a.getKind(), a.getRefId(), a.getAgreementNo(), a.getTitle(), a.getPartyName(),
@@ -473,7 +473,7 @@ public class ConstructionService {
         p.setTenantId(UserContext.tenantId());
         p.setStatus(ACTIVE);
         p.setCreatedBy(UserContext.username());
-        p.setCreatedAt(LocalDateTime.now());
+        p.setCreatedAt(OrgClock.now());
         apply(p, q, true);
         requireUniqueName(p);
         p = projects.save(p);
@@ -607,7 +607,7 @@ public class ConstructionService {
             case COMPLETED -> {
                 if (CLOSED.equals(p.getStatus())) reopen(p);
                 p.setStatus(COMPLETED);
-                p.setCompletedOn(r.completedOn() != null ? r.completedOn() : LocalDate.now());
+                p.setCompletedOn(r.completedOn() != null ? r.completedOn() : OrgClock.today());
                 activity.record("CHANGED", AREA, "Completed " + p.getName());
             }
             case CLOSED -> close(p);
@@ -628,7 +628,7 @@ public class ConstructionService {
         BigDecimal cost = bal.getOrDefault(p.getCostAccountId(), Money.ZERO);
         BigDecimal land = p.getLandAccountId() == null ? Money.ZERO : bal.getOrDefault(p.getLandAccountId(), Money.ZERO);
         BigDecimal profit = advances.add(interest).subtract(cost).subtract(land);
-        LocalDate on = p.getCompletedOn() != null ? p.getCompletedOn() : LocalDate.now();
+        LocalDate on = p.getCompletedOn() != null ? p.getCompletedOn() : OrgClock.today();
         JournalDraft d = JournalDraft.of(on, VoucherType.JOURNAL, "Closed the books of " + p.getName() + " · " + (profit.signum() >= 0 ? "profit " : "loss ")
                 + ActivityService.money(profit.abs())).source(SOURCE_CLOSE, p.getId()).party(p.getName());
         d.debit(p.getAdvancesAccountId(), advances, "Payments received set off against the project");
@@ -668,7 +668,7 @@ public class ConstructionService {
                     c.setNote(profit.signum() > 0 ? "Share of the profit" : "Share of the loss");
                     c.setMovedOn(on);
                     c.setCreatedBy(UserContext.username());
-                    c.setCreatedAt(LocalDateTime.now());
+                    c.setCreatedAt(OrgClock.now());
                     shareRows.add(c);
                 }
             }
@@ -683,7 +683,7 @@ public class ConstructionService {
             }
         }
         p.setStatus(CLOSED);
-        p.setClosedAt(LocalDateTime.now());
+        p.setClosedAt(OrgClock.now());
         if (p.getCompletedOn() == null) p.setCompletedOn(on);
         activity.record("CHANGED", AREA, "Closed the books of " + p.getName() + " · " + (profit.signum() >= 0 ? "profit " : "loss ") + ActivityService.money(profit.abs()));
     }
@@ -755,7 +755,7 @@ public class ConstructionService {
         String to = r.status().trim().toUpperCase();
         if (!Set.of("PENDING", "IN_PROGRESS", "DONE").contains(to)) throw new BusinessException("Unknown stage status " + to);
         st.setStatus(to);
-        st.setCompletedOn("DONE".equals(to) ? (r.completedOn() != null ? r.completedOn() : LocalDate.now()) : null);
+        st.setCompletedOn("DONE".equals(to) ? (r.completedOn() != null ? r.completedOn() : OrgClock.today()) : null);
         stages.save(st);
         if (PLANNING.equals(p.getStatus()) && !"PENDING".equals(to)) {
             p.setStatus(ACTIVE);
@@ -780,7 +780,7 @@ public class ConstructionService {
             x.setSeq(extras.findByProjectId(id).stream().mapToInt(ConstructionExtra::getSeq).max().orElse(0) + 1);
             x.setStatus("PROPOSED");
             x.setCreatedBy(UserContext.username());
-            x.setCreatedAt(LocalDateTime.now());
+            x.setCreatedAt(OrgClock.now());
         } else {
             x = requireExtra(p, extraId);
             if (signedFor(p, "EXTRA", x.getId())) {
@@ -791,7 +791,7 @@ public class ConstructionService {
         x.setDescription(blank(r.description()));
         x.setAmount(Money.round(r.amount()));
         x.setExtraDays(r.extraDays() == null ? 0 : r.extraDays());
-        x.setRequestedOn(r.requestedOn() != null ? r.requestedOn() : LocalDate.now());
+        x.setRequestedOn(r.requestedOn() != null ? r.requestedOn() : OrgClock.today());
         x.setDueDate(r.dueDate());
         extras.save(x);
         activity.record(extraId == null ? "ADDED" : "CHANGED", AREA, "Extra work EX-" + x.getSeq() + " · " + x.getTitle() + " · " + ActivityService.money(x.getAmount())
@@ -810,7 +810,7 @@ public class ConstructionService {
             throw new BusinessException("Money was received towards this extra work; it cannot be cancelled");
         }
         x.setStatus(to);
-        x.setCompletedOn("DONE".equals(to) ? (r.completedOn() != null ? r.completedOn() : LocalDate.now()) : null);
+        x.setCompletedOn("DONE".equals(to) ? (r.completedOn() != null ? r.completedOn() : OrgClock.today()) : null);
         extras.save(x);
         activity.record("CHANGED", AREA, "Extra work EX-" + x.getSeq() + " " + to.toLowerCase() + " · " + p.getName());
         return detail(id);
@@ -889,7 +889,7 @@ public class ConstructionService {
         int done = (int) st.stream().filter(s -> "DONE".equals(s.getStatus())).count();
         int progress = st.isEmpty() ? 0 : (int) Math.round(done * 100.0 / st.size());
         LocalDate revised = p.getPlannedEndDate() == null ? null : p.getPlannedEndDate().plusDays(extraDays);
-        Long daysLeft = revised == null || CLOSED.equals(p.getStatus()) || COMPLETED.equals(p.getStatus()) ? null : ChronoUnit.DAYS.between(LocalDate.now(), revised);
+        Long daysLeft = revised == null || CLOSED.equals(p.getStatus()) || COMPLETED.equals(p.getStatus()) ? null : ChronoUnit.DAYS.between(OrgClock.today(), revised);
         BigDecimal profit = received.add(interestReceived).subtract(totalCost);
         BigDecimal expected = contract
                 ? totalValue.subtract(Money.nz(p.getEstimatedCost()).max(totalCost))
@@ -925,7 +925,7 @@ public class ConstructionService {
         }
         List<ConstructionDues.Payment> paid = rc.stream().filter(r -> r.getSaleId() == null)
                 .map(r -> new ConstructionDues.Payment(r.getReceivedOn(), r.getAmount().subtract(Money.nz(r.getInterestAmount())))).toList();
-        return ConstructionDues.compute(items, paid, p.getLateInterestPercent(), p.getLateGraceDays() == null ? 0 : p.getLateGraceDays(), LocalDate.now());
+        return ConstructionDues.compute(items, paid, p.getLateInterestPercent(), p.getLateGraceDays() == null ? 0 : p.getLateGraceDays(), OrgClock.today());
     }
 
     /** A buyer's plan against what they (and their bank) paid. */
@@ -950,7 +950,7 @@ public class ConstructionService {
         BigDecimal rate = s.getLateInterestPercent() != null ? s.getLateInterestPercent() : p.getLateInterestPercent();
         ConstructionDues.Result d = ConstructionDues.compute(items,
                 mine.stream().map(r -> new ConstructionDues.Payment(r.getReceivedOn(), r.getAmount().subtract(Money.nz(r.getInterestAmount())))).toList(),
-                rate, p.getLateGraceDays() == null ? 0 : p.getLateGraceDays(), LocalDate.now());
+                rate, p.getLateGraceDays() == null ? 0 : p.getLateGraceDays(), OrgClock.today());
         boolean active = !"CANCELLED".equals(s.getStatus());
         return new SaleView(s, unitLabel(u), plan, d.rows(), received, interestReceived, bank, s.getTotalPrice().subtract(received),
                 active ? d.due() : Money.ZERO, active ? d.overdue() : Money.ZERO, active ? d.interest().subtract(interestReceived).max(Money.ZERO) : Money.ZERO);
@@ -1196,7 +1196,7 @@ public class ConstructionService {
         c.setAddress(blank(x.address()));
         c.setSharePercent(x.sharePercent());
         c.setMe(Boolean.TRUE.equals(x.me()));
-        c.setCreatedAt(LocalDateTime.now());
+        c.setCreatedAt(OrgClock.now());
         return partners.save(c);
     }
 
@@ -1207,7 +1207,7 @@ public class ConstructionService {
         ConstructionParty c = new ConstructionParty();
         c.setTenantId(p.getTenantId());
         c.setProjectId(p.getId());
-        c.setCreatedAt(LocalDateTime.now());
+        c.setCreatedAt(OrgClock.now());
         partyFrom(c, role, x);
         return parties.save(c);
     }
@@ -1257,7 +1257,7 @@ public class ConstructionService {
                     x.setAllottedTo(toOwner ? "LANDOWNER" : "BUILDER");
                     x.setStatus(toOwner ? "LANDOWNER" : "AVAILABLE");
                     if (toOwner && !owners.isEmpty()) x.setPartyId(owners.get(made.size() % owners.size()).getId());
-                    x.setCreatedAt(LocalDateTime.now());
+                    x.setCreatedAt(OrgClock.now());
                     made.add(units.save(x));
                 }
             }

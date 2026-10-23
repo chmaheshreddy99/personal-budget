@@ -109,7 +109,7 @@ public class AccessLinkService {
         byte[] bytes = new byte[24];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         AccessLink link = new AccessLink();
         link.setTenantId(me.tenantId());
         link.setLabel(r.label().trim());
@@ -135,7 +135,7 @@ public class AccessLinkService {
     public LinkView revoke(Long id) {
         AccessLink link = require(id);
         if (link.getRevokedAt() == null) {
-            link.setRevokedAt(LocalDateTime.now());
+            link.setRevokedAt(OrgClock.now());
             link.setRevokedByName(UserContext.get().fullName());
             link = links.save(link);
             registry.closeAllForLink(link.getId());
@@ -147,7 +147,7 @@ public class AccessLinkService {
     /** Revokes every link that still works. */
     @Transactional
     public int revokeAll() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         List<AccessLink> active = links.findByTenantId(UserContext.tenantId()).stream().filter(l -> l.isActive(now)).toList();
         active.forEach(l -> {
             l.setRevokedAt(now);
@@ -165,7 +165,7 @@ public class AccessLinkService {
     @Transactional
     public void delete(Long id) {
         AccessLink link = require(id);
-        if (link.isActive(LocalDateTime.now())) {
+        if (link.isActive(OrgClock.now())) {
             throw new BusinessException("Revoke the link first");
         }
         links.delete(link);
@@ -181,7 +181,7 @@ public class AccessLinkService {
         if (link.getRevokedAt() != null) {
             throw new BusinessException("This link was switched off by the administrator");
         }
-        if (!link.getExpiresAt().isAfter(LocalDateTime.now())) {
+        if (!link.getExpiresAt().isAfter(OrgClock.now())) {
             throw new BusinessException("This link has expired. Ask for a new one.");
         }
         return link;
@@ -190,7 +190,7 @@ public class AccessLinkService {
     /** Counts a use of the link. */
     @Transactional
     public void touch(AccessLink link) {
-        link.setLastUsedAt(LocalDateTime.now());
+        link.setLastUsedAt(OrgClock.now());
         link.setUseCount((link.getUseCount() == null ? 0 : link.getUseCount()) + 1);
         links.save(link);
     }
@@ -200,7 +200,7 @@ public class AccessLinkService {
     }
 
     private LinkView toView(AccessLink l) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String status = l.getRevokedAt() != null ? "REVOKED" : l.getExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         long open = "ACTIVE".equals(status) ? sessions.findByLinkId(l.getId()).stream().filter(s -> s.getExpiresAt().isAfter(now)).count() : 0;
         long waiting = pending.findByTenantId(l.getTenantId()).stream()

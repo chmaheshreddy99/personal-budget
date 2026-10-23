@@ -63,7 +63,7 @@ public class BudgetService {
 
     /** Budget vs actual for a month, including categories that have spending but no budget. */
     public BudgetSummary summary(YearMonth month) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         Clock clock = new Clock(month, today);
         LedgerSnapshot books = ledger.snapshot();
         // chit installments count under Chit Payments (budget only; in the books they are savings)
@@ -466,14 +466,14 @@ public class BudgetService {
 
     /** This month's budgets. */
     public List<Budget> all() {
-        return forMonth(YearMonth.now());
+        return forMonth(OrgClock.month());
     }
 
     // ================================================================== helpers
 
     private static String monthOf(String month) {
         if (month == null || month.isBlank()) {
-            return YearMonth.now().toString();
+            return OrgClock.month().toString();
         }
         try {
             return YearMonth.parse(month.trim()).toString();

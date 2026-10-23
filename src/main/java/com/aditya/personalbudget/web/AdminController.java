@@ -6,6 +6,7 @@ import com.aditya.personalbudget.dto.UserDtos.UserRequest;
 import com.aditya.personalbudget.dto.UserDtos.UserView;
 import com.aditya.personalbudget.security.Permission;
 import com.aditya.personalbudget.security.RequiresPermission;
+import com.aditya.personalbudget.service.OrgTimeZoneService;
 import com.aditya.personalbudget.service.AppSettingsService;
 import com.aditya.personalbudget.service.UserService;
 import jakarta.validation.Valid;
@@ -33,9 +34,11 @@ public class AdminController {
     private final com.aditya.personalbudget.service.TenantMailService mail;
 
     private final com.aditya.personalbudget.service.HostedChitService chits;
+    private final OrgTimeZoneService timeZones;
 
     public AdminController(UserService users, AppSettingsService appSettings, com.aditya.personalbudget.service.TenantMailService mail,
-                           com.aditya.personalbudget.service.HostedChitService chits) {
+                           com.aditya.personalbudget.service.HostedChitService chits, OrgTimeZoneService timeZones) {
+        this.timeZones = timeZones;
         this.chits = chits;
         this.mail = mail;
         this.users = users;
@@ -76,6 +79,26 @@ public class AdminController {
     public com.aditya.personalbudget.service.TenantMailService.MailSettingsView testMailSettings(
             @jakarta.validation.Valid @RequestBody com.aditya.personalbudget.service.TenantMailService.TestRequest request) {
         return mail.test(request);
+    }
+
+    /** The organization's time zone: the one its times are recorded and shown in (the server's when none is set). */
+    @GetMapping("/organization/time-zone")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public OrgTimeZoneService.TimeZoneView timeZone() {
+        return timeZones.view();
+    }
+
+    @PutMapping("/organization/time-zone")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public OrgTimeZoneService.TimeZoneView saveTimeZone(@RequestBody OrgTimeZoneService.TimeZoneRequest request) {
+        return timeZones.save(request);
+    }
+
+    /** The time zones to choose from, by UTC offset. */
+    @GetMapping("/time-zones")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public List<OrgTimeZoneService.ZoneOption> timeZones() {
+        return timeZones.zones();
     }
 
     /** The sections (menu items) the signed-in user's organization has: what can be shared with its users. */

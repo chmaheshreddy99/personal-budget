@@ -17,7 +17,7 @@ import { chitSummaryReport } from './chit-summary.js';
 import { hostedChitReport } from './hosted-chit-report.js';
 import { emiReport } from './emi-report.js';
 import { icon } from '../core/icons.js';
-import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date } from '../core/format.js';
+import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date, orgNow } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, sparkline } from '../core/charts.js';
 import { categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -39,11 +39,11 @@ const REPORTS = [
 /** Quick period choices for the date filters. */
 const PRESETS = [
     { label: 'This month', from: () => firstOfMonth(0) },
-    { label: 'Last month', from: () => firstOfMonth(-1), to: () => isoDate(new Date(new Date().getFullYear(), new Date().getMonth(), 0)) },
+    { label: 'Last month', from: () => firstOfMonth(-1), to: () => isoDate(new Date(orgNow().getFullYear(), orgNow().getMonth(), 0)) },
     { label: '3 months', from: () => firstOfMonth(-2) },
     { label: '6 months', from: () => firstOfMonth(-5) },
     { label: '12 months', from: () => firstOfMonth(-11) },
-    { label: 'Year to date', from: () => `${new Date().getFullYear()}-01-01` },
+    { label: 'Year to date', from: () => `${orgNow().getFullYear()}-01-01` },
 ];
 
 const period = { from: firstOfMonth(-5), to: isoDate(), asOf: isoDate() };

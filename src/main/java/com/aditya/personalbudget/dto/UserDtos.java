@@ -48,7 +48,9 @@ public final class UserDtos {
                          /* opened with an access link: its id, VIEW or RECORD, maker-checker, and when it ends */
                          Long linkId, String linkMode, boolean approval, LocalDateTime linkExpiresAt,
                          /* still on the default password: the app asks for a new one before anything else */
-                         boolean mustChangePassword) {
+                         boolean mustChangePassword,
+                         /* the organization's time zone (its own, else the server's): "today" and times are in it */
+                         String timeZone) {
     }
 
     public record SessionView(String token, MeView user) {

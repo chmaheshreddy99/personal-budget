@@ -21,7 +21,7 @@ import java.util.Set;
 /**
  * Host a Chit used to come with the Chits section and Activity with the role; both are sections of their own now.
  * Once, users and access links limited to some sections keep what they could open: Host a Chit where Chits was
- * shared, and Activity for users. A marker file in the data folder makes sure it runs only once, so an admin's
+ * shared, and Activity for users. A record kept with the data makes sure it runs only once, so an admin's
  * later choices stand.
  */
 @Component
@@ -29,6 +29,8 @@ import java.util.Set;
 public class FeatureSplitMigration implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(FeatureSplitMigration.class);
+    /** Recorded with the data (see TsvDataStore#isDone); the marker file is how older versions recorded it. */
+    private static final String STEP = "feature-split";
     private static final String MARKER = ".migrated-feature-split";
 
     private final TsvDataStore store;
@@ -41,7 +43,11 @@ public class FeatureSplitMigration implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) throws IOException {
         Path marker = store.dataDir().resolve(MARKER);
-        if (Files.exists(marker)) {
+        boolean done = store.isDone(STEP);
+        if (done || Files.exists(marker)) {
+            if (!done) {
+                store.markDone(STEP);   // ran here before the record moved in with the data: keep it there now
+            }
             return;
         }
         int users = 0;
@@ -64,7 +70,7 @@ public class FeatureSplitMigration implements ApplicationRunner {
                 links++;
             }
         }
-        Files.writeString(marker, "Host a Chit and Activity became sections of their own\n");
+        store.markDone(STEP);
         if (users + links > 0) {
             log.info("Host a Chit and Activity are sections of their own now: kept them for {} user(s) and {} access link(s)", users, links);
         }

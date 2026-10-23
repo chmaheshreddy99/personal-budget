@@ -99,7 +99,7 @@ public class DocumentService {
         Map<Long, List<com.aditya.personalbudget.domain.entity.Attachment>> files = attachments.findByTenantId(tenantId).stream()
                 .filter(a -> a.getDocumentId() != null)
                 .collect(Collectors.groupingBy(a -> a.getDocumentId()));
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         Map<Long, Long> open = shares.findByTenantId(tenantId).stream().filter(s -> s.isActive(now))
                 .collect(Collectors.groupingBy(DocumentShare::getDocumentId, Collectors.counting()));
         return documents.findByTenantId(tenantId).stream()
@@ -113,7 +113,7 @@ public class DocumentService {
         PersonalDocument d = new PersonalDocument();
         d.setTenantId(UserContext.tenantId());
         d.setCreatedBy(UserContext.username());
-        d.setCreatedAt(LocalDateTime.now());
+        d.setCreatedAt(OrgClock.now());
         apply(d, r);
         d = documents.save(d);
         return view(d, List.of(), 0);
@@ -179,8 +179,8 @@ public class DocumentService {
         s.setSharedWith(blank(r.sharedWith()));
         s.setAllowDownload(r.allowDownload());
         s.setCreatedByName(UserContext.get().fullName());
-        s.setCreatedAt(LocalDateTime.now());
-        s.setExpiresAt(LocalDateTime.now().plusHours(r.hours()));
+        s.setCreatedAt(OrgClock.now());
+        s.setExpiresAt(OrgClock.now().plusHours(r.hours()));
         s.setViews(0);
         s = shares.save(s);
         activity.record("ADDED", "Documents", "Shared " + d.getTitle() + " (" + d.getOwner() + ")"
@@ -195,7 +195,7 @@ public class DocumentService {
                 .filter(x -> x.getDocumentId().equals(documentId))
                 .orElseThrow(() -> new NotFoundException("Share link", shareId));
         if (s.getRevokedAt() == null) {
-            s.setRevokedAt(LocalDateTime.now());
+            s.setRevokedAt(OrgClock.now());
             s = shares.save(s);
             activity.record("REVOKED", "Documents", "Stopped sharing " + require(documentId).getTitle()
                     + (s.getSharedWith() != null ? " with " + s.getSharedWith() : ""));
@@ -209,7 +209,7 @@ public class DocumentService {
         DocumentShare s = active(token);
         PersonalDocument d = documents.findById(s.getDocumentId()).orElseThrow(() -> new BusinessException("This document is no longer shared"));
         s.setViews((s.getViews() == null ? 0 : s.getViews()) + 1);
-        s.setLastViewedAt(LocalDateTime.now());
+        s.setLastViewedAt(OrgClock.now());
         shares.save(s);
         List<PublicFile> files = attachmentService.sharedFiles(d.getId()).stream()
                 .map(a -> new PublicFile(a.id(), a.fileName(), a.contentType(), a.image(), a.pdf(), a.hasThumbnail()))
@@ -235,7 +235,7 @@ public class DocumentService {
         if (s.getRevokedAt() != null) {
             throw new BusinessException("The owner stopped sharing this document");
         }
-        if (!s.getExpiresAt().isAfter(LocalDateTime.now())) {
+        if (!s.getExpiresAt().isAfter(OrgClock.now())) {
             throw new BusinessException("This link has expired. Ask for a new one.");
         }
         return s;
@@ -256,7 +256,7 @@ public class DocumentService {
     }
 
     private static ShareView view(DocumentShare s) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         String status = s.getRevokedAt() != null ? "REVOKED" : s.getExpiresAt().isAfter(now) ? "ACTIVE" : "EXPIRED";
         return new ShareView(s.getId(), s.getDocumentId(), s.getSharedWith(), Boolean.TRUE.equals(s.getAllowDownload()), s.getCreatedByName(),
                 s.getCreatedAt(), s.getExpiresAt(), s.getRevokedAt(), s.getViews() == null ? 0 : s.getViews(), s.getLastViewedAt(), status);

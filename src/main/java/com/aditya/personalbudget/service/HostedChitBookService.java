@@ -486,7 +486,7 @@ public class HostedChitBookService {
         BigDecimal advanced = personal.stream().flatMap(p -> p.byChit().stream()).map(ChitShare::amount)
                 .filter(x -> x.signum() < 0).reduce(Money.ZERO, BigDecimal::add).negate();
         BigDecimal earned = bookChits.stream().map(c -> c.money().earned()).reduce(Money.ZERO, BigDecimal::add);
-        YearMonth now = YearMonth.now();
+        YearMonth now = OrgClock.month();
         BigDecimal earnedThisMonth = b.earnedBetween(now.atDay(1), now.atEndOfMonth());
         BigDecimal moved = transferViews.stream().filter(t -> YearMonth.from(t.date()).equals(now)).map(TransferView::amount)
                 .reduce(Money.ZERO, BigDecimal::add);
@@ -510,7 +510,7 @@ public class HostedChitBookService {
     /** The postings on a chit-book (or any) account between two dates, with the running balance. */
     public Statement statement(Long accountId, LocalDate from, LocalDate to) {
         Account account = accountService.require(accountId);
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         LocalDate start = from != null ? from : end.minusMonths(3).withDayOfMonth(1);
         Books b = new Books();
         Map<Long, String> chitNames = chits.findByTenantId(UserContext.tenantId()).stream()
@@ -674,7 +674,7 @@ public class HostedChitBookService {
         HostedChitTransfer t = new HostedChitTransfer();
         t.setTenantId(UserContext.tenantId());
         t.setCreatedBy(UserContext.username());
-        t.setCreatedAt(LocalDateTime.now());
+        t.setCreatedAt(OrgClock.now());
         Draft d = check(r, null);
         fill(t, r, d);
         t = transfers.save(t);
@@ -744,8 +744,8 @@ public class HostedChitBookService {
 
     private Draft check(TransferRequest r, Long transferId) {
         Draft d = new Draft();
-        d.date = r.date() != null ? r.date() : LocalDate.now();
-        if (d.date.isAfter(LocalDate.now())) {
+        d.date = r.date() != null ? r.date() : OrgClock.today();
+        if (d.date.isAfter(OrgClock.today())) {
             throw new BusinessException("The transfer date cannot be in the future");
         }
         d.chit = r.chitId() == null ? null : requireChit(r.chitId());
@@ -1125,7 +1125,7 @@ public class HostedChitBookService {
         }
 
         BookAccount bookAccount(Account a, Map<Long, String> chitNames, List<String> used) {
-            LocalDate today = LocalDate.now();
+            LocalDate today = OrgClock.today();
             YearMonth month = YearMonth.from(today);
             BigDecimal in = Money.ZERO, out = Money.ZERO;
             LocalDate last = null;

@@ -390,7 +390,7 @@ public class AttachmentService implements ApplicationRunner {
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             g.drawImage(img, 0, 0, null);
             String text = (mark == null || mark.isBlank() ? "For this agreement only" : "For " + mark + " only") + " · "
-                    + java.time.LocalDate.now();
+                    + OrgClock.today();
             java.awt.Font font = new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, Math.max(16, Math.max(Math.min(w, h) / 26, w / 52)));
             g.setFont(font);
             g.setColor(new java.awt.Color(192, 20, 28, 30));
@@ -411,7 +411,7 @@ public class AttachmentService implements ApplicationRunner {
             g.setColor(java.awt.Color.WHITE);
             java.awt.Font small = new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, Math.max(11, band * 2 / 5));
             g.setFont(small);
-            String line = what + " · from PDF SHA-256 " + sha.substring(0, 24) + "… · taken " + LocalDateTime.now().withNano(0);
+            String line = what + " · from PDF SHA-256 " + sha.substring(0, 24) + "… · taken " + OrgClock.now().withNano(0);
             while (g.getFontMetrics().stringWidth(line) > w - band && small.getSize() > 8) {
                 small = small.deriveFont(small.getSize2D() - 1);
                 g.setFont(small);
@@ -591,7 +591,7 @@ public class AttachmentService implements ApplicationRunner {
         a.setSource(source != null && SOURCES.contains(source.toUpperCase()) ? source.toUpperCase() : "UPLOAD");
         a.setCaption(blankToNull(caption, 200));
         a.setCreatedBy(UserContext.username());
-        a.setCreatedAt(LocalDateTime.now());
+        a.setCreatedAt(OrgClock.now());
 
         BufferedImage image = type.startsWith("image/") ? decode(bytes) : null;
         a.setWidth(image == null ? null : image.getWidth());

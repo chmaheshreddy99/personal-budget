@@ -44,7 +44,7 @@ public class AppSyncWriter {
         k.setTenantId(tenant);
         k.setClientId(e.clientId());
         k.setCreatedBy(UserContext.username());
-        k.setCreatedAt(LocalDateTime.now());
+        k.setCreatedAt(OrgClock.now());
         SyncResult result;
         if (UserContext.get().approval()) {
             var p = pending.submit(req);
@@ -86,7 +86,7 @@ public class AppSyncWriter {
         k.setClientId(c.clientId());
         k.setEntryId(paid.journalEntryId());
         k.setCreatedBy(UserContext.username());
-        k.setCreatedAt(LocalDateTime.now());
+        k.setCreatedAt(OrgClock.now());
         keys.save(k);
         activity.record("POSTED", "Chits", "Paid instalment " + paid.installmentNo() + " from the phone app · " + after.chit().name()
                 + " · " + ActivityService.money(paid.paidAmount()));

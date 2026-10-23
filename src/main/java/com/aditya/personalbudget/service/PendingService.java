@@ -92,7 +92,7 @@ public class PendingService {
     public PendingView submit(ExpenseRequest r) {
         CurrentUser me = UserContext.get();
         // the same expense, from the same sender, already waiting since a moment ago: not sent twice
-        LocalDateTime recent = LocalDateTime.now().minusMinutes(2);
+        LocalDateTime recent = OrgClock.now().minusMinutes(2);
         boolean twice = pending.findByTenantId(me.tenantId()).stream()
                 .filter(x -> PendingEntry.PENDING.equals(x.getStatus()) && x.getSubmittedAt() != null && x.getSubmittedAt().isAfter(recent))
                 .filter(x -> me.viaLink() ? me.linkId().equals(x.getLinkId()) : me.userId().equals(x.getSubmittedById()))
@@ -108,7 +108,7 @@ public class PendingService {
         p.setLinkId(me.linkId());
         p.setSubmittedById(me.viaLink() ? null : me.userId());
         p.setSubmittedBy(ActivityService.actorOf(me));
-        p.setSubmittedAt(LocalDateTime.now());
+        p.setSubmittedAt(OrgClock.now());
         p.setStatus(PendingEntry.PENDING);
         p.setResubmits(0);
         addStep(p, "SUBMITTED", null);
@@ -131,7 +131,7 @@ public class PendingService {
         String changes = changes(request(p), r);
         String what = fill(p, r);
         p.setStatus(PendingEntry.PENDING);
-        p.setSubmittedAt(LocalDateTime.now());
+        p.setSubmittedAt(OrgClock.now());
         if (wasRejected) {
             p.setResubmits((p.getResubmits() == null ? 0 : p.getResubmits()) + 1);
             p.setReviewedBy(null);
@@ -202,7 +202,7 @@ public class PendingService {
         String corrections = changes(r, post);
         p.setStatus(PendingEntry.APPROVED);
         p.setReviewedBy(UserContext.get().fullName());
-        p.setReviewedAt(LocalDateTime.now());
+        p.setReviewedAt(OrgClock.now());
         p.setReviewNote(blankToNull(fix.note()));
         p.setJournalEntryId(posted.id());
         addStep(p, "APPROVED", join(corrections.isEmpty() ? null : "corrected " + corrections, p.getReviewNote()));
@@ -217,7 +217,7 @@ public class PendingService {
         PendingEntry p = requirePending(id);
         p.setStatus(PendingEntry.REJECTED);
         p.setReviewedBy(UserContext.get().fullName());
-        p.setReviewedAt(LocalDateTime.now());
+        p.setReviewedAt(OrgClock.now());
         p.setReviewNote(r == null ? null : blankToNull(r.note()));
         addStep(p, "REJECTED", p.getReviewNote());
         p = pending.save(p);
@@ -279,7 +279,7 @@ public class PendingService {
 
     private void addStep(PendingEntry p, String action, String note) {
         List<Step> steps = new ArrayList<>(history(p));
-        steps.add(new Step(action, LocalDateTime.now(), ActivityService.actorOf(UserContext.get()), note));
+        steps.add(new Step(action, OrgClock.now(), ActivityService.actorOf(UserContext.get()), note));
         String text = json.writeValueAsString(steps);
         while (text.length() > HISTORY_MAX && steps.size() > 2) {   // keep the first step and the latest ones
             steps.remove(1);

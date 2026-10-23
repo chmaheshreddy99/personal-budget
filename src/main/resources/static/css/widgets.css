@@ -1963,3 +1963,6 @@ td.c-ctst, th.c-ctst { width: 112px; white-space: nowrap; }
     .xp-interest .xi-seg { display: flex; }
     .xp-interest .xi-seg .seg-chip { flex: 1; justify-content: center; }
 }
+
+/* Settings, Backup: the actions of a backup are always shown */
+.cat-actions.bk-actions { opacity: 1; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

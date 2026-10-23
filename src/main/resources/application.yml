@@ -6,9 +6,10 @@ spring:
       enabled: true
   servlet:
     multipart:
-      # evidence uploads (see budget.attachments.max-file-mb)
-      max-file-size: 12MB
-      max-request-size: 13MB
+      # evidence uploads are limited by budget.attachments.max-file-mb; this is the largest upload of any kind,
+      # a backup file with its evidence files being the biggest (Settings, Backup)
+      max-file-size: 200MB
+      max-request-size: 201MB
   # E-mail for Host a Chit reminders and receipts (off until a host is set). For Gmail, turn on 2-step
   # verification and create an app password (Google account > Security > App passwords).
   # mail:
@@ -26,8 +27,22 @@ server:
     enabled: true
 
 budget:
-  # Folder (relative to the working directory) holding one .tbl file per table
+  # Folder (relative to the working directory) holding one .tbl file per table; with Google Sheets storage it still
+  # holds evidence attachments, settings and the lock file
   data-dir: data
+  # Where the tables are stored. Override these in config/application.yml next to the jar (see config/application.yml.sample)
+  storage:
+    # files = tab-separated files in data-dir; google-sheets = one tab per table in a Google spreadsheet
+    type: files
+    google-sheets:
+      # the id in the spreadsheet's address: docs.google.com/spreadsheets/d/<spreadsheet-id>/edit
+      spreadsheet-id:
+      # the service account's JSON key; a relative path is looked up next to the jar first, then in the working directory.
+      # Share the spreadsheet with the service account's e-mail address (client_email in the key) as an Editor.
+      credentials-file: config/google-credentials.json
+      timeout-seconds: 30
+      # on the first start against an empty spreadsheet, copy the tables in data-dir into it
+      import-local-data: false
   security:
     # Roles are always enforced: see RolePolicy for who may do what. A viewer can only read.
     session-hours: 12
@@ -44,6 +59,11 @@ budget:
   #   # sender address when it is not spring.mail.username, and where members' replies go
   #   from: chits@example.com
   #   reply-to: you@example.com
+  backup:
+    # JSON backups of the whole data (Settings, Backup): the folder, relative to the app's root (the folder holding
+    # config/: next to the jar, or the project root), and how many to keep (the oldest go first; 0 keeps every one)
+    dir: backups
+    keep: 30
   attachments:
     # Evidence (photos, scans, PDFs) attached to entries, stored under <data-dir>/attachments
     max-file-mb: 10

@@ -260,7 +260,7 @@ public class AccountLedgerSync implements StoreListener {
         row.setAction(action);
         row.setChangedFields(changedFields);
         row.setPreviousBalance(previousBalance);
-        row.setLoggedAt(LocalDateTime.now());
+        row.setLoggedAt(OrgClock.now());
         row.setLoggedBy(UserContext.username());
         store.save(AccountLog.class, row);
     }

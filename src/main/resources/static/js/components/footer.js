@@ -10,7 +10,7 @@ import { api, onMutation } from '../core/api.js';
 import { state } from '../core/store.js';
 import { esc } from '../core/ui.js';
 import { icon } from '../core/icons.js';
-import { moneyShort, percent, shortDate } from '../core/format.js';
+import { moneyShort, percent, shortDate, orgNow } from '../core/format.js';
 import { openShortcutMap } from '../core/keys.js';
 
 const $ = id => document.getElementById(id);
@@ -49,7 +49,7 @@ export function refreshFooter(soft = false) {
 }
 
 function render(p) {
-    const month = new Date().toLocaleDateString('en-GB', { month: 'short' });
+    const month = orgNow().toLocaleDateString('en-GB', { month: 'short' });
     const used = p.budgetUsedPercent === null ? null : Number(p.budgetUsedPercent);
     const items = [
         item('#/expenses/today', 'receipt', 'Today', moneyShort(p.spentToday)),
@@ -68,7 +68,7 @@ function render(p) {
     ];
     $('foot-pulse').innerHTML = items.join('');
 
-    const now = new Date();
+    const now = orgNow();
     $('foot-status').innerHTML = `
         <span class="foot-dot" title="Connected · data saved to disk"></span>
         <span title="Tab-separated tables in the data folder">${icon('database')} ${p.dataFiles} tables · ${size(p.dataBytes)}</span>
@@ -86,7 +86,7 @@ function item(go, iconName, label, value, extra = '', cls = '') {
 }
 
 function dueLabel(iso) {
-    const days = Math.round((new Date(iso + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+    const days = Math.round((new Date(iso + 'T00:00:00') - new Date(orgNow().toDateString())) / 86400000);
     if (days <= 0) return '<span class="warn">today</span>';
     if (days === 1) return 'tomorrow';
     return days < 7 ? `in ${days} days` : shortDate(iso);

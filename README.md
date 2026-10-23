@@ -4,7 +4,8 @@ A multi-tenant, double-entry personal finance application: accounts, expenses an
 journals, budgets, balance sheet, reports and forecast.
 
 - **Backend:** Java 21, Spring Boot 4.1, Gradle (Groovy DSL)
-- **Storage:** one tab-separated `.tbl` file per table in `./data`, no database
+- **Storage:** one tab-separated `.tbl` file per table in `./data`, no database; or, as an option, one tab per
+  table in a Google spreadsheet (see [Storing the data in Google Sheets](#storing-the-data-in-google-sheets))
 - **UI:** plain HTML, CSS and JavaScript modules with no frameworks or CDNs. Icons and charts are hand-written SVG.
 
 ## Run
@@ -50,6 +51,9 @@ Delete the `data` folder to start over.
 | Users & roles | Users and roles, tenants, the permission matrix, and the user's own profile and password. For each user an admin picks the **sections shared** (Dashboard, Expenses, Income, Journal, Accounts, Chits, Budgets, Balance sheet, Reports, Forecast), whether they may use the **mobile version**, and which sections they get there. Opened from the user menu (top right), not the main menu. |
 | Android app | A separate React Native app in **`mobile-app/`** (see its README). It shows every account with its balance (your own, construction and Host a Chit accounts, and EMIs) and statements, and syncs when it opens, when it comes back to the front and with its Sync button. It records expenses offline: the account's balance goes down at once, and the expense goes up when the server (an ngrok URL works) is reachable. Each expense is booked once, by its own id, through `POST /api/app/expenses/sync`. The offline copy stays within a size you set. A **work offline** switch stops all syncing. **Bank SMS** that money went out are detected, even with the app closed, and offered as expenses with the details filled in. The app's server calls are under `/api/app` (`AppController`). |
 | Mobile version | A lighter app for phones at `/m/` (the address is set by an admin in Settings → Mobile app): Home (net worth, cash & bank, spent this month against the budget, income, money to collect, what is due next, the latest entries), Expenses (today, this month, last month, to collect; add an expense in a few taps), Accounts (balances and recent statements), Chits (progress, paid in, still to pay, take home now, installments), Budgets and Income. It signs in on its own (its session is kept apart from the full site's) and shows only the sections shared for mobile. Account statements go back as far as needed (1 month to **All**, 60 entries at a time with *Show more*), money in green and out in orange, and each entry shows which account was debited (**Dr**) and which credited (**Cr**). An expense can carry its bill: **Camera** (with crop) or **Upload**; through an access link with approval the evidence travels with it and lands on the posted entry when approved. |
+| Settings › Organization | The organization's **time zone** (any region zone, listed by UTC offset; empty = the server's). "Today", the time an entry was recorded, sign-ins and due dates are all in it, on the server and in the browser, so a server running in another zone shows the household's local times. Times saved before a change keep the clock time they were saved with. |
+| Settings › Backup | (Super admins.) **Back up now** writes one JSON file with every table of every organization and the id sequences (optionally the evidence files too), whichever storage holds them, to the `backups/` folder next to `config/`; the newest 30 are kept. Each backup can be **downloaded**, **deleted** or **restored**, and a downloaded one can be **uploaded** to restore it. A restore replaces all the data in one go (all or nothing; a damaged file changes nothing) after saving the current data as a `before-restore-…` backup, so it can be undone. Sign-in sessions are never part of a backup. |
+| Waiting for the server | Every call to the server that takes more than a moment shows a thin progress bar at the top of the page, and the button, chip or row that started it shows a spinner and takes no more clicks until it is answered (a save is locked at once), so a slow save is never sent twice and a row being expanded shows that it is loading. The same holds on the mobile version and the share and agreement pages. |
 | Activity | **Who changed what.** Every change (add, edit, delete, payment, reversal, approval), sign-in and opened access link, by day: who, what in words (*Paid installment #7 · Shriram Gold 5L · ₹21,676*), which section and from where (full site, mobile version or an access link). Filters by period, person, section and text with **Clear filters**, a summary (changes, people, busiest section, link activity, deletions) and Excel / PDF export. For admins and managers (permission *Approve entries*). |
 | Access links | **Temporary access without an account.** An admin makes a link to the mobile version for a person (a driver, a helper, family on a trip): for how long (1 hour to 30 days), which sections, **View only** or **Recorder** (may add expenses) and, for a recorder, **maker-checker**. The link is shown once with a QR code, copy and WhatsApp share; only a hash is stored. It stops working when it expires, and **Revoke** (or **Revoke all**) ends it at once, even on a phone where it is open. A link session can never reach balances, history or settings beyond its sections, cannot change anything but add expenses, and shows who it is for and when it ends. |
 | Approvals | **Maker-checker.** Expenses recorded through a link with approval wait under Activity → Approvals (a badge on the menu shows how many). A checker approves them, correcting amount, date, category, account or description if needed, and only then are they posted (the note says who recorded it); or rejects them with a reason. The person with the link sees what is waiting, approved or rejected. |
@@ -153,6 +157,42 @@ Nothing is cached between requests: the files are the only copy of the data.
   (server-sent events). Every open browser redraws its current page with fresh numbers, so a change made in
   one login shows in the others within a second or two. While a dialog is open, the redraw waits until it closes.
 
+### Storing the data in Google Sheets
+
+The same tables can live in a Google spreadsheet instead of `.tbl` files. Repositories, services and the rules
+above do not change: only the layer that reads and writes whole tables does (`TableStorage`: `LocalFileStorage`
+or `GoogleSheetsStorage`).
+
+- Each table is one tab (header row, frozen, then one row per entity, exactly like a `.tbl` file); the id sequences
+  (and the record of one-off data migrations already run) are the `_sequences` tab. Missing tabs are added on
+  start, and other tabs in the spreadsheet are left alone.
+- Cells are written as plain text (`RAW`): nothing is turned into a number, date or formula, and a line break in a
+  note is a real line break in the cell.
+- **Nothing is kept in memory.** The data is read when it is needed: the first read of a request fetches every
+  table tab in one API call, that copy serves only that request, and it is dropped when the request ends. A save
+  reads the spreadsheet afresh and writes its changes back in one call (two when a tab must grow first) before it
+  ends. So every page shows what the spreadsheet holds at that moment, edits made by hand included.
+- Each request to the app costs one read call, and each save one more read plus one write. Google allows a service
+  account 60 read and 60 write calls a minute by default; busy calls are retried with growing pauses, so a burst of
+  clicks slows down rather than fails (the page shows it is waiting). If that limit is reached often, raise it in
+  the Google Cloud console (APIs & Services, Google Sheets API, Quotas).
+- One running app per spreadsheet, and edit it by hand only while the app is stopped: a hand edit made just before
+  the app writes the same tab can be overwritten.
+- Evidence files, `app-settings.properties` and the lock file stay in `data-dir`.
+
+Setup:
+
+1. In the Google Cloud console, enable the **Google Sheets API** for a project, create a **service account** (no
+   roles needed) and add a **JSON key** to it.
+2. Save the key as `config/google-credentials.json` (next to the jar, or in the project root when running from the
+   sources). Keep it private.
+3. Create an empty spreadsheet and **share** it, as an Editor, with the service account's e-mail address
+   (`client_email` in the key).
+4. Copy `config/application.yml.sample` to `config/application.yml`, set `budget.storage.type: google-sheets` and
+   the spreadsheet id (the part of its address between `/d/` and `/edit`).
+5. To bring your existing data along, set `import-local-data: true` for the first start: the `.tbl` files of
+   `data-dir` are copied into the still empty spreadsheet (the files are left as they are).
+
 ### Accounting model
 
 Every money movement is a balanced journal: at least two lines, and total debit equals total credit.
@@ -242,9 +282,22 @@ the account is locked for 10 minutes.
 
 ## Configuration (`application.yml`)
 
+The built-in settings can be overridden without touching the jar: put an `application.yml` (or `.properties`) in a
+`config` folder **next to the jar** (`config/application.yml.sample` shows how; the build copies the samples to
+`build/libs/config/`). Spring Boot's own `./config/` of the working directory works too (the project root under
+`./app.sh` or `bootRun`), and so do `--key=value` command-line arguments, which win over both. The `config` folder
+holds secrets (the Google key) and is not committed.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `budget.data-dir` | `data` | Folder holding the `.tbl` files |
+| `budget.data-dir` | `data` | Folder holding the `.tbl` files (and, with either storage, evidence files and settings) |
+| `budget.storage.type` | `files` | `files`: `.tbl` files in `data-dir`; `google-sheets`: tabs of a Google spreadsheet |
+| `budget.storage.google-sheets.spreadsheet-id` | not set | The id in the spreadsheet's address: `docs.google.com/spreadsheets/d/<id>/edit` |
+| `budget.storage.google-sheets.credentials-file` | `config/google-credentials.json` | The service account's JSON key; a relative path is looked up next to the jar first, then in the working directory |
+| `budget.storage.google-sheets.timeout-seconds` | `30` | Connect and read timeout of each API call |
+| `budget.storage.google-sheets.import-local-data` | `false` | On a start against an empty spreadsheet, copy the `.tbl` files of `data-dir` into it |
+| `budget.backup.dir` | `backups` | Where backups are written; a relative path is under the app's root (the folder holding `config/`: next to the jar, else the working directory) |
+| `budget.backup.keep` | `30` | How many backups to keep (the oldest are deleted; `0` keeps all) |
 | `budget.security.session-hours` | `12` | How long a session stays valid |
 | `budget.security.default-user-role` | `ADMIN` | Role for users created without one |
 | `budget.interest.day-count` | `MONTHLY` | Interest per month, 30-day months (`MONTHLY`) or actual days / 365 (`ACTUAL`) |

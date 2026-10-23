@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.web;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.dto.InsightReportDtos.InsightReport;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.service.InsightReportService;
@@ -56,19 +57,19 @@ public class InsightController {
     public BalanceSheet balanceSheet(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate compareTo) {
-        return reports.balanceSheet(asOf != null ? asOf : LocalDate.now(), compareTo);
+        return reports.balanceSheet(asOf != null ? asOf : OrgClock.today(), compareTo);
     }
 
     @GetMapping("/reports/trial-balance")
     public TrialBalance trialBalance(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
-        return reports.trialBalance(asOf != null ? asOf : LocalDate.now());
+        return reports.trialBalance(asOf != null ? asOf : OrgClock.today());
     }
 
     @GetMapping("/reports/income-statement")
     public IncomeStatement incomeStatement(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         return reports.incomeStatement(from != null ? from : end.withDayOfMonth(1), end);
     }
 
@@ -76,7 +77,7 @@ public class InsightController {
     public AccountLedger ledger(@PathVariable Long accountId,
                                 @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                                 @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         return reports.accountLedger(accountId, from != null ? from : end.minusMonths(3).withDayOfMonth(1), end);
     }
 
@@ -84,7 +85,7 @@ public class InsightController {
     public ExpenseAnalysis expenseAnalysis(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         return reports.expenseAnalysis(from != null ? from : end.minusMonths(5).withDayOfMonth(1), end);
     }
 
@@ -92,7 +93,7 @@ public class InsightController {
     public CashFlow cashFlow(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         return reports.cashFlow(from != null ? from : end.minusMonths(5).withDayOfMonth(1), end);
     }
 
@@ -100,7 +101,7 @@ public class InsightController {
     public InsightReport insights(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate end = to != null ? to : OrgClock.today();
         LocalDate start = from != null ? from : end.withDayOfMonth(1);
         if (start.isAfter(end)) {
             throw new BusinessException("The start date is after the end date");

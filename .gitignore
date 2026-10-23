@@ -8,6 +8,11 @@ data/
 logs/
 run/
 app.conf
+backups/
+
+# local settings and the Google service account key (only the samples are shared)
+config/*
+!config/*.sample
 
 # Java build output from VS Code / Eclipse
 bin/

@@ -206,7 +206,7 @@ public class EmiService {
         Map<Long, String> numbers = entries.findByTenantId(tenant).stream().collect(Collectors.toMap(JournalEntry::getId, JournalEntry::getEntryNo));
         Map<Long, List<EmiInstallment>> byPlan = installments.findByTenantId(tenant).stream()
                 .collect(Collectors.groupingBy(EmiInstallment::getPlanId));
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         List<EmiPlan> all = plans.findByTenantId(tenant);
         List<PlanView> list = all.stream().filter(p -> withClosed || !Boolean.TRUE.equals(p.getArchived()))
                 .map(p -> view(p, byPlan.getOrDefault(p.getId(), List.of()).stream().sorted(Comparator.comparing(EmiInstallment::getSeq)).toList(),
@@ -287,7 +287,7 @@ public class EmiService {
         p.setTenantId(UserContext.tenantId());
         p.setStatus("ACTIVE");
         p.setCreatedBy(UserContext.username());
-        p.setCreatedAt(LocalDateTime.now());
+        p.setCreatedAt(OrgClock.now());
         Account pay = terms(p, r);
         p = plans.save(p);
         if (LOAN.equals(p.getKind())) p.setLiabilityAccountId(newLoanAccount(p).getId());
@@ -369,7 +369,7 @@ public class EmiService {
         Category category = categories.require(r.categoryId(), CategoryKind.EXPENSE);
         LocalDate first = r.firstDueDate() != null ? r.firstDueDate() : r.purchaseDate().plusMonths(1);
         if (first.isBefore(r.purchaseDate())) throw new BusinessException("The first EMI cannot be before the purchase");
-        if (r.purchaseDate().isAfter(LocalDate.now())) throw new BusinessException("The purchase date is in the future");
+        if (r.purchaseDate().isAfter(OrgClock.today())) throw new BusinessException("The purchase date is in the future");
         p.setKind(kind);
         p.setNarration(r.narration().trim());
         p.setParty(blank(r.party()));
@@ -472,7 +472,7 @@ public class EmiService {
     /** Books every EMI that has fallen due on plans that book themselves (a card's is billed, a loan's paid); how many. */
     @Transactional
     public int postDueForAll() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         int posted = 0;
         for (EmiPlan p : plans.findByTenantId(UserContext.tenantId())) {
             if (!"ACTIVE".equals(p.getStatus()) || !Boolean.TRUE.equals(p.getAutoPost()) || Boolean.TRUE.equals(p.getArchived())) continue;
@@ -588,7 +588,7 @@ public class EmiService {
             if (entry != null) ledger.delete(entry);
             what = CARD.equals(p.getKind()) ? "billing of EMI " : "EMI ";
             // undone by hand: it is not booked again by itself tonight
-            if (Boolean.TRUE.equals(p.getAutoPost()) && !last.getDueDate().isAfter(LocalDate.now())) p.setAutoPost(false);
+            if (Boolean.TRUE.equals(p.getAutoPost()) && !last.getDueDate().isAfter(OrgClock.today())) p.setAutoPost(false);
         }
         if (!"ACTIVE".equals(p.getStatus())) {
             p.setStatus("ACTIVE");
@@ -661,7 +661,7 @@ public class EmiService {
             throw new BusinessException(open + " EMI" + (open == 1 ? " is" : "s are") + " still to pay on " + p.getNarration() + ": pay them, or pay it off early, then close it");
         }
         p.setArchived(true);
-        p.setArchivedOn(LocalDate.now());
+        p.setArchivedOn(OrgClock.today());
         plans.save(p);
         if (p.getLiabilityAccountId() != null) accounts.findById(p.getLiabilityAccountId()).ifPresent(a -> { a.setActive(false); accounts.save(a); });
         activity.record("CHANGED", AREA, "Closed the EMI plan " + p.getNarration());
@@ -728,7 +728,7 @@ public class EmiService {
                 BigDecimal charges = ls.stream().filter(l -> l.getCategoryId() != null).map(JournalLine::getDebit).reduce(Money.ZERO, BigDecimal::add);
                 Long from = ls.stream().filter(l -> l.getCredit().signum() > 0).map(JournalLine::getAccountId).findFirst().orElse(p.getPayAccountId());
                 Long expenses = ledger.systemAccount(DefaultChartOfAccounts.EXPENSES).getId();
-                JournalDraft d = JournalDraft.of(p.getClosedOn() != null ? p.getClosedOn() : LocalDate.now(), VoucherType.EMI_PAYMENT, "Paid off early · " + p.getNarration())
+                JournalDraft d = JournalDraft.of(p.getClosedOn() != null ? p.getClosedOn() : OrgClock.today(), VoucherType.EMI_PAYMENT, "Paid off early · " + p.getNarration())
                         .party(p.getLender()).reference(p.getReference()).source(SOURCE_FORECLOSE, p.getId());
                 if (from.equals(p.getPayAccountId())) d.debit(expenses, charges, "Foreclosure charges").category(loanInterest()).credit(from, charges, "Foreclosure charges");
                 else d.debit(p.getPayAccountId(), owed, "The blocked amount paid off").debit(expenses, charges, "Foreclosure charges").category(loanInterest())

@@ -7,7 +7,7 @@
  */
 import { api, session, setUnauthorizedHandler, setConflictHandler, lastOwnMutation, mutationsInFlight } from './core/api.js';
 import { state, loadOptions, can, readOnly, invalidateAccounts, hasFeature } from './core/store.js';
-import { setCurrency } from './core/format.js';
+import { setCurrency, setTimeZone } from './core/format.js';
 import { icon, hydrateIcons } from './core/icons.js';
 import { esc, toast } from './core/ui.js';
 import { openQuickEntry, openJournalEditor } from './components/transaction-forms.js';
@@ -117,7 +117,7 @@ function showLogin(message = '') {
     // where the mobile version lives (set by an admin in Settings)
     api.get('/meta/app').then(app => {
         const link = $('mobile-link');
-        link.href = `/${app.mobilePath}/`;
+        link.href = `/?ui=mobile`;   // also forgets "always open the full site" on this device
         link.hidden = false;
     }).catch(() => {});
 }
@@ -327,6 +327,7 @@ async function enterApp() {
     sessionPassword = '';
     await loadOptions();
     setCurrency(state.user.currency);
+    setTimeZone(state.user.timeZone);
 
     $('login-screen').hidden = true;
     $('app').hidden = false;

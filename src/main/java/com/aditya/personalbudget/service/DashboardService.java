@@ -56,7 +56,7 @@ public class DashboardService {
     }
 
     public Dashboard build() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         YearMonth month = YearMonth.from(today);
         LedgerSnapshot books = ledger.snapshot();
         Map<Long, BigDecimal> balances = books.balancesAsOf(today);
@@ -81,7 +81,7 @@ public class DashboardService {
     private Kpis kpis(LedgerSnapshot books, Map<Long, BigDecimal> balances, Map<Long, BigDecimal> thisMonth,
                       Map<Long, BigDecimal> lastMonth, YearMonth prev) {
         // Same presentation as the balance sheet: dues on prized chits count as liabilities
-        BigDecimal chitDues = books.chitBalancesAsOf(LocalDate.now()).values().stream()
+        BigDecimal chitDues = books.chitBalancesAsOf(OrgClock.today()).values().stream()
                 .filter(v -> v.signum() < 0)
                 .map(BigDecimal::negate)
                 .reduce(Money.ZERO, BigDecimal::add);

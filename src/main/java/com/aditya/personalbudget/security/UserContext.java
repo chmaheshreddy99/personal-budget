@@ -1,6 +1,7 @@
 package com.aditya.personalbudget.security;
 
 import com.aditya.personalbudget.exception.UnauthorizedException;
+import com.aditya.personalbudget.service.OrgClock;
 
 /**
  * Holds the {@link CurrentUser} for the request being processed (set by {@link AuthInterceptor}).
@@ -15,10 +16,12 @@ public final class UserContext {
 
     public static void set(CurrentUser user) {
         CURRENT.set(user);
+        OrgClock.forget();   // its zone is looked up again, for this user's organization
     }
 
     public static void clear() {
         CURRENT.remove();
+        OrgClock.forget();
     }
 
     public static CurrentUser get() {

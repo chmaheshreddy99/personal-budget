@@ -11,7 +11,7 @@ import { esc, toast, openModal, confirmDialog } from '../core/ui.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
 import { evalAmount } from './expense-dialog.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
-import { money, moneyShort, date, isoDate } from '../core/format.js';
+import { money, moneyShort, date, isoDate, orgNow } from '../core/format.js';
 import { padHtml, bindPad, signatureSvg } from '../core/bond.js';
 
 export const num = v => Number(v || 0);
@@ -659,7 +659,7 @@ export async function openCost(d, c, after) {
     const running = d.stages.find(s => s.status === 'IN_PROGRESS') || d.stages.find(s => s.status === 'PENDING');
     const head0 = c?.head || null;
     let f0 = d.figures;
-    const day = n => { const x = new Date(); x.setDate(x.getDate() - n); return isoDate(x); };
+    const day = n => { const x = orgNow(); x.setDate(x.getDate() - n); return isoDate(x); };
 
     const tile = (h, i) => `<button type="button" class="cat-tile ${h === head0 ? 'selected' : ''}" data-head="${h}" data-search="${esc(headName(h).toLowerCase())}" ${i >= TOP_HEADS && h !== head0 ? 'hidden data-extra' : ''}
         title="${esc(headName(h))}${byHead[h] ? ` · ${money(byHead[h].amount)} so far, ${byHead[h].count}×` : ''}">

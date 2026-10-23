@@ -65,6 +65,13 @@ public class Organization implements Identifiable {
      */
     @Column(length = 400)
     private String features;
+
+    /**
+     * The IANA time zone the organization's times are recorded and shown in ("Asia/Kolkata"); empty = the server's
+     * zone. See {@code OrgClock}.
+     */
+    @Column(length = 40)
+    private String timeZone;
     /** Optimistic locking: a save based on an older version is rejected. */
     @jakarta.persistence.Version
     private Long version;

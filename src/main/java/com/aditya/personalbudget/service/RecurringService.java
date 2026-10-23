@@ -47,7 +47,7 @@ public class RecurringService {
 
     public List<RecurringView> list() {
         LedgerSnapshot books = ledger.snapshot();
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         return recurring.findByTenantId(UserContext.tenantId()).stream()
                 .sorted(Comparator.comparing(RecurringTransaction::getNextDueDate))
                 .map(r -> new RecurringView(r.getId(), r.getName(), r.getKind(), r.getAmount(),

@@ -54,7 +54,7 @@ public class AccountService {
 
     public List<AccountView> list() {
         LedgerSnapshot books = ledger.snapshot();
-        LocalDate today = LocalDate.now();
+        LocalDate today = OrgClock.today();
         YearMonth month = YearMonth.from(today);
         Map<Long, BigDecimal> balances = books.balancesAsOf(LocalDate.MAX);
         Map<Long, BigDecimal> monthMoves = books.movementsBetween(month.atDay(1), month.atEndOfMonth());
@@ -131,7 +131,7 @@ public class AccountService {
         Account account = new Account();
         account.setTenantId(tenantId);
         account.setSystemAccount(false);
-        account.setCreatedAt(LocalDateTime.now());
+        account.setCreatedAt(OrgClock.now());
         apply(account, request);
         if (account.getCode() == null || account.getCode().isBlank()) {
             account.setCode(nextCode(tenantId, account.getAccountClass()));
@@ -211,7 +211,7 @@ public class AccountService {
         account.setDescription(description);
         account.setSystemAccount(system);
         account.setActive(true);
-        account.setCreatedAt(LocalDateTime.now());
+        account.setCreatedAt(OrgClock.now());
         return accounts.save(account);
     }
 
@@ -254,7 +254,7 @@ public class AccountService {
                 || type.getAccountClass() == AccountClass.LIABILITY;
         if (balanceSheet && Money.isPositive(r.openingBalance())) {
             account.setOpeningBalance(Money.round(r.openingBalance()));
-            account.setOpeningDate(r.openingDate() != null ? r.openingDate() : LocalDate.now());
+            account.setOpeningDate(r.openingDate() != null ? r.openingDate() : OrgClock.today());
         } else {
             account.setOpeningBalance(null);
             account.setOpeningDate(r.openingDate());

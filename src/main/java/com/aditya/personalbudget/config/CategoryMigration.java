@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.config;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.Budget;
 import com.aditya.personalbudget.domain.entity.Category;
@@ -82,7 +83,7 @@ public class CategoryMigration implements ApplicationRunner {
     }
 
     private void migrate(Long tenantId, Map<Long, Long> legacyBudgetAccounts) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         List<Account> accounts = store.findAll(Account.class, a -> a.getTenantId().equals(tenantId));
 
         // ---- 1. one category per old expense / income account
@@ -225,7 +226,7 @@ public class CategoryMigration implements ApplicationRunner {
             for (int n = 1; usedCode(accounts, free); n++) {
                 free = String.valueOf(Integer.parseInt(code) + n * 9);
             }
-            Account created = newAccount(tenantId, t, LocalDateTime.now());
+            Account created = newAccount(tenantId, t, OrgClock.now());
             created.setCode(free);
             return store.save(Account.class, created);
         }
@@ -292,7 +293,7 @@ public class CategoryMigration implements ApplicationRunner {
     /** Copies every table file (and the id sequences) to a time-stamped folder inside the data directory. */
     private Path backup() {
         Path dir = store.dataDir();
-        Path target = dir.resolve("backup-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+        Path target = dir.resolve("backup-" + OrgClock.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
         try (Stream<Path> files = Files.list(dir)) {
             Files.createDirectories(target);
             List<Path> sources = new ArrayList<>(files.filter(Files::isRegularFile)

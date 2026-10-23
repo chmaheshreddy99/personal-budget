@@ -25,7 +25,7 @@ import { openModal, esc, toast, readForm, accountOptions } from '../core/ui.js';
 import { interestAccountFilter } from './claim-panel.js';
 import { icon, categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { loadSuggestions } from '../core/autocomplete.js';
-import { money, moneyShort, isoDate, currencySymbol, percent, date } from '../core/format.js';
+import { money, moneyShort, isoDate, currencySymbol, percent, date, orgNow } from '../core/format.js';
 import { openJournalEditor } from './transaction-forms.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
 import { addMonths, monthsBetween, emiPreviewHtml } from './emi.js';
@@ -81,7 +81,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
     // system categories (chit commission ...) are booked by their features, so they come last
     // ... plus a head start for everyday categories (new users), and in the first days of a month the regular bills
     // not yet paid this month
-    const earlyInMonth = new Date().getDate() <= 7;
+    const earlyInMonth = orgNow().getDate() <= 7;
     const dueBill = c => earlyInMonth && MONTHLY.test(c.name) && (c.entries || 0) > 0 && !Number(c.thisMonth) ? 3 : 0;
     const score = c => (usage.recent[c.id] || 0) * 3 + (usage.category[c.id] || 0) + Math.sqrt(c.entries || 0) + (Number(c.thisMonth) ? 2 : 0)
         + everydayBoost(c) + dueBill(c);
@@ -340,7 +340,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
 // ===================================================================== pieces
 
 function dateChip(daysAgo, label) {
-    const d = new Date();
+    const d = orgNow();
     d.setDate(d.getDate() - daysAgo);
     return `<button type="button" class="date-chip" data-date="${isoDate(d)}">${label}</button>`;
 }

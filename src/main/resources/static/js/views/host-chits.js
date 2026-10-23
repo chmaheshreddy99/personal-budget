@@ -20,7 +20,7 @@ import { api } from '../core/api.js';
 import { state, can, loadAccounts, categoriesOf } from '../core/store.js';
 import { panel, esc, openModal, confirmDialog, toast, emptyState, printElement, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
-import { money, moneyShort, date, shortDate, shortDateYear, isoDate, daysFromToday, dateTime } from '../core/format.js';
+import { money, moneyShort, date, shortDate, shortDateYear, isoDate, daysFromToday, dateTime, orgNow } from '../core/format.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { qrSvg } from '../core/qr.js';
@@ -1547,7 +1547,7 @@ function historyHtml(d) {
 // ===================================================================== new chit (wizard dialog)
 
 function newDraft() {
-    const now = new Date();
+    const now = orgNow();
     return {
         step: 1, chitType: 'FIXED', name: '', startMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`, dueDay: 5,
         memberCount: 20, installment: 25000, baseValue: 500000, monthlyIncrement: 5000, commission: 25000,
@@ -2460,7 +2460,7 @@ function sharePlan(w) {
 /** A running chit as a draft, to print or share its table (and, for planned chits, to edit it). */
 /** A new chit's draft copied from a chit: same terms and members, from next month, with its own name and accounts. */
 function copyDraft(d) {
-    const now = new Date();
+    const now = orgNow();
     const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const from = draftFromChit(d);
     const w = { ...newDraft(), ...from, name: '', nameTouched: false, copiedFrom: d.chit.name,

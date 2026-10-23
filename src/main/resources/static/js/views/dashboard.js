@@ -10,7 +10,7 @@ import { panel, kpi, esc, statusBadge, emptyState, openModal } from '../core/ui.
 import { kindChip, movementHtml, projectTag } from '../core/entry-kind.js';
 import { shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
-import { money, moneyShort, percent, monthLabel, shortDate, daysFromToday, isoDate } from '../core/format.js';
+import { money, moneyShort, percent, monthLabel, shortDate, daysFromToday, isoDate, orgNow } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers } from '../core/charts.js';
 import { openEntryDetail, openQuickEntry, openJournalEditor } from '../components/transaction-forms.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
@@ -39,11 +39,11 @@ export async function render(container, _params, isCurrent) {
     const avgEarn = mean(done.slice(-3).map(p => p.income));
     const keptYear = mean(done.slice(-12).filter(p => p.income > 0).map(p => ((p.income - p.expense) / p.income) * 100));
     const cover = avgSpend ? Number(k.liquidBalance) / avgSpend : null;
-    const dayOfMonth = new Date().getDate();
+    const dayOfMonth = orgNow().getDate();
     const totalExpense = d.expenseBreakdown.reduce((s, p) => s + Number(p.value), 0);
     const widgets = layout.order.filter(id => !layout.hidden.includes(id));
     const label = Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, w.label]));
-    const hour = new Date().getHours();
+    const hour = orgNow().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
     const nextChit = chits.filter(c => c.nextDueDate && (c.status === 'ACTIVE' || c.status === 'PRIZED')).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate))[0];
     const post = can('POST_TRANSACTIONS');
@@ -83,7 +83,7 @@ export async function render(container, _params, isCurrent) {
     <div class="page dashboard">
         <div class="dash-bar">
             <div class="dash-hello"><b>${greeting}, ${esc((state.user?.fullName || '').split(' ')[0])}</b>
-                <span>${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></div>
+                <span>${orgNow().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></div>
             <span class="spacer"></span>
             ${post ? `<div class="quick-actions" id="quick-actions">
                 <button class="qa" data-qa="expense" title="Add expense (E)">${icon('arrow-out')}Expense<span class="kbd">E</span></button>
@@ -169,7 +169,7 @@ export async function render(container, _params, isCurrent) {
 const ymOf = date => String(date).slice(0, 7);
 /** The next n months as "YYYY-MM", this month first. */
 function monthsAhead(n) {
-    const now = new Date();
+    const now = orgNow();
     return Array.from({ length: n }, (_, i) => {
         const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -349,7 +349,7 @@ function accountsHtml(tiles) {
 function cashflowHtml(k) {
     const income = Number(k.monthIncome), expense = Number(k.monthExpense);
     const max = Math.max(income, expense, 1);
-    const now = new Date();
+    const now = orgNow();
     const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const projected = (expense / now.getDate()) * days;
     return `<div class="cashflow">
@@ -447,7 +447,7 @@ function analyse(d) {
     const runway = avgExpense ? liquid / avgExpense : null;
     const debtRatio = assets ? liabilities / assets : 0;
 
-    const now = new Date();
+    const now = orgNow();
     const day = now.getDate();
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const monthExpense = Number(k.monthExpense);

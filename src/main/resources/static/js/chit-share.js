@@ -9,6 +9,7 @@
  *              (location if they allow it); the device's details are recorded as evidence
  * Worked out when the page is opened, so it is always current. The token stays in the address fragment.
  */
+import { trackedFetch } from './core/busy.js';
 import { upiLogo } from './core/upi-logos.js';
 import { qrSvg } from './core/qr.js';
 import { printBond, openCamera, shrinkImage, verifyEvidence, chitRecitals } from './core/bond.js';
@@ -88,7 +89,7 @@ async function verifyWithServer() {
 }
 
 async function call(url, body) {
-    const r = await fetch(url, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const r = await trackedFetch(url, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.message || 'This link does not work any more.');
     return data;
@@ -483,7 +484,7 @@ function bindKyc() {
         const form = new FormData();
         form.append('docType', type);
         form.append('file', blob, name);
-        const r = await fetch(`/api/public/hosted-chits/${encodeURIComponent(token)}/kyc`, { method: 'POST', body: form });
+        const r = await trackedFetch(`/api/public/hosted-chits/${encodeURIComponent(token)}/kyc`, { method: 'POST', body: form });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.message || 'The photo could not be added');
         ch = data;

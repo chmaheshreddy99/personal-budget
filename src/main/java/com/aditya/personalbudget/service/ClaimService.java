@@ -143,7 +143,7 @@ public class ClaimService {
     }
 
     public ClaimSummary summary(List<ClaimView> views) {
-        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDate monthStart = OrgClock.today().withDayOfMonth(1);
         BigDecimal outstanding = Money.ZERO, lent = Money.ZERO, paidFor = Money.ZERO;
         BigDecimal interestDue = Money.ZERO, overdue = Money.ZERO, collected = Money.ZERO;
         int open = 0, overdueCount = 0;
@@ -184,7 +184,7 @@ public class ClaimService {
 
         Claim claim = new Claim();
         claim.setTenantId(UserContext.tenantId());
-        claim.setCreatedAt(LocalDateTime.now());
+        claim.setCreatedAt(OrgClock.now());
         claim.setStatus(ClaimStatus.OPEN);
         apply(claim, request, payer, receivable);
         claim = claims.save(claim);
@@ -454,7 +454,7 @@ public class ClaimService {
             posting.setAmount(d.amount());
             posting.setAutomatic(automatic);
             posting.setAccountId(target.equals(claim.getReceivableAccountId()) ? null : target);
-            posting.setCreatedAt(LocalDateTime.now());
+            posting.setCreatedAt(OrgClock.now());
             posting = postings.save(posting);
             if (d.amount().signum() > 0) {
                 String month = (d.firstPeriod() < d.period().period() ? "months " + d.firstPeriod() + "-" + d.period().period()
@@ -707,9 +707,9 @@ public class ClaimService {
                 postings.findByTenantId(tenantId).stream()
                         .sorted(Comparator.comparing(ClaimInterestPosting::getPeriodNo))
                         .collect(Collectors.groupingBy(ClaimInterestPosting::getClaimId)),
-                LocalDate.now(), attachments.countsByEntry(tenantId),
+                OrgClock.today(), attachments.countsByEntry(tenantId),
                 shares.findByTenantId(tenantId).stream().collect(Collectors.groupingBy(ClaimShare::getClaimId)),
-                LocalDateTime.now());
+                OrgClock.now());
     }
 
     private ClaimView toView(Claim c, Context ctx) {

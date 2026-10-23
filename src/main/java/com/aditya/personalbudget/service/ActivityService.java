@@ -47,7 +47,7 @@ public class ActivityService {
         try {
             ActivityEntry e = new ActivityEntry();
             e.setTenantId(user.tenantId());
-            e.setAt(LocalDateTime.now());
+            e.setAt(OrgClock.now());
             e.setUserId(user.userId());
             e.setActor(actorOf(user));
             e.setVia(user.viaLink() ? "LINK" : user.mobile() ? "MOBILE" : "WEB");

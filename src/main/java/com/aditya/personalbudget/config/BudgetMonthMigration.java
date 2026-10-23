@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.config;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.domain.entity.Budget;
 import com.aditya.personalbudget.storage.TsvDataStore;
 import org.slf4j.Logger;
@@ -36,7 +37,7 @@ public class BudgetMonthMigration implements ApplicationRunner {
         if (undated.isEmpty()) {
             return;
         }
-        String month = YearMonth.now().toString();
+        String month = OrgClock.month().toString();
         undated.forEach(b -> b.setMonth(month));
         store.saveAll(Budget.class, undated);
         log.info("{} budget(s) set for {}", undated.size(), month);

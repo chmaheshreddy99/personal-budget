@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.config;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.domain.entity.Category;
 import com.aditya.personalbudget.domain.entity.Organization;
 import com.aditya.personalbudget.service.DefaultChartOfAccounts;
@@ -22,14 +23,16 @@ import java.util.List;
 /**
  * Gives organizations set up before them the income and expense categories added to the defaults (Savings Income,
  * Shopping, Milk &amp; Dairy, Maid &amp; Household Help ...), once. A default is skipped where the organization already
- * has a category of that name or code (so a renamed "Shopping &amp; Clothing" stays as it is), and a marker file makes
- * sure categories someone deletes later do not come back.
+ * has a category of that name or code (so a renamed "Shopping &amp; Clothing" stays as it is), and a record kept
+ * with the data makes sure categories someone deletes later do not come back.
  */
 @Component
 @Order(7)
 public class NewDefaultCategories implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(NewDefaultCategories.class);
+    /** Recorded with the data (see TsvDataStore#isDone); the marker file is how older versions recorded it. */
+    private static final String STEP = "default-categories-2026-10";
     private static final String MARKER = ".added-default-categories-2026-10";
 
     private final TsvDataStore store;
@@ -42,11 +45,15 @@ public class NewDefaultCategories implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) throws IOException {
         Path marker = store.dataDir().resolve(MARKER);
-        if (Files.exists(marker)) {
+        boolean done = store.isDone(STEP);
+        if (done || Files.exists(marker)) {
+            if (!done) {
+                store.markDone(STEP);   // ran here before the record moved in with the data: keep it there now
+            }
             return;
         }
         int added = 0;
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         for (Organization org : store.findAll(Organization.class, o -> true)) {
             List<Category> own = store.findAll(Category.class, c -> c.getTenantId().equals(org.getId()));
             if (own.isEmpty()) {
@@ -74,7 +81,7 @@ public class NewDefaultCategories implements ApplicationRunner {
             store.saveAll(Category.class, rows);
             added += rows.size();
         }
-        Files.writeString(marker, "New default income and expense categories were added\n");
+        store.markDone(STEP);
         if (added > 0) {
             log.info("Added {} new default income / expense categor{}", added, added == 1 ? "y" : "ies");
         }

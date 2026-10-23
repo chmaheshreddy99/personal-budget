@@ -43,15 +43,15 @@ final class StorageRenames {
         try {
             int tables = 0;
             for (Map.Entry<String, String> t : TABLES.entrySet()) {
-                Path from = dataDir.resolve(t.getKey() + TsvTable.EXTENSION);
-                Path to = dataDir.resolve(t.getValue() + TsvTable.EXTENSION);
+                Path from = dataDir.resolve(t.getKey() + LocalFileStorage.EXTENSION);
+                Path to = dataDir.resolve(t.getValue() + LocalFileStorage.EXTENSION);
                 if (Files.exists(from) && Files.notExists(to)) {
                     Files.move(from, to);
                     tables++;
                 }
             }
             int files = 0;
-            try (DirectoryStream<Path> all = Files.newDirectoryStream(dataDir, "*" + TsvTable.EXTENSION)) {
+            try (DirectoryStream<Path> all = Files.newDirectoryStream(dataDir, "*" + LocalFileStorage.EXTENSION)) {
                 for (Path file : all) {
                     if (renameColumns(file)) {
                         files++;
