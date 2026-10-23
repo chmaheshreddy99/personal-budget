@@ -21,7 +21,7 @@ export function AccountDetail({ account, onBack, onAdd }: { account: Account; on
   const [stmt, setStmt] = useState<Statement | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
-  const { balance, pending } = liveBalance(account, app.queue, app.chitQueue);
+  const { balance, pending } = liveBalance(account, app.queue, app.chitQueue, app.records);
   const debitIn = account.accountClass === 'ASSET';
   const local = [
     ...app.queue.filter(e => e.paidFromId === account.id && e.status !== 'SYNCED').map(e => ({ id: e.clientId, date: e.date, text: e.narration || e.categoryName, amount: e.amount, failed: e.status === 'FAILED' })),

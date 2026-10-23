@@ -4,7 +4,7 @@
  */
 import { parseSms } from '../src/sms';
 import { money, moneyShort } from '../src/format';
-import { Account, DEFAULT_SETTINGS, LocalChitPayment, LocalExpense, liveBalance, normalizeUrl, visibleAccounts } from '../src/data';
+import { Account, DEFAULT_SETTINGS, LocalChitPayment, LocalRecord, LocalExpense, liveBalance, normalizeUrl, visibleAccounts } from '../src/data';
 
 const acc = (over: Partial<Account>): Account => ({
   id: 1, name: 'HDFC Savings', type: 'BANK', typeLabel: 'Bank Account', accountClass: 'ASSET', group: 'OWN', groupName: null, institution: 'HDFC',
@@ -70,4 +70,14 @@ test('construction, hosted chit and EMI accounts are hidden until turned on; cho
 test('a chit instalment paid on the phone comes off the account until synced', () => {
   const chits = [{ fromAccountId: 1, amount: 4500, status: 'QUEUED' }, { fromAccountId: 1, amount: 4500, status: 'SYNCED' }] as LocalChitPayment[];
   expect(liveBalance(accounts[0], [], chits)).toEqual({ balance: 45500, pending: 4500 });
+});
+
+test('paid for, lent, income, money back and EMIs recorded on the phone move the balance until synced', () => {
+  const r = (kind: string, flow: string, amount: number, status = 'QUEUED', accountId = 1) => ({ kind, flow, amount, status, accountId }) as unknown as LocalRecord;
+  const records = [r('CLAIM', 'OUT', 2000), r('INCOME', 'IN', 30000), r('REPAYMENT', 'IN', 500), r('EMI_PAY', 'OUT', 3000), r('GIFT', 'NONE', 1000),
+    r('INCOME', 'IN', 999, 'SYNCED'), r('CLAIM', 'OUT', 70, 'QUEUED', 2)];
+  // 50000 - 2000 + 30000 + 500 - 3000 (a gift not booked as an expense does not move money)
+  expect(liveBalance(accounts[0], [], [], records)).toEqual({ balance: 75500, pending: -25500 });
+  // paid for someone with the card: more is owed on it
+  expect(liveBalance(accounts[1], [], [], records)).toEqual({ balance: 12070, pending: 70 });
 });

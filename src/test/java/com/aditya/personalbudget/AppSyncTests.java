@@ -122,4 +122,53 @@ class AppSyncTests {
         assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("45500");
         assertThat(app.snapshot(30).chits().stream().filter(c -> c.id().equals(mine.id())).findFirst().orElseThrow().paidCount()).isEqualTo(1);
     }
+
+    @Test
+    void paidForLentIncomeAndGiftsRecordedOnThePhoneAreBookedOnce() {
+        Long bank = accounts.create(new AccountRequest(null, "Phone money " + System.nanoTime(), AccountType.BANK, "ICICI", null, BigDecimal.valueOf(20000),
+                LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
+        Long income = categories.list().stream().filter(c -> c.kind() == CategoryKind.INCOME && !c.system()).findFirst().orElseThrow().id();
+        Long giftCategory = categories.list().stream().filter(c -> c.kind() == CategoryKind.EXPENSE && !c.system()).findFirst().orElseThrow().id();
+        String friend = "Ravi " + System.nanoTime();
+
+        var paidFor = new AppSyncService.SyncClaim("claim-" + System.nanoTime(), "PAID_FOR", friend, "Movie tickets", BigDecimal.valueOf(1200),
+                LocalDate.now(), null, bank, null, null, null);
+        var lent = new AppSyncService.SyncClaim("lent-" + System.nanoTime(), "LENT", friend, "Hand loan", BigDecimal.valueOf(5000),
+                LocalDate.now(), LocalDate.now().plusMonths(3), bank, BigDecimal.valueOf(12), null, null);
+        var salary = new AppSyncService.SyncIncome("inc-" + System.nanoTime(), LocalDate.now(), BigDecimal.valueOf(30000), income, bank, "Salary", "Acme", null);
+        var gift = new AppSyncService.SyncGift("gift-" + System.nanoTime(), "GIVEN", LocalDate.now(), friend, "Friend", "Wedding", "CASH", null,
+                BigDecimal.valueOf(2000), null, null, "UPI", false, null, bank, giftCategory);
+        var first = app.sync(new SyncRequest(null, null, List.of(paidFor, lent), null, List.of(salary), List.of(gift), null));
+        assertThat(first).extracting(AppSyncService.SyncResult::status).containsExactly("CREATED", "CREATED", "CREATED", "CREATED");
+        // sent again (the answer was lost): nothing is booked twice
+        var again = app.sync(new SyncRequest(null, null, List.of(paidFor, lent), null, List.of(salary), List.of(gift), null));
+        assertThat(again).extracting(AppSyncService.SyncResult::status).containsOnly("DUPLICATE");
+        assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("41800");   // 20000 - 1200 - 5000 + 30000 - 2000
+
+        var snap = app.snapshot(30);
+        var owed = snap.claims().stream().filter(c -> c.party().equals(friend)).toList();
+        assertThat(owed).extracting(AppSyncService.AppClaim::kind).containsExactlyInAnyOrder("PAID_FOR", "LENT");
+        assertThat(snap.incomes()).anyMatch(i -> i.amount().compareTo(BigDecimal.valueOf(30000)) == 0 && bank.equals(i.intoId()));
+        assertThat(snap.gifts()).anyMatch(g -> g.person().equals(friend) && g.entryNo() != null);
+        assertThat(snap.features()).contains("EXPENSES", "INCOME", "GIFTS");
+        assertThat(snap.canRecord()).isTrue();
+
+        // money received back on what was paid for him
+        Long claimId = owed.stream().filter(c -> c.kind().equals("PAID_FOR")).findFirst().orElseThrow().id();
+        var back = new AppSyncService.SyncRepayment("back-" + System.nanoTime(), claimId, LocalDate.now(), BigDecimal.valueOf(1200), null, bank, null);
+        assertThat(app.sync(new SyncRequest(null, null, null, List.of(back), null, null, null)))
+                .singleElement().satisfies(r -> assertThat(r.status()).isEqualTo("CREATED"));
+        assertThat(app.snapshot(30).claims().stream().filter(c -> c.id().equals(claimId)).findFirst().orElseThrow().status()).isEqualTo("SETTLED");
+        assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("43000");
+
+        // a section not shared with the user is refused, item by item
+        UserContext.set(new CurrentUser(UserContext.get().userId(), "admin", "Admin", UserRole.ADMIN, UserContext.tenantId(), "x", "x", "INR",
+                java.util.EnumSet.of(Feature.EXPENSES), false, null, false));
+        var refused = app.sync(new SyncRequest(null, null, null, null,
+                List.of(new AppSyncService.SyncIncome("inc-no-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, income, bank, null, null, null)), null, null));
+        assertThat(refused).singleElement().satisfies(r -> {
+            assertThat(r.status()).isEqualTo("FAILED");
+            assertThat(r.message()).contains("Income");
+        });
+    }
 }

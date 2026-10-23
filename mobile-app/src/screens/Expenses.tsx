@@ -1,18 +1,27 @@
 /**
+ * The Expenses tab, in four parts (those shared with the user): Expenses, To collect (paid for someone and lent),
+ * EMIs and Income.
  * Expenses: those recorded on the phone (waiting, not accepted, waiting for approval, synced) with the server's,
- * by day. Each row is short; a tap opens it to every detail, its evidence (add a photo or a file) and, while it
+ * by day, this month, last month or all kept on the phone, with where the money went by category (tap one to see
+ * only it). Each row is short; a tap opens it to every detail, its evidence (add a photo or a file) and, while it
  * waits to be synced, to change or delete it. Search finds an expense by what it was, the shop, category or account.
  */
 import React, { useMemo, useState } from 'react';
 import { LayoutAnimation, Platform, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, UIManager, View } from 'react-native';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Clock, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
+import { AlertTriangle, ArrowDownLeft, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock, HandCoins, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EvidenceTarget, useApp } from '../state';
-import { LocalExpense } from '../data';
+import { LocalExpense, hasFeature } from '../data';
 import { date, dayLabel, isoDate, money, moneyShort } from '../format';
 import { Button, Card, Chip, Empty, GradientPanel, IconBubble, Pill, categoryLook } from '../ui';
 import { EvidenceStrip } from '../evidence';
 import { colors, radius, space } from '../theme';
+import { ClaimsList } from './Claims';
+import { EmisList } from './Emis';
+import { IncomeList } from './Income';
+import type { RecordMode } from './AddExpense';
+
+type Part = 'expenses' | 'collect' | 'emis' | 'income';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) UIManager.setLayoutAnimationEnabledExperimental(true);
 
@@ -28,15 +37,48 @@ const STATUS: Record<string, [string, string, string, any]> = {
   SYNCED: ['Synced', colors.green, colors.greenSoft, CheckCircle2],
 };
 
-export function ExpensesScreen({ onEdit }: { onEdit: (e: LocalExpense) => void }) {
+export function ExpensesScreen({ onEdit, onRecord }: { onEdit: (e: LocalExpense) => void; onRecord: (m: RecordMode) => void }) {
+  const app = useApp();
+  const [part, setPart] = useState<Part>('expenses');
+  const expenses = hasFeature(app.snapshot, 'EXPENSES');
+  const collect = (app.snapshot?.claims || []).filter(c => c.status !== 'SETTLED' && c.status !== 'WRITTEN_OFF').length
+    + app.records.filter(r => r.kind === 'CLAIM' && r.status !== 'SYNCED').length;
+  const parts: [Part, string, any, number][] = [
+    ...(expenses ? [['expenses', 'Expenses', Receipt, 0], ['collect', 'To collect', HandCoins, collect], ['emis', 'EMIs', CalendarClock, (app.snapshot?.emis || []).length]] as [Part, string, any, number][] : []),
+    ...(hasFeature(app.snapshot, 'INCOME') ? [['income', 'Income', ArrowDownLeft, 0]] as [Part, string, any, number][] : []),
+  ];
+  const current = parts.some(x => x[0] === part) ? part : parts[0]?.[0] || 'expenses';
+  const header = parts.length > 1 ? (
+    <View style={st.parts}>
+      {parts.map(([key, label, Icon, n]) => {
+        const on = key === current;
+        return (
+          <Pressable key={key} onPress={() => setPart(key)} style={[st.part, on && st.partOn]}>
+            <Icon color={on ? colors.white : colors.text2} size={15} />
+            <Text style={[st.partText, on && { color: colors.white }]} numberOfLines={1}>{label}</Text>
+            {n && !on ? <View style={st.partBadge}><Text style={st.partBadgeText}>{n > 9 ? '9+' : n}</Text></View> : null}
+          </Pressable>
+        );
+      })}
+    </View>
+  ) : null;
+  if (current === 'collect') return <ClaimsList header={header} onRecord={onRecord} />;
+  if (current === 'emis') return <EmisList header={header} />;
+  if (current === 'income') return <IncomeList header={header} onRecord={onRecord} />;
+  return <ExpenseList header={header} onEdit={onEdit} />;
+}
+
+function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: LocalExpense) => void }) {
   const app = useApp();
   const insets = useSafeAreaInsets();
-  const [filter, setFilter] = useState<'all' | 'phone' | 'month'>('all');
+  const [filter, setFilter] = useState<'all' | 'phone' | 'month' | 'last'>('month');
+  const [category, setCategory] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const month = isoDate().slice(0, 7);
+  const lastMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return isoDate(d).slice(0, 7); })();
 
-  const rows = useMemo<Row[]>(() => {
+  const base = useMemo<Row[]>(() => {
     const local: Row[] = app.queue.map(e => ({ key: e.clientId, date: e.date, title: e.narration || e.categoryName, party: e.party || null, paidFrom: e.paidFromName,
       category: e.categoryName, amount: e.amount, reference: e.reference || null, notes: e.notes, entryNo: e.entryNo, entryId: e.entryId, local: e, status: e.status }));
     const synced = new Set(app.queue.map(e => e.entryNo).filter(Boolean));
@@ -46,10 +88,23 @@ export function ExpensesScreen({ onEdit }: { onEdit: (e: LocalExpense) => void }
     let all = [...local, ...server];
     if (filter === 'phone') all = local;
     if (filter === 'month') all = all.filter(r => r.date.startsWith(month));
+    if (filter === 'last') all = all.filter(r => r.date.startsWith(lastMonth));
+    return all;
+  }, [app.queue, app.snapshot, filter, month, lastMonth]);
+
+  // where the money went in what is shown, by category (before a category is picked)
+  const byCategory = useMemo(() => {
+    const m = new Map<string, number>();
+    base.forEach(r => m.set(r.category, (m.get(r.category) || 0) + r.amount));
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [base]);
+
+  const rows = useMemo<Row[]>(() => {
+    let all = category ? base.filter(r => r.category === category) : base;
     const q = query.trim().toLowerCase();
     if (q) all = all.filter(r => [r.title, r.party, r.paidFrom, r.category, r.reference, r.entryNo, String(r.amount)].some(v => v && v.toLowerCase().includes(q)));
-    return all.sort((a, b) => b.date.localeCompare(a.date) || (b.local?.createdAt || 0) - (a.local?.createdAt || 0));
-  }, [app.queue, app.snapshot, filter, month, query]);
+    return [...all].sort((a, b) => b.date.localeCompare(a.date) || (b.local?.createdAt || 0) - (a.local?.createdAt || 0));
+  }, [base, category, query]);
 
   const sections = useMemo(() => {
     const m = new Map<string, Row[]>();
@@ -57,8 +112,15 @@ export function ExpensesScreen({ onEdit }: { onEdit: (e: LocalExpense) => void }
     return [...m.entries()].map(([d, data]) => ({ title: d, total: data.reduce((s, r) => s + r.amount, 0), data }));
   }, [rows]);
 
-  const monthTotal = [...app.queue.filter(e => e.status !== 'SYNCED'), ...(app.snapshot?.expenses || [])]
-    .filter(x => x.date.startsWith(month)).reduce((s, x) => s + x.amount, 0);
+  const spentIn = (m: string) => [...app.queue.filter(e => e.status !== 'SYNCED'), ...(app.snapshot?.expenses || []).filter(x => x.status !== 'REVERSED')]
+    .filter(x => x.date.startsWith(m)).reduce((s, x) => s + x.amount, 0);
+  const monthTotal = spentIn(month);
+  const lastTotal = spentIn(lastMonth);
+  // this month against the same days of last month
+  const dayNo = new Date().getDate();
+  const lastSoFar = [...(app.snapshot?.expenses || [])].filter(x => x.status !== 'REVERSED' && x.date.startsWith(lastMonth) && Number(x.date.slice(8, 10)) <= dayNo)
+    .reduce((s, x) => s + x.amount, 0);
+  const shownTotal = byCategory.reduce((s, [, v]) => s + v, 0);
   const waiting = app.queue.filter(e => e.status === 'QUEUED' || e.status === 'FAILED');
   const toggle = (k: string) => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpen(o => (o === k ? null : k)); };
 
@@ -73,9 +135,11 @@ export function ExpensesScreen({ onEdit }: { onEdit: (e: LocalExpense) => void }
       refreshControl={<RefreshControl refreshing={app.syncing} onRefresh={() => app.sync()} colors={[colors.ocean]} />}
       ListHeaderComponent={
         <View style={{ gap: space.m, marginBottom: space.s }}>
+          {header}
           <GradientPanel from={colors.navy} to={colors.navy2}>
             <Text style={st.label}>SPENT THIS MONTH</Text>
             <Text style={st.big}>{money(monthTotal)}</Text>
+            {lastTotal ? <Text style={st.vs}>{lastSoFar ? `${monthTotal <= lastSoFar ? '▼' : '▲'} ${money(Math.abs(monthTotal - lastSoFar))} ${monthTotal <= lastSoFar ? 'less' : 'more'} than by this day last month · ` : ''}last month {moneyShort(lastTotal)}</Text> : null}
             <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               <Pill text={`${waiting.length} waiting to sync`} fg={waiting.length ? '#ffd68a' : 'rgba(255,255,255,0.8)'} bg="rgba(255,255,255,0.12)" Icon={Clock} />
               <Pill text={`${app.queue.filter(e => e.status === 'PENDING').length} for approval`} fg="rgba(255,255,255,0.8)" bg="rgba(255,255,255,0.12)" Icon={Hourglass} />
@@ -88,11 +152,36 @@ export function ExpensesScreen({ onEdit }: { onEdit: (e: LocalExpense) => void }
               style={st.searchInput} autoCorrect={false} returnKeyType="search" />
             {query ? <Pressable onPress={() => setQuery('')} hitSlop={8}><X color={colors.muted} size={16} /></Pressable> : null}
           </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Chip label="All" selected={filter === 'all'} onPress={() => setFilter('all')} />
-            <Chip label="This month" selected={filter === 'month'} onPress={() => setFilter('month')} />
-            <Chip label="On the phone" Icon={Smartphone} selected={filter === 'phone'} onPress={() => setFilter('phone')} />
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Chip label="This month" selected={filter === 'month'} onPress={() => { setFilter('month'); setCategory(null); }} />
+            <Chip label="Last month" selected={filter === 'last'} onPress={() => { setFilter('last'); setCategory(null); }} />
+            <Chip label="All" selected={filter === 'all'} onPress={() => { setFilter('all'); setCategory(null); }} />
+            <Chip label="On the phone" Icon={Smartphone} selected={filter === 'phone'} onPress={() => { setFilter('phone'); setCategory(null); }} />
           </View>
+          {byCategory.length > 1 ? (
+            <Card style={{ gap: 8 }}>
+              <View style={st.catHead}><Text style={st.k}>Where it went</Text>{category ? <Pressable onPress={() => setCategory(null)} hitSlop={8}><Text style={st.link}>Show all</Text></Pressable> : null}</View>
+              {byCategory.slice(0, 5).map(([name, v]) => {
+                const look = categoryLook(name);
+                const on = category === name;
+                return (
+                  <Pressable key={name} onPress={() => setCategory(on ? null : name)} style={st.cat}>
+                    <IconBubble Icon={look.Icon} fg={look.fg} bg={look.bg} size={26} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <View style={st.catRow}>
+                        <Text style={[st.catName, on && { color: colors.ocean }]} numberOfLines={1}>{name}</Text>
+                        <Text style={st.catPct}>{Math.round((v / (shownTotal || 1)) * 100)}%</Text>
+                        <Text style={st.catAmt}>{moneyShort(v)}</Text>
+                      </View>
+                      <View style={st.catBar}><View style={[st.catFill, { width: `${(v / (byCategory[0][1] || 1)) * 100}%`, backgroundColor: look.fg }]} /></View>
+                    </View>
+                    {on ? <X color={colors.ocean} size={15} /> : null}
+                  </Pressable>
+                );
+              })}
+              {byCategory.length > 5 ? <Text style={st.sub}>…and {byCategory.length - 5} more categories</Text> : null}
+            </Card>
+          ) : null}
         </View>
       }
       renderSectionHeader={({ section }) => (
@@ -163,6 +252,22 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
 }
 
 const st = StyleSheet.create({
+  parts: { flexDirection: 'row', gap: 4, backgroundColor: colors.card, borderRadius: radius.m, padding: 4, borderWidth: 1, borderColor: colors.line },
+  part: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 36, borderRadius: 9, paddingHorizontal: 2 },
+  partOn: { backgroundColor: colors.navy },
+  partText: { fontSize: 12, fontWeight: '800', color: colors.text2, flexShrink: 1 },
+  partBadge: { minWidth: 16, height: 16, borderRadius: 8, backgroundColor: colors.violet, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  partBadgeText: { color: colors.white, fontSize: 9.5, fontWeight: '800' },
+  vs: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 4 },
+  catHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  link: { color: colors.ocean, fontWeight: '700', fontSize: 12.5 },
+  cat: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  catRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  catName: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.text },
+  catPct: { fontSize: 11.5, fontWeight: '700', color: colors.muted },
+  catAmt: { fontSize: 12.5, fontWeight: '800', color: colors.text, minWidth: 54, textAlign: 'right' },
+  catBar: { height: 4, borderRadius: 2, backgroundColor: colors.sunken, overflow: 'hidden' },
+  catFill: { height: 4, borderRadius: 2 },
   label: { color: 'rgba(255,255,255,0.6)', fontSize: 10.5, fontWeight: '800', letterSpacing: 1 },
   big: { color: colors.white, fontSize: 30, fontWeight: '800', marginTop: 2 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, borderRadius: radius.m, borderWidth: 1, borderColor: colors.line,

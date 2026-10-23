@@ -10,16 +10,38 @@ accounts, statements and expenses on the phone, so it works without the server, 
   group on under *Settings → Accounts shown*. There you can also show **only chosen accounts**. Hidden accounts are
   not listed, not offered to pay from and not kept offline. Tap an account for its statement. Lines are collapsed;
   tap one to see its full description, the other account, the amounts, the balance after it, and to add evidence.
-- **Expenses:** short rows by day. Tap a row to see every detail and its evidence, and to change or delete it while
-  it waits. Search by shop, category, account, reference or amount.
-- **Recording an expense (+):** the amount, the day, the category (type to search, or pick from the most used), the
-  account, what it was for, the shop, a reference and notes. **Evidence:** take a photo of the bill or attach an
+- **Expenses tab**, in four parts (only those shared with you show):
+  - **Expenses:** short rows by day, for this month, last month, everything kept on the phone or only what is on the
+    phone. The panel compares this month with the same days of last month, and **Where it went** shows the top
+    categories (tap one to see only its expenses). Tap a row to see every detail and its evidence, and to change or
+    delete it while it waits. Search by shop, category, account, reference or amount.
+  - **To collect:** money **paid for someone** and money **lent**, with what is still owed, how much came back and
+    when it is due (overdue first); what you borrowed or owe shows under *I owe*. Tap one for every detail and the
+    money received so far. **Received back** records money that came back (all, half or any amount, interest on money
+    lent, the account it came into), and **Remind** opens WhatsApp with a polite reminder.
+  - **EMIs:** every EMI running (card or loan), how far it is paid, what is due this month and next, and what is still
+    to pay. Tap one for the instalments to come; **Pay EMI** pays the next one (or 2, 3, 6) from the bank, or into
+    the card for a card EMI.
+  - **Income:** what came in this month, last month or in all, by day, with the top sources (tap one to see only it)
+    and **Add income**.
+- **Recording (+):** one sheet with four modes at the top: **Expense**, **Paid for** (a bill paid for someone, owed
+  back), **Lent** (with an optional due date and interest a year) and **Income** (the income source and the account
+  it came into). Paid for and Lent offer the people you recorded before. A bank SMS opens the same sheet, so a debit
+  can be recorded as money paid for someone too. An expense takes the amount, the day, the category (type to search,
+  or pick from the most used), the account, what it was for, the shop, a reference and notes. **Evidence:** take a photo of the bill or attach an
   image or PDF. It is kept on the phone and uploaded to the expense at the next sync, then deleted from the phone.
   The account's balance goes down at once, marked *waiting*, until it is synced.
 - **Chits:** the chits you are a member of, with progress, overdue instalments, the next due date, what is still to
   pay and their value now. Open a chit to see its instalments and **pay one**: choose the account and date, and
   enter the dividend, which comes off what you pay. This works offline too. The account's balance goes down at once,
   and the server books the payment once at the next sync.
+- **More → Gifts:** gifts given and received (cash, gold and silver by weight, items) by month, with what was given and
+  received this year. **People** shows the give-and-take with each person; tap one to see only theirs, and record the
+  next gift to or from them. **Gave a gift / Received one** records the person, relation, occasion, what it was and
+  its value; cash given can also be booked as an expense from an account in a category (Gifts & Donations by
+  default).
+- Everything recorded on the phone (paid for, lent, money received back, income, gifts, EMIs paid) works offline like
+  expenses: the account's balance moves at once, marked *waiting*, and the server books it once at the next sync.
 - **More → Balance sheet:** net worth, assets, liabilities and equity by group (tap a group to see its accounts),
   plus debt to assets, liquidity, emergency-fund months and monthly spend. A copy is kept for offline use.
 - **More → Bank SMS:** detects debit SMS from Indian banks and cards: SBI, HDFC, ICICI, Axis, Kotak, BoB, PNB, Union,
@@ -47,15 +69,17 @@ The app talks to the server at the address you enter: an ngrok URL such as `http
 |---|---|
 | `GET /api/meta/app` | Is the server there (no sign-in needed) |
 | `POST /api/auth/login` | Sign in: the app keeps the token, never the password |
-| `GET /api/app/snapshot?days=` | Every account with its balance and group, the expense categories, the latest expenses |
+| `GET /api/app/snapshot?days=` | Every account with its balance and group, the expense and income categories, the latest expenses, the chits, and (for the sections shared with the user) money paid for someone or lent with what came back, the EMIs, income and gifts |
 | `GET /api/app/accounts/{id}/statement?days=` | An account's statement |
-| `POST /api/app/expenses/sync` | `{expenses, chitPayments}` recorded on the phone, each with the app's own id |
+| `POST /api/app/expenses/sync` | `{expenses, chitPayments, claims, repayments, incomes, gifts, emiPayments}` recorded on the phone, each with the app's own id |
 | `POST /api/attachments?entryId=` (or `pendingId=`) | Evidence for an expense (multipart `file`) |
 | `GET /api/reports/balance-sheet` | The balance sheet |
 
-The server remembers each synced id permanently (`data/app_sync_keys.tbl`). An expense sent again, for example after
-a dropped connection, is answered `DUPLICATE` and is not booked twice. A user whose expenses need approval gets
-`PENDING`, and the expense waits under Approvals.
+The server remembers each synced id permanently (`data/app_sync_keys.tbl`). An item sent again, for example after a
+dropped connection, is answered `DUPLICATE` and is not booked twice. A user whose expenses need approval gets
+`PENDING`, and the expense waits under Approvals; money paid for someone or lent, income, gifts and EMIs cannot wait
+for approval, so for such a user they are answered `FAILED` with the reason (record them on the full site). Each item
+also needs its section: Expenses (paid for, lent, money back, EMIs), Income or Gifts.
 
 To share the server through ngrok: `ngrok http 8080`, then enter the `https://…ngrok-free.app` address in the app.
 
@@ -90,7 +114,8 @@ src/state.tsx           the app's state and actions (useApp), when to sync, the 
 src/sms.ts              reading bank SMS: amount, account, shop, reference, date, category
 src/native.ts           the Android module (store and SMS) from JavaScript
 src/evidence.tsx        taking / attaching evidence, thumbnails
-src/screens/*           Setup, Accounts, AccountDetail, Expenses, AddExpense, Chits, More, BalanceSheet, Detected (bank SMS), Settings
+src/screens/*           Setup, Accounts, AccountDetail, Expenses (with Claims, Emis, Income), AddExpense (the record sheet), Chits, More,
+                        Gifts, Budget, Categories, BalanceSheet, Detected (bank SMS), Settings
 src/ui.tsx, theme.ts    building blocks, icons (lucide), colours
 android/app/src/main/java/com/personalbudget/app/bridge/
                         BudgetBridgeModule (store, SMS), SmsReceiver (catches bank SMS, notifies)

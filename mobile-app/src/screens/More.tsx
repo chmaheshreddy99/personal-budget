@@ -1,15 +1,15 @@
-/** More: the budget, categories, the balance sheet, bank SMS (with how many wait to be recorded) and settings. */
+/** More: the budget, categories, gifts, the balance sheet, bank SMS (with how many wait to be recorded) and settings. */
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { ChartPie, ChevronRight, MessageSquareText, Scale, Settings as Cog, Tags } from 'lucide-react-native';
+import { ChartPie, ChevronRight, Gift, MessageSquareText, Scale, Settings as Cog, Tags } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
-import { isExpense } from '../data';
+import { hasFeature, isExpense } from '../data';
 import { ago, money } from '../format';
 import { Card, IconBubble } from '../ui';
 import { colors, space } from '../theme';
 
-export type MorePage = 'budget' | 'categories' | 'sheet' | 'sms' | 'settings';
+export type MorePage = 'budget' | 'categories' | 'gifts' | 'sheet' | 'sms' | 'settings';
 
 export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
   const app = useApp();
@@ -22,6 +22,7 @@ export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
       b && b.totalLimit ? `${money(b.totalSpent)} of ${money(b.totalLimit)} spent · ${money(b.totalRemaining)} left` : 'This month’s budgets and what is spent', 0],
     ['categories', Tags, colors.aqua, colors.aquaSoft, 'Categories',
       cats.length ? `${expense} expense · ${cats.length - expense} income` : 'Expense and income categories', 0],
+    ...(hasFeature(app.snapshot, 'GIFTS') ? [['gifts', Gift, colors.coral, colors.coralSoft, 'Gifts', giftLine(app), 0] as [MorePage, any, string, string, string, string, number]] : []),
     ['sheet', Scale, colors.green, colors.greenSoft, 'Balance sheet',
       app.sheet ? `Net worth ${money(app.sheet.netWorth)} · updated ${ago(app.sheet.fetchedAt)}` : 'What you own and owe, by group', 0],
     ['sms', MessageSquareText, colors.violet, colors.violetSoft, 'Bank SMS',
@@ -45,6 +46,15 @@ export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
       ))}
     </ScrollView>
   );
+}
+
+/** "3 given · 2 received this year", counting those waiting on the phone. */
+function giftLine(app: ReturnType<typeof useApp>): string {
+  const year = String(new Date().getFullYear());
+  const list = [...(app.snapshot?.gifts || []).map(g => ({ d: g.direction, date: g.date })),
+    ...app.records.filter(r => r.kind === 'GIFT').map(r => ({ d: r.payload.direction, date: r.date }))].filter(g => g.date.startsWith(year));
+  if (!list.length) return 'Given and received, person by person';
+  return `${list.filter(g => g.d === 'GIVEN').length} given · ${list.filter(g => g.d === 'RECEIVED').length} received this year`;
 }
 
 const st = StyleSheet.create({

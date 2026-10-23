@@ -6,6 +6,7 @@
  *   snapshot   every account with its balance, the expense and income categories, the latest expenses (from the server)
  *   budgets    this month's budgets against what was spent (from the server)
  *   queue      expenses recorded on the phone, not yet on the server (never trimmed)
+ *   records    paid for someone, lent, money received back, income, gifts and EMIs paid on the phone (never trimmed)
  *   stmt-<id>  an account's statement, for the most active accounts first, as far as the size allows
  *
  * Sync (on opening the app, coming back to it, the Sync button, and every minute while something waits): when the
@@ -49,10 +50,47 @@ export type Chit = {
   organizerUpi?: string | null; upiNote?: string | null;
 };
 
+/** Money paid for someone or lent (owed to me), or borrowed / a bill to pay (owed by me), with what came back. */
+export type ClaimRepayment = { date: string; principal: number; interest: number | null; accountName: string | null; writeOff: boolean };
+export type Claim = {
+  id: number; kind: 'LENT' | 'PAID_FOR' | 'BORROWED' | 'BILL_DUE'; kindLabel: string; party: string; narration: string | null; amount: number;
+  date: string; dueDate: string | null; status: 'OPEN' | 'PARTIAL' | 'SETTLED' | 'WRITTEN_OFF'; statusLabel: string; overdue: boolean;
+  outstanding: number; repaid: number; interestRate: number | null; interestDue: number | null; accountName: string | null; entryNo: string | null;
+  reference: string | null; notes: string | null; lastPaymentDate: string | null; repayments: ClaimRepayment[];
+};
+export const owedToMe = (c: { kind: string }) => c.kind === 'LENT' || c.kind === 'PAID_FOR';
+
+export type EmiInstalment = { seq: number; dueDate: string; emi: number; status: string; overdue: boolean; paidOn: string | null };
+/** An EMI plan: kind CARD (billed on a card, paid into it from the bank) or LOAN (paid from the bank). */
+export type Emi = {
+  id: number; kind: 'CARD' | 'LOAN' | string; narration: string; lender: string | null; emiAmount: number; months: number; paidCount: number;
+  left: number; dueNow: number; outstanding: number; stillToPay: number; overdueAmount: number; nextDueDate: string | null; nextAmount: number | null;
+  payAccountId: number | null; payAccountName: string | null; payAccountType: string | null; progressPercent: number; endDate: string | null;
+  instalments: EmiInstalment[];
+};
+
+export type ServerIncome = {
+  entryId: number; entryNo: string; date: string; narration: string; party: string | null; reference: string | null;
+  categoryId: number | null; categoryName: string; amount: number; intoId: number | null; into: string | null;
+};
+
+export type GiftKind = 'CASH' | 'GOLD' | 'SILVER' | 'ITEM' | 'OTHER';
+export type Gift = {
+  id: number; direction: 'GIVEN' | 'RECEIVED'; date: string; person: string; relation: string | null; occasion: string | null; kind: GiftKind;
+  description: string | null; value: number | null; quantity: number | null; unit: string | null; mode: string | null; donation: boolean;
+  notes: string | null; accountName: string | null; entryNo: string | null;
+};
+
 export type Snapshot = {
   serverTime: string; user: string; household: string; currency: string; accounts: Account[]; categories: Category[];
   expenses: ServerExpense[]; expensesFrom: string; chits?: Chit[]; canPayChits?: boolean; fetchedAt: number;
+  /** missing in a snapshot kept from an older server: then every section is assumed */
+  features?: string[]; canRecord?: boolean;
+  claims?: Claim[]; emis?: Emi[]; incomes?: ServerIncome[]; gifts?: Gift[];
 };
+
+/** Is a section shared with the user? (an older server does not say: yes) */
+export const hasFeature = (snap: Snapshot | null, f: string) => !snap?.features || snap.features.includes(f);
 
 export type LocalStatus = 'QUEUED' | 'FAILED' | 'SYNCED' | 'PENDING';
 
@@ -68,6 +106,18 @@ export type LocalChitPayment = {
   clientId: string; chitId: number; chitName: string; installmentId: number; installmentNo: number; dueAmount: number; dividend: number;
   amount: number; paidDate: string; fromAccountId: number; fromAccountName: string; createdAt: number; status: LocalStatus; message?: string;
   entryNo?: string; syncedAt?: number;
+};
+
+/**
+ * Something else recorded on the phone, not yet on the server: money paid for someone or lent (CLAIM), money received
+ * back on one (REPAYMENT), income (INCOME), a gift (GIFT) or EMIs paid (EMI_PAY). payload is what the server gets;
+ * the rest is what the phone shows meanwhile, and how it moves an account's balance (flow OUT of / IN to accountId).
+ */
+export type RecordKind = 'CLAIM' | 'REPAYMENT' | 'INCOME' | 'GIFT' | 'EMI_PAY';
+export type LocalRecord = {
+  clientId: string; kind: RecordKind; createdAt: number; status: LocalStatus; message?: string; entryNo?: string; entryId?: number; syncedAt?: number;
+  title: string; sub: string; date: string; amount: number; accountId: number | null; accountName: string; flow: 'OUT' | 'IN' | 'NONE';
+  payload: Record<string, any>;
 };
 
 /**
@@ -145,7 +195,8 @@ export function visibleAccounts(settings: Settings, accounts: Account[]): Accoun
 
 // ===================================================================== the store
 
-const K = { settings: 'settings', snapshot: 'snapshot', queue: 'queue', meta: 'meta', chitQueue: 'chit-queue', uploads: 'uploads', sheet: 'balance-sheet', budgets: 'budgets' };
+const K = { settings: 'settings', snapshot: 'snapshot', queue: 'queue', meta: 'meta', chitQueue: 'chit-queue', uploads: 'uploads', sheet: 'balance-sheet', budgets: 'budgets',
+  records: 'records' };
 const stmtKey = (id: number) => `stmt-${id}`;
 
 async function read<T>(key: string, fallback: T): Promise<T> {
@@ -169,6 +220,8 @@ export const store = {
   saveQueue: (q: LocalExpense[]) => write(K.queue, q),
   chitQueue: () => read<LocalChitPayment[]>(K.chitQueue, []),
   saveChitQueue: (q: LocalChitPayment[]) => write(K.chitQueue, q),
+  records: () => read<LocalRecord[]>(K.records, []),
+  saveRecords: (r: LocalRecord[]) => write(K.records, r),
   uploads: () => read<Upload[]>(K.uploads, []),
   saveUploads: (u: Upload[]) => write(K.uploads, u),
   balanceSheet: () => read<BalanceSheet | null>(K.sheet, null),
@@ -296,7 +349,7 @@ type SyncResult = { clientId: string; status: 'CREATED' | 'DUPLICATE' | 'PENDING
   message: string | null; pendingId: number | null };
 
 /** What waits on the phone to go to the server. */
-export type Outbox = { queue: LocalExpense[]; chits: LocalChitPayment[]; uploads: Upload[] };
+export type Outbox = { queue: LocalExpense[]; chits: LocalChitPayment[]; uploads: Upload[]; records: LocalRecord[] };
 
 export type SyncOutcome = Outbox & { ok: boolean; offline?: boolean; sent: number; failed: number; uploaded: number; message: string;
   snapshot?: Snapshot; sheet?: BalanceSheet | null; budgets?: Budgets | null };
@@ -317,12 +370,15 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
   let q = [...outbox.queue];
   let cq = [...outbox.chits];
   let ups = [...outbox.uploads];
+  let rs = [...outbox.records];
   let sent = 0, failed = 0, uploaded = 0;
   try {
     const waiting = q.filter(e => waits(e.status));
     const chitsWaiting = cq.filter(c => waits(c.status));
-    if (waiting.length || chitsWaiting.length) {
-      const n = waiting.length + chitsWaiting.length;
+    const recordsWaiting = rs.filter(r => waits(r.status));
+    const of = (k: RecordKind) => recordsWaiting.filter(r => r.kind === k).map(r => ({ ...r.payload, clientId: r.clientId }));
+    if (waiting.length || chitsWaiting.length || recordsWaiting.length) {
+      const n = waiting.length + chitsWaiting.length + recordsWaiting.length;
       onStep?.(`Sending ${n} item${n === 1 ? '' : 's'}…`);
       const results = await request<SyncResult[]>(settings, '/api/app/expenses/sync', {
         method: 'POST', timeoutMs: 30000,
@@ -331,6 +387,7 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
             narration: e.narration || null, party: e.party || null, reference: e.reference || null, notes: e.notes || null })),
           chitPayments: chitsWaiting.map(c => ({ clientId: c.clientId, chitId: c.chitId, installmentId: c.installmentId, paidDate: c.paidDate,
             fromAccountId: c.fromAccountId, dividend: c.dividend || null })),
+          claims: of('CLAIM'), repayments: of('REPAYMENT'), incomes: of('INCOME'), gifts: of('GIFT'), emiPayments: of('EMI_PAY'),
         },
       });
       const byId = new Map(results.map(r => [r.clientId, r]));
@@ -344,9 +401,10 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
       };
       q = q.map(settle);
       cq = cq.map(settle);
+      rs = rs.map(settle);
     }
-    // evidence of expenses the server now has goes to their entries (or, waiting for approval, to the request)
-    const booked = new Map(q.map(e => [e.clientId, e]));
+    // evidence of what the server now has goes to its entries (or, waiting for approval, to the request)
+    const booked = new Map<string, { entryId?: number; pendingId?: number }>([...q.map(e => [e.clientId, e] as const), ...rs.map(r => [r.clientId, r] as const)]);
     ups = ups.map(u => {
       if (!u.clientId || u.entryId || u.pendingId) return u;
       const e = booked.get(u.clientId);
@@ -377,9 +435,12 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
     // a chit payment is done once the server shows the instalment paid
     const paid = new Set((snapshot.chits || []).flatMap(c => c.installments).filter(i => i.status === 'PAID').map(i => i.id));
     cq = cq.filter(c => !(c.status === 'SYNCED' && (paid.has(c.installmentId) || Date.now() - (c.syncedAt || 0) > 86400000)));
+    // the rest is in the server's lists as soon as it is synced (an item with evidence still to upload waits for it)
+    rs = rs.filter(r => evidenceFor.has(r.clientId) || r.status !== 'SYNCED');
     await store.saveSnapshot(snapshot);
     await store.saveQueue(q);
     await store.saveChitQueue(cq);
+    await store.saveRecords(rs);
     let sheet: BalanceSheet | null = null;
     try {
       onStep?.('Getting the balance sheet…');
@@ -398,12 +459,13 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
     await cacheStatements(settings, snapshot);
     await enforceLimit(settings, snapshot);
     const bits = [sent ? `${sent} sent` : '', uploaded ? `${uploaded} evidence uploaded` : '', failed ? `${failed} not accepted` : ''].filter(Boolean);
-    return { ok: true, sent, failed, uploaded, queue: q, chits: cq, uploads: ups, snapshot, sheet, budgets, message: ['Synced', ...bits].join(' · ') };
+    return { ok: true, sent, failed, uploaded, queue: q, chits: cq, uploads: ups, records: rs, snapshot, sheet, budgets, message: ['Synced', ...bits].join(' · ') };
   } catch (e: any) {
     await store.saveQueue(q);
     await store.saveChitQueue(cq);
     await store.saveUploads(ups);
-    return { ok: false, sent, failed, uploaded, queue: q, chits: cq, uploads: ups,
+    await store.saveRecords(rs);
+    return { ok: false, sent, failed, uploaded, queue: q, chits: cq, uploads: ups, records: rs,
       message: e instanceof ApiError && e.status === 401 ? 'Please sign in again' : e.message || 'Sync failed' };
   }
 }
@@ -482,9 +544,11 @@ export async function fetchStatement(settings: Settings, id: number): Promise<St
  * The balance shown for an account: the server's, less what was spent from it on the phone and not yet synced
  * (expenses and chit instalments; a card's balance is what is owed, so it goes up).
  */
-export function liveBalance(a: Account, queue: LocalExpense[], chits: LocalChitPayment[] = []): { balance: number; pending: number } {
+export function liveBalance(a: Account, queue: LocalExpense[], chits: LocalChitPayment[] = [], records: LocalRecord[] = []): { balance: number; pending: number } {
+  const mine = records.filter(r => r.accountId === a.id && waits(r.status));
   const pending = queue.filter(e => e.paidFromId === a.id && waits(e.status)).reduce((s, e) => s + e.amount, 0)
-    + chits.filter(c => c.fromAccountId === a.id && waits(c.status)).reduce((s, c) => s + c.amount, 0);
+    + chits.filter(c => c.fromAccountId === a.id && waits(c.status)).reduce((s, c) => s + c.amount, 0)
+    + mine.reduce((s, r) => s + (r.flow === 'OUT' ? r.amount : r.flow === 'IN' ? -r.amount : 0), 0);
   const balance = a.accountClass === 'LIABILITY' ? a.balance + pending : a.balance - pending;
   return { balance, pending };
 }

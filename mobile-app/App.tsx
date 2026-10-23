@@ -1,7 +1,8 @@
 /**
  * Personal Budget for Android: the accounts with their balances, expenses (recorded offline and synced when the
- * server answers, with evidence), chits (paid offline too, or with Google Pay / PhonePe when the chit has a UPI ID),
- * and under More the budget, categories, the balance sheet, bank SMS offered as expenses, and settings. Signs in to the Personal Budget server first.
+ * server answers, with evidence), money paid for someone or lent (and received back), EMIs, income, chits (paid
+ * offline too, or with Google Pay / PhonePe when the chit has a UPI ID), and under More the budget, categories, gifts,
+ * the balance sheet, bank SMS offered as expenses, and settings. Signs in to the Personal Budget server first.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Modal, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +18,7 @@ import { SetupScreen } from './src/screens/Setup';
 import { AccountsScreen } from './src/screens/Accounts';
 import { AccountDetail } from './src/screens/AccountDetail';
 import { ExpensesScreen } from './src/screens/Expenses';
-import { AddExpense, Prefill } from './src/screens/AddExpense';
+import { AddExpense, Prefill, RecordMode } from './src/screens/AddExpense';
 import { DetectedScreen } from './src/screens/Detected';
 import { SettingsScreen } from './src/screens/Settings';
 import { ChitsScreen } from './src/screens/Chits';
@@ -25,6 +26,7 @@ import { BalanceSheetScreen } from './src/screens/BalanceSheet';
 import { BudgetScreen } from './src/screens/Budget';
 import { CategoriesScreen } from './src/screens/Categories';
 import { MorePage, MoreScreen } from './src/screens/More';
+import { GiftsScreen } from './src/screens/Gifts';
 
 type Tab = 'accounts' | 'expenses' | 'chits' | 'more';
 
@@ -79,11 +81,12 @@ function Shell() {
       <View style={{ flex: 1 }}>
         {account ? <AccountDetail account={account} onBack={() => setAccount(null)} onAdd={a => setAdding({ prefill: { paidFromId: a.id } })} />
           : tab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }} />
-          : tab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} />
+          : tab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
           : tab === 'chits' ? <ChitsScreen />
           : page === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />
           : page === 'categories' ? <CategoriesScreen onBack={() => setPage(null)} />
           : page === 'sheet' ? <BalanceSheetScreen onBack={() => setPage(null)} />
+          : page === 'gifts' ? <GiftsScreen onBack={() => setPage(null)} />
           : page === 'sms' ? <DetectedScreen onRecord={record} onBack={() => setPage(null)} />
           : page === 'settings' ? <SettingsScreen onBack={() => setPage(null)} />
           : <MoreScreen onOpen={setPage} />}

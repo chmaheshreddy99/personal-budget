@@ -7,14 +7,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, PermissionsAndroid, Platform, ToastAndroid } from 'react-native';
 import {
-  Account, BalanceSheet, Budgets, Chit, DEFAULT_SETTINGS, Installment, LocalChitPayment, LocalExpense, Meta, Settings, Snapshot, Statement, Upload,
-  enforceLimit, fetchBalanceSheet, fetchBudgets, fetchStatement, login, normalizeUrl, store, syncNow, thisMonth, usage, visibleAccounts,
+  Account, BalanceSheet, Budgets, Chit, DEFAULT_SETTINGS, Installment, LocalChitPayment, LocalExpense, LocalRecord, Meta, Settings, Snapshot, Statement, Upload,
+  enforceLimit, fetchBalanceSheet, fetchBudgets, fetchStatement, liveBalance, login, normalizeUrl, store, syncNow, thisMonth, usage, visibleAccounts,
 } from './data';
 import { uuid } from './format';
 import { PickedFile, RawSms, SmsPermissions, nativeFiles, nativeSettings, nativeSms, smsSupported } from './native';
 import { ParsedSms, parseSms } from './sms';
 
 type NewExpense = Omit<LocalExpense, 'clientId' | 'createdAt' | 'status'>;
+/** Paid for someone, lent, money back, income, a gift or EMIs paid, as recorded on the phone. */
+export type NewRecord = Omit<LocalRecord, 'clientId' | 'createdAt' | 'status'>;
 /** What a piece of evidence belongs to: an expense on the phone, or one on the server. */
 export type EvidenceTarget = { clientId?: string; entryId?: number; pendingId?: number; label: string };
 type Used = { total: number; cache: number; statements: number; evidence: number };
@@ -27,6 +29,8 @@ type AppContext = {
   accounts: Account[];
   queue: LocalExpense[];
   chitQueue: LocalChitPayment[];
+  /** paid for, lent, money back, income, gifts and EMIs recorded on the phone */
+  records: LocalRecord[];
   uploads: Upload[];
   sheet: BalanceSheet | null;
   /** this month's budgets (kept for offline use) */
@@ -49,6 +53,10 @@ type AppContext = {
   removeEvidence(id: string): Promise<void>;
   payChit(chit: Chit, inst: Installment, p: { paidDate: string; fromAccountId: number; dividend: number }): Promise<void>;
   removeChitPayment(clientId: string): Promise<void>;
+  addRecord(r: NewRecord, evidence?: PickedFile[]): Promise<LocalRecord>;
+  removeRecord(clientId: string): Promise<void>;
+  /** an account's balance with what waits on the phone */
+  balanceOf(a: Account): number;
   loadSheet(): Promise<BalanceSheet | null>;
   /** a month's budgets from the server (this month when none is given; offline: the kept copy of this month) */
   loadBudgets(month?: string): Promise<Budgets | null>;
@@ -78,6 +86,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [queue, setQueue] = useState<LocalExpense[]>([]);
   const [chitQueue, setChitQueue] = useState<LocalChitPayment[]>([]);
+  const [records, setRecords] = useState<LocalRecord[]>([]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [sheet, setSheet] = useState<BalanceSheet | null>(null);
   const [budgets, setBudgets] = useState<Budgets | null>(null);
@@ -89,8 +98,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [used, setUsed] = useState<Used>({ total: 0, cache: 0, statements: 0, evidence: 0 });
   const [perms, setPerms] = useState<SmsPermissions | null>(null);
   // the latest values for callbacks that outlive a render (timers, events)
-  const ref = useRef({ settings, queue, chitQueue, uploads, syncing, snapshot });
-  ref.current = { settings, queue, chitQueue, uploads, syncing, snapshot };
+  const ref = useRef({ settings, queue, chitQueue, uploads, syncing, snapshot, records });
+  ref.current = { settings, queue, chitQueue, uploads, syncing, snapshot, records };
 
   const refreshUsage = useCallback(async () => {
     const [u, evidence] = await Promise.all([usage(), nativeFiles.size().catch(() => 0)]);
@@ -110,22 +119,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const persistQueue = async (q: LocalExpense[]) => { setQueue(q); ref.current.queue = q; await store.saveQueue(q); };
   const persistChits = async (q: LocalChitPayment[]) => { setChitQueue(q); ref.current.chitQueue = q; await store.saveChitQueue(q); };
   const persistUploads = async (u: Upload[]) => { setUploads(u); ref.current.uploads = u; await store.saveUploads(u); };
+  const persistRecords = async (r: LocalRecord[]) => { setRecords(r); ref.current.records = r; await store.saveRecords(r); };
 
   const sync = useCallback(async (quiet = false) => {
-    const { settings: s, queue: q, chitQueue: cq, uploads: ups, syncing: busy } = ref.current;
+    const { settings: s, queue: q, chitQueue: cq, uploads: ups, records: rs, syncing: busy } = ref.current;
     if (busy) return;
     if (s.offline) { if (!quiet) notify('Working offline: turn it off in Settings to sync'); return; }
     setSyncing(true);
     ref.current.syncing = true;
     try {
-      const out = await syncNow(s, { queue: q, chits: cq, uploads: ups }, setStep);
+      const out = await syncNow(s, { queue: q, chits: cq, uploads: ups, records: rs }, setStep);
       // what was added on the phone while the sync ran is kept too
       const addedQ = ref.current.queue.filter(e => !q.some(x => x.clientId === e.clientId));
       const addedC = ref.current.chitQueue.filter(e => !cq.some(x => x.clientId === e.clientId));
       const addedU = ref.current.uploads.filter(e => !ups.some(x => x.id === e.id));
+      const addedR = ref.current.records.filter(e => !rs.some(x => x.clientId === e.clientId));
       await persistQueue([...addedQ, ...out.queue]);
       await persistChits([...addedC, ...out.chits]);
       await persistUploads([...addedU, ...out.uploads]);
+      await persistRecords([...addedR, ...out.records]);
       if (out.snapshot) setSnapshot(out.snapshot);
       if (out.sheet) setSheet(out.sheet);
       if (out.budgets) setBudgets(out.budgets);
@@ -150,10 +162,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- load what is on the phone, then sync
   useEffect(() => {
     (async () => {
-      const [s, snap, q, cq, ups, bs, bg, m] = await Promise.all([store.settings(), store.snapshot(), store.queue(), store.chitQueue(), store.uploads(),
-        store.balanceSheet(), store.budgets(), store.meta()]);
-      setSettings(s); setSnapshot(snap); setQueue(q); setChitQueue(cq); setUploads(ups); setSheet(bs); setBudgets(bg); setMeta(m);
-      ref.current = { settings: s, queue: q, chitQueue: cq, uploads: ups, syncing: false, snapshot: snap };
+      const [s, snap, q, cq, ups, bs, bg, m, rs] = await Promise.all([store.settings(), store.snapshot(), store.queue(), store.chitQueue(), store.uploads(),
+        store.balanceSheet(), store.budgets(), store.meta(), store.records()]);
+      setSettings(s); setSnapshot(snap); setQueue(q); setChitQueue(cq); setUploads(ups); setSheet(bs); setBudgets(bg); setMeta(m); setRecords(rs);
+      ref.current = { settings: s, queue: q, chitQueue: cq, uploads: ups, syncing: false, snapshot: snap, records: rs };
       setReady(true);
       // the receiver's own switch follows the app's setting (it is what decides whether an SMS is caught)
       if (smsSupported && s.smsEnabled) nativeSms.setEnabled(true).catch(() => undefined);
@@ -174,8 +186,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (ref.current.settings.token && !ref.current.settings.offline) sync(true);
     });
     const timer = setInterval(() => {
-      const { settings: s, queue: q, chitQueue: cq, uploads: ups } = ref.current;
-      if (s.token && !s.offline && (q.some(e => e.status === 'QUEUED') || cq.some(c => c.status === 'QUEUED') || ups.some(u => u.status === 'WAITING'))) sync(true);
+      const { settings: s, queue: q, chitQueue: cq, uploads: ups, records: rs } = ref.current;
+      if (s.token && !s.offline && (q.some(e => e.status === 'QUEUED') || cq.some(c => c.status === 'QUEUED') || rs.some(r => r.status === 'QUEUED')
+        || ups.some(u => u.status === 'WAITING'))) sync(true);
     }, 60000);
     const off = nativeSms.onSms(sms => setRaw(list => (list.some(x => x.id === sms.id) ? list : [...list, sms])));
     return () => { sub.remove(); clearInterval(timer); off(); };
@@ -257,6 +270,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeChitPayment = useCallback(async (clientId: string) => {
     await persistChits(ref.current.chitQueue.filter(c => c.clientId !== clientId));
   }, []);
+
+  const addRecord = useCallback(async (r: NewRecord, evidence: PickedFile[] = []) => {
+    const item: LocalRecord = { ...r, clientId: uuid(), createdAt: Date.now(), status: 'QUEUED' };
+    await persistRecords([item, ...ref.current.records]);
+    if (evidence.length) await addEvidence({ clientId: item.clientId, label: r.title }, evidence);
+    soon();
+    return item;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addEvidence]);
+
+  const removeRecord = useCallback(async (clientId: string) => {
+    const mine = ref.current.uploads.filter(u => u.clientId === clientId && !u.entryId && !u.pendingId);
+    await Promise.all(mine.map(u => nativeFiles.remove(u.path)));
+    await persistUploads(ref.current.uploads.filter(u => !mine.includes(u)));
+    await persistRecords(ref.current.records.filter(x => x.clientId !== clientId));
+    refreshUsage();
+  }, [refreshUsage]);
 
   const loadSheet = useCallback(async () => {
     const s = ref.current.settings;
@@ -341,6 +371,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUsage, sync]);
 
   const accounts = useMemo(() => visibleAccounts(settings, snapshot?.accounts || []), [settings, snapshot]);
+  const balanceOf = useCallback((a: Account) => liveBalance(a, queue, chitQueue, records).balance, [queue, chitQueue, records]);
 
   // an SMS is matched to the accounts shown first, then to any of my own
   const readSms = useCallback((body: string, sender = 'SMS') => {
@@ -371,8 +402,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [raw, snapshot, queue, accounts]);
 
   const value: AppContext = {
-    ready, settings, snapshot, accounts, queue, chitQueue, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
-    saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment, loadSheet, loadBudgets,
+    ready, settings, snapshot, accounts, queue, chitQueue, records, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
+    saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment,
+    addRecord, removeRecord, balanceOf, loadSheet, loadBudgets,
     statement, dismissSms, scanInbox, enableSms, checkPerms, readSms, clearCache, notify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

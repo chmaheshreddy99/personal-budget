@@ -34,10 +34,10 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
   const failed = [...app.queue, ...app.chitQueue].filter(e => e.status === 'FAILED').length;
 
   const own = accounts.filter(a => a.group === 'OWN');
-  const signed = (a: Account) => (a.accountClass === 'ASSET' ? 1 : -1) * liveBalance(a, app.queue, app.chitQueue).balance;
+  const signed = (a: Account) => (a.accountClass === 'ASSET' ? 1 : -1) * liveBalance(a, app.queue, app.chitQueue, app.records).balance;
   const netWorth = own.reduce((s, a) => s + signed(a), 0);
-  const cash = own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)).reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue).balance, 0);
-  const cards = own.filter(a => a.type === 'CREDIT_CARD').reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue).balance, 0);
+  const cash = own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)).reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
+  const cards = own.filter(a => a.type === 'CREDIT_CARD').reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
 
   const byName = (list: Account[]) => {
     const m = new Map<string, Account[]>();
@@ -103,7 +103,7 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
       {OWN_ORDER.map(([label, test]) => {
         const list = own.filter(test);
         if (!list.length) return null;
-        const total = list.reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue).balance, 0);
+        const total = list.reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
         return (
           <Card key={label} style={st.groupCard}>
             <Pressable style={st.groupHead} onPress={() => toggle(label)}>
@@ -146,7 +146,7 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
 
 function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   const app = useApp();
-  const { balance, pending } = liveBalance(a, app.queue, app.chitQueue);
+  const { balance, pending } = liveBalance(a, app.queue, app.chitQueue, app.records);
   const card = a.type === 'CREDIT_CARD';
   const available = card && a.creditLimit ? a.creditLimit - balance : null;
   return (
