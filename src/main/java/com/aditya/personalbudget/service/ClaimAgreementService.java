@@ -394,7 +394,7 @@ public class ClaimAgreementService {
         ClaimAgreement a = active(token);
         String phone = verify(a, r.phone());
         if (!ClaimAgreement.DRAFT.equals(a.getStatus())) {
-            throw new BusinessException("This agreement was already accepted on " + a.getAcceptedAt().format(DAY));
+            throw new BusinessException("This agreement was already accepted on " + OrgClock.toOrg(a.getAcceptedAt()).format(DAY));
         }
         if (!Boolean.TRUE.equals(r.agree())) {
             throw new BusinessException("Tick the box to confirm you have read and accept the agreement");
@@ -657,6 +657,7 @@ public class ClaimAgreementService {
 
     private static <T> T asTenant(Organization tenant, Supplier<T> work) {
         CurrentUser previous = UserContext.current().orElse(null);
+        OrgClock.showFor(tenant.getId());   // the answer is written after this: in the organization's zone
         UserContext.set(new CurrentUser(null, "agreement-link", "Agreement link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
                 tenant.getName(), tenant.getCurrency(), Feature.all(), false));
         try {

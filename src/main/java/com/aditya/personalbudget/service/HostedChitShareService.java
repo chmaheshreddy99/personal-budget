@@ -396,7 +396,7 @@ public class HostedChitShareService {
         }
         HostedChitAgreement a = agreements.findById(s.getAgreementId()).orElseThrow(() -> new BusinessException("This agreement no longer exists"));
         if (!HostedChitAgreement.DRAFT.equals(a.getStatus())) {
-            throw new BusinessException("This agreement was already accepted on " + a.getAcceptedAt().toLocalDate());
+            throw new BusinessException("This agreement was already accepted on " + OrgClock.toOrg(a.getAcceptedAt()).toLocalDate());
         }
         if (!Boolean.TRUE.equals(r.agree())) {
             throw new BusinessException("Tick the box to confirm you agree");
@@ -715,6 +715,7 @@ public class HostedChitShareService {
 
     private static <T> T asTenant(Organization tenant, Supplier<T> work) {
         CurrentUser previous = UserContext.current().orElse(null);
+        OrgClock.showFor(tenant.getId());   // the answer is written after this: in the organization's zone
         UserContext.set(new CurrentUser(null, "share", "Chit link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
                 tenant.getName(), tenant.getCurrency(), Feature.all(), false));
         try {

@@ -8,7 +8,7 @@ import { api } from '../core/api.js';
 import { state, can, FEATURES, ROLE_SECTIONS } from '../core/store.js';
 import { panel, table, esc, field, readForm, openModal, toast, confirmDialog, stat } from '../core/ui.js';
 import { icon } from '../core/icons.js';
-import { date } from '../core/format.js';
+import { date, setTimeZone } from '../core/format.js';
 
 const TABS = [
     { key: 'users', label: 'Users', iconName: 'users', permission: 'MANAGE_USERS' },
@@ -173,9 +173,9 @@ async function openUserForm(user, reload) {
 // ===================================================================== organizations (tenants on the server)
 
 async function drawTenants(body, actions, reload) {
-    const tenants = await api.get('/admin/tenants');
+    const [tenants, zones] = await Promise.all([api.get('/admin/tenants'), api.get('/admin/time-zones').catch(() => [])]);
     actions.innerHTML = `<button class="btn primary" id="new-tenant">${icon('plus')}Organization</button>`;
-    actions.querySelector('#new-tenant').addEventListener('click', () => openTenantForm(null, reload));
+    actions.querySelector('#new-tenant').addEventListener('click', () => openTenantForm(null, zones, reload));
 
     body.innerHTML = panel({
         title: 'Organizations', iconName: 'building', bodyClass: 'flush', sub: 'Each organization has its own isolated books, users and menu',
@@ -184,6 +184,7 @@ async function drawTenants(body, actions, reload) {
             { label: 'Menu', render: t => `<span class="access-cell" title="${esc(FEATURES.filter(f => t.features.includes(f.key)).map(f => f.label).join(', '))}">
                 ${t.limited ? `<span class="badge">${icon('eye')}${t.features.length} of ${FEATURES.length}</span>` : `<span class="badge gray">${icon('eye')}Everything</span>`}</span>` },
             { label: 'Currency', render: t => esc(t.currency) },
+            { label: 'Time zone', render: t => t.timeZone ? `<span class="small">${icon('clock')} ${esc(t.timeZone.replace(/_/g, ' '))}</span>` : '<span class="small muted">Server zone</span>' },
             { label: 'Users', align: 'r', render: t => t.userCount },
             { label: 'Accounts', align: 'r', render: t => t.accountCount },
             { label: 'Status', render: t => t.active ? `<span class="badge good">${icon('check')}Active</span>` : `<span class="badge gray">${icon('lock')}Inactive</span>` },
@@ -193,12 +194,18 @@ async function drawTenants(body, actions, reload) {
     });
     body.addEventListener('click', e => {
         const edit = e.target.closest('[data-edit]');
-        if (edit) openTenantForm(tenants.find(t => t.id === Number(edit.dataset.edit)), reload);
+        if (edit) openTenantForm(tenants.find(t => t.id === Number(edit.dataset.edit)), zones, reload);
     });
 }
 
-function openTenantForm(tenant, reload) {
-    const t = tenant || { currency: 'INR', active: true, features: FEATURES.map(f => f.key) };
+/** A new organization starts in this browser's zone, when the server knows it. */
+const browserZone = zones => {
+    const own = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zones.find(z => z.id === own || (own === 'Asia/Calcutta' && z.id === 'Asia/Kolkata'))?.id || '';
+};
+
+function openTenantForm(tenant, zones, reload) {
+    const t = tenant || { currency: 'INR', active: true, features: FEATURES.map(f => f.key), timeZone: browserZone(zones) };
     openModal({
         title: tenant ? `Edit ${tenant.name}` : 'New organization', iconName: 'building',
         body: `<form class="form-grid two">
@@ -206,6 +213,9 @@ function openTenantForm(tenant, reload) {
             ${field({ label: 'Organization code', name: 'code', value: t.code, required: true, hint: tenant ? 'Used at sign-in; it cannot change' : '2-30 lowercase letters, digits or hyphens; used at sign-in',
                       attrs: tenant ? 'readonly' : 'pattern="[a-z0-9][a-z0-9-]{1,29}"' })}
             ${field({ label: 'Currency', name: 'currency', value: t.currency, attrs: 'maxlength="3"' })}
+            ${field({ label: 'Time zone', name: 'timeZone', type: 'select', value: t.timeZone || '', span: 'span-2',
+                      options: [{ value: '', label: "The server's time zone" }, ...zones.map(z => ({ value: z.id, label: z.label }))],
+                      hint: 'Every date and time of the organization is shown in it, and its "today" is counted in it' })}
             ${tenant ? field({ label: 'Active', name: 'active', type: 'checkbox', value: t.active }) : `
                 <div class="section-title span-2">First admin of the organization</div>
                 ${field({ label: 'Admin username', name: 'adminUsername', required: true })}
@@ -237,8 +247,13 @@ function openTenantForm(tenant, reload) {
                 const features = [...form.querySelectorAll('[data-feature]')].filter(i => i.checked).map(i => i.dataset.feature);
                 if (!features.length) throw new Error('Give the organization at least one menu item');
                 data.features = features.length === FEATURES.length ? FEATURES.map(f => f.key) : features;
+                data.timeZone = form.timeZone.value;   // empty: the server's
                 if (tenant) await api.put(`/admin/tenants/${tenant.id}`, data);
                 else await api.post('/admin/tenants', data);
+                if (tenant && tenant.id === state.user.tenantId) {   // our own: today and the times move with it
+                    state.user = await api.get('/auth/me');
+                    setTimeZone(state.user.timeZone);
+                }
                 toast('Organization saved');
                 reload();
             },

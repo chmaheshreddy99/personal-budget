@@ -174,7 +174,7 @@ public class UserService {
                 .map(t -> new TenantView(t.getId(), t.getCode(), t.getName(), t.getCurrency(),
                         Boolean.TRUE.equals(t.getActive()), t.getCreatedAt(),
                         users.findByTenantId(t.getId()).size(), accounts.findByTenantId(t.getId()).size(),
-                        FeaturePolicy.ofTenant(t), t.getFeatures() != null))
+                        FeaturePolicy.ofTenant(t), t.getFeatures() != null, t.getTimeZone()))
                 .toList();
     }
 
@@ -189,6 +189,7 @@ public class UserService {
                 null, request.adminPassword(), UserRole.ADMIN));
         Organization tenant = tenants.findById(admin.getTenantId()).orElseThrow();
         tenant.setFeatures(tenantFeatures(request.features()));
+        tenant.setTimeZone(OrgTimeZoneService.valid(request.timeZone()));
         tenants.save(tenant);
     }
 
@@ -206,7 +207,11 @@ public class UserService {
         if (request.features() != null) {
             tenant.setFeatures(tenantFeatures(request.features()));
         }
+        if (request.timeZone() != null) {
+            tenant.setTimeZone(OrgTimeZoneService.valid(request.timeZone()));
+        }
         tenants.save(tenant);
+        OrgClock.forget();   // it may be the signed-in user's own organization
     }
 
     /** The sections the signed-in user's organization has. */

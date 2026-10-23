@@ -61,6 +61,7 @@ class BackupAndTimeZoneTests {
     @Autowired BackupService backup;
     @Autowired OrgTimeZoneService timeZones;
     @Autowired TsvDataStore store;
+    @Autowired tools.jackson.databind.ObjectMapper json;
 
     @BeforeEach
     void signIn() {
@@ -111,19 +112,27 @@ class BackupAndTimeZoneTests {
     }
 
     @Test
-    void timesAreRecordedInTheOrganizationsTimeZone() {
+    void timesAreKeptInOneZoneAndShownInTheOrganizationsZone() {
         String far = ZoneId.systemDefault().getId().equals("Pacific/Kiritimati") ? "Pacific/Pago_Pago" : "Pacific/Kiritimati";
+        Long id = accounts.create(account("Zoned " + System.nanoTime())).id();
+        LocalDateTime recorded = accountRows.findById(id).orElseThrow().getCreatedAt();
+
         OrgTimeZoneService.TimeZoneView view = timeZones.save(new OrgTimeZoneService.TimeZoneRequest(far));
         assertThat(view.timeZone()).isEqualTo(far);
         assertThat(OrgClock.zone()).isEqualTo(ZoneId.of(far));
-        assertThat(Duration.between(LocalDateTime.now(ZoneId.of(far)), OrgClock.now()).abs()).isLessThan(Duration.ofMinutes(1));
-        Long id = accounts.create(account("Zoned " + System.nanoTime())).id();
-        LocalDateTime created = accountRows.findById(id).orElseThrow().getCreatedAt();
-        assertThat(Duration.between(LocalDateTime.now(ZoneId.of(far)), created).abs()).isLessThan(Duration.ofMinutes(1));
+        assertThat(OrgClock.today()).isEqualTo(java.time.LocalDate.now(ZoneId.of(far)));
+        // recorded in the storage zone, whatever the organization's zone ...
+        assertThat(Duration.between(LocalDateTime.now(OrgClock.storageZone()), OrgClock.now()).abs()).isLessThan(Duration.ofMinutes(1));
+        // ... and every time the API sends is on the organization's clock, old ones included; what it receives goes back
+        String sent = json.writeValueAsString(recorded);
+        LocalDateTime shown = recorded.atZone(OrgClock.storageZone()).withZoneSameInstant(ZoneId.of(far)).toLocalDateTime();
+        assertThat(sent).isEqualTo("\"" + shown.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "\"");
+        assertThat(json.readValue(sent, LocalDateTime.class)).isEqualTo(recorded);
 
         assertThatThrownBy(() -> timeZones.save(new OrgTimeZoneService.TimeZoneRequest("Mars/Olympus"))).isInstanceOf(BusinessException.class);
         assertThat(timeZones.save(new OrgTimeZoneService.TimeZoneRequest("")).timeZone()).isNull();
-        assertThat(OrgClock.zone()).isEqualTo(ZoneId.systemDefault());
+        assertThat(OrgClock.zone()).isEqualTo(OrgClock.storageZone());
+        assertThat(json.writeValueAsString(recorded)).isEqualTo("\"" + recorded.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "\"");
     }
 
     @Test

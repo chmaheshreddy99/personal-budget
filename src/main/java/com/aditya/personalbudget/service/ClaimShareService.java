@@ -152,6 +152,7 @@ public class ClaimShareService {
         s.setLastViewedAt(OrgClock.now());
         shares.save(s);
         CurrentUser previous = UserContext.current().orElse(null);
+        OrgClock.showFor(tenant.getId());   // the answer is written after this: in the organization's zone
         UserContext.set(new CurrentUser(null, "statement", "Statement link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
                 tenant.getName(), tenant.getCurrency(), Feature.all(), false));
         try {

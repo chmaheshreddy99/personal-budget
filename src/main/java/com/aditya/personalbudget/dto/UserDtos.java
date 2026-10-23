@@ -36,7 +36,9 @@ public final class UserDtos {
             @NotBlank @Size(max = 100) String fullName,
             @NotBlank @Size(min = 3, max = 50) String username,
             @Email @Size(max = 120) String email,
-            @NotBlank @Size(min = 6, max = 100) String password) {
+            @NotBlank @Size(min = 6, max = 100) String password,
+            /* the new organization's time zone (the browser's, "Asia/Kolkata"); empty: the server's */
+            @Size(max = 40) String timeZone) {
     }
 
     public record MeView(Long userId, String username, String fullName, String email, UserRole role, String roleLabel,
@@ -92,12 +94,16 @@ public final class UserDtos {
             @Size(max = 100) String adminFullName,
             @Size(min = 6, max = 100) String adminPassword,
             /* the sections (menu items) the organization has; null = every section */
-            Set<Feature> features) {
+            Set<Feature> features,
+            /* the time zone its times are shown in ("Asia/Kolkata"); empty: the server's; null (an update): unchanged */
+            @Size(max = 40) String timeZone) {
     }
 
     public record TenantView(Long id, String code, String name, String currency, boolean active,
                              LocalDateTime createdAt, long userCount, long accountCount,
                              /* the sections the organization has, and whether that is fewer than all */
-                             Set<Feature> features, boolean limited) {
+                             Set<Feature> features, boolean limited,
+                             /* its own time zone (null: the server's applies) */
+                             String timeZone) {
     }
 }

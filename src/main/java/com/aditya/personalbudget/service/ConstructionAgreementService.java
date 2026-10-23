@@ -310,7 +310,7 @@ public class ConstructionAgreementService {
         if (!"DRAFT".equals(a.getStatus())) throw new BusinessException("This agreement is already " + a.getStatus().toLowerCase());
         a.setStatus("SIGNED");
         a.setAcceptedName(ConstructionService.blank(r.name()) != null ? ActivityService.cut(r.name().trim(), 100) : a.getPartyName());
-        a.setAcceptedAt(r.on() != null ? r.on().atStartOfDay() : OrgClock.now());
+        a.setAcceptedAt(r.on() != null ? OrgClock.fromOrg(r.on().atStartOfDay()) : OrgClock.now());
         a.setAcceptedUserAgent("Signed in person on paper, recorded by " + UserContext.get().fullName());
         if (a.getTokenHash() != null && a.getLinkRevokedAt() == null) a.setLinkRevokedAt(OrgClock.now());
         core.agreements().save(a);
@@ -477,7 +477,7 @@ public class ConstructionAgreementService {
         if ("FLAT_SALE".equals(a.getKind()) && a.getRefId() != null) {
             core.sales().findById(a.getRefId()).filter(s -> "BOOKED".equals(s.getStatus())).ifPresent(s -> {
                 s.setStatus("AGREED");
-                s.setAgreementOn(a.getAcceptedAt().toLocalDate());
+                s.setAgreementOn(OrgClock.toOrg(a.getAcceptedAt()).toLocalDate());
                 core.sales().save(s);
             });
         }
@@ -659,6 +659,7 @@ public class ConstructionAgreementService {
 
     private static <T> T asTenant(Organization tenant, Supplier<T> work) {
         CurrentUser previous = UserContext.current().orElse(null);
+        OrgClock.showFor(tenant.getId());   // the answer is written after this: in the organization's zone
         UserContext.set(new CurrentUser(null, "agreement-link", "Agreement link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
                 tenant.getName(), tenant.getCurrency(), Feature.all(), false));
         try {

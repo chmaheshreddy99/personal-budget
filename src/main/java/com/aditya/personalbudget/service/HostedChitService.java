@@ -655,7 +655,7 @@ public class HostedChitService {
     /** Nothing in a closed chit changes: the organiser re-opens it first. */
     static void requireOpen(HostedChit c) {
         if (closed(c)) {
-            throw new BusinessException(c.getName() + " is closed" + (c.getClosedAt() != null ? " (" + c.getClosedAt().toLocalDate() + ")" : "")
+            throw new BusinessException(c.getName() + " is closed" + (c.getClosedAt() != null ? " (" + OrgClock.toOrg(c.getClosedAt()).toLocalDate() + ")" : "")
                     + ": its payments, payouts and settings are final. Re-open it to make a change.");
         }
     }

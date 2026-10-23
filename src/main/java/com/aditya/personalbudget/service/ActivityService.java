@@ -68,8 +68,8 @@ public class ActivityService {
         Long tenantId = UserContext.tenantId();
         String text = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
         return entries.findByTenantId(tenantId).stream()
-                .filter(e -> from == null || !e.getAt().toLocalDate().isBefore(from))
-                .filter(e -> to == null || !e.getAt().toLocalDate().isAfter(to))
+                .filter(e -> from == null || !OrgClock.toOrg(e.getAt()).toLocalDate().isBefore(from))
+                .filter(e -> to == null || !OrgClock.toOrg(e.getAt()).toLocalDate().isAfter(to))
                 .filter(e -> actor == null || actor.isBlank() || e.getActor().equals(actor))
                 .filter(e -> area == null || area.isBlank() || e.getArea().equals(area))
                 .filter(e -> text.isEmpty() || (e.getSummary() + " " + e.getActor() + " " + e.getArea() + " " + e.getAction())
@@ -89,7 +89,7 @@ public class ActivityService {
     public long clear(LocalDate before, boolean dryRun) {
         Long tenantId = UserContext.tenantId();
         List<ActivityEntry> old = entries.findByTenantId(tenantId).stream()
-                .filter(e -> before == null || e.getAt().toLocalDate().isBefore(before))
+                .filter(e -> before == null || OrgClock.toOrg(e.getAt()).toLocalDate().isBefore(before))
                 .toList();
         if (!dryRun && !old.isEmpty()) {
             entries.deleteAll(old);

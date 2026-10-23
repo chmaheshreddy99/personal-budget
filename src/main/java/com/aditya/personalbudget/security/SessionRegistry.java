@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.security;
 
+import com.aditya.personalbudget.service.OrgClock;
 import com.aditya.personalbudget.config.BudgetProperties;
 import com.aditya.personalbudget.domain.entity.AccessLink;
 import com.aditya.personalbudget.domain.entity.AppUser;
@@ -59,7 +60,7 @@ public class SessionRegistry {
 
     /** As {@link #open(AppUser, String)}; a mobile session only reaches the user's mobile sections. */
     public String open(AppUser user, String userAgent, boolean mobile) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         sessions.deleteAll(sessions.findExpired(now));   // housekeeping while we are writing anyway
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
@@ -81,7 +82,7 @@ public class SessionRegistry {
      * expires (or after the usual session hours, whichever comes first).
      */
     public String openForLink(AccessLink link, String userAgent) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
@@ -110,7 +111,7 @@ public class SessionRegistry {
             return Optional.empty();
         }
         return sessions.findByTokenHash(hash(token))
-                .filter(s -> s.getExpiresAt().isAfter(LocalDateTime.now()))
+                .filter(s -> s.getExpiresAt().isAfter(OrgClock.now()))
                 .flatMap(s -> s.getLinkId() != null ? findForLink(s) : users.findById(s.getUserId())
                         .filter(u -> Boolean.TRUE.equals(u.getActive()))
                         .flatMap(u -> tenants.findById(u.getTenantId())
@@ -120,7 +121,7 @@ public class SessionRegistry {
 
     /** A link session lives only while its link is active and its maker is still an active user. */
     private Optional<CurrentUser> findForLink(UserSession s) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = OrgClock.now();
         return links.findById(s.getLinkId())
                 .filter(l -> l.isActive(now))
                 .flatMap(l -> users.findById(l.getCreatedById())

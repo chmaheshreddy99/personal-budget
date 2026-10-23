@@ -54,7 +54,7 @@ public class ChangeNotifier {
         emitter.onCompletion(remove);
         emitter.onTimeout(remove);
         emitter.onError(e -> remove.run());
-        send(subscriber, "hello", Map.of("at", LocalDateTime.now().toString()));
+        send(subscriber, "hello", Map.of("at", OrgClock.now().toString()));
         return emitter;
     }
 
@@ -72,7 +72,7 @@ public class ChangeNotifier {
         payload.put("tables", tables);
         payload.put("userId", by == null ? null : by.userId());
         payload.put("by", by == null ? "system" : by.fullName());
-        payload.put("at", LocalDateTime.now().toString());
+        payload.put("at", OrgClock.now().toString());
         for (Subscriber s : subscribers) {
             if (by == null || s.tenantId().equals(by.tenantId())) {
                 send(s, "change", payload);

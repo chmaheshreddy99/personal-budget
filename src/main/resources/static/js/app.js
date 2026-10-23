@@ -142,6 +142,7 @@ function bindLoginScreen() {
         e.preventDefault();
         $('login-error').textContent = '';
         const body = Object.fromEntries(new FormData(form).entries());
+        if (path === '/auth/register') body.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;   // the new organization's zone
         sessionPassword = body.password || '';
         const button = form.querySelector('[type=submit]');
         const label = button.textContent;

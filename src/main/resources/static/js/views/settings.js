@@ -90,7 +90,7 @@ async function renderOrganization(body, reload) {
                 </select>` : `<input value="${esc(tz.effective || '')}" readonly data-plain>`}
                 <small>Dates and times are recorded and shown in this zone: "today", when an entry was made, sign-ins, due dates.</small></label>
             ${admin ? `<div class="book-note">${icon('clock')}<span>Now in <b>${esc(tz.effectiveLabel)}</b>: <b>${esc(dateTime(tz.now))}</b>.
-                The server runs in ${esc(tz.serverTimeZone)}. Times saved before a change keep the clock time they were saved with.</span></div>
+                Times are kept in ${esc(tz.serverTimeZone)} and shown in this zone, so a change moves every time shown, those saved before it too.</span></div>
                 <div class="row"><button class="btn primary" type="submit">${icon('check')}Save time zone</button></div>`
                 : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
         </form>` });

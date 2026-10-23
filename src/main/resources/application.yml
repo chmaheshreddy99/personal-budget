@@ -30,6 +30,10 @@ budget:
   # Folder (relative to the working directory) holding one .tbl file per table; with Google Sheets storage it still
   # holds evidence attachments, settings and the lock file
   data-dir: data
+  # The time zone times are recorded in (e.g. Asia/Kolkata); empty = the server's. Each organization's times are shown
+  # in its own zone (Settings, Organization). Set this to the zone the data was recorded in before moving the app to a
+  # server running in another zone (cloud servers often run in UTC), so the times already recorded keep their meaning.
+  storage-time-zone:
   # Where the tables are stored. Override these in config/application.yml next to the jar (see config/application.yml.sample)
   storage:
     # files = tab-separated files in data-dir; google-sheets = one tab per table in a Google spreadsheet

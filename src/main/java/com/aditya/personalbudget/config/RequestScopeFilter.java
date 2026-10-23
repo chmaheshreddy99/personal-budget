@@ -49,7 +49,7 @@ public class RequestScopeFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
         } finally {
             store.endRequest();
-            OrgClock.forget();
+            OrgClock.endRequest();
         }
     }
 }

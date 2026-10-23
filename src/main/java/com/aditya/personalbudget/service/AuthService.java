@@ -76,10 +76,10 @@ public class AuthService {
     public SessionView login(LoginRequest request, String userAgent) {
         AppUser user = users.findByUsername(request.username().trim())
                 .orElseThrow(() -> new UnauthorizedException("Invalid username or password"));
-        LocalDateTime now = OrgClock.nowIn(user.getTenantId());   // no one is signed in yet: the user's organization
+        LocalDateTime now = OrgClock.now();
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now)) {
             throw new UnauthorizedException("Too many wrong passwords. Try again after "
-                    + user.getLockedUntil().toLocalTime().withNano(0) + ".");
+                    + OrgClock.toOrg(user.getLockedUntil(), user.getTenantId()).toLocalTime().withSecond(0).withNano(0) + ".");
         }
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             int failed = (user.getFailedLogins() == null ? 0 : user.getFailedLogins()) + 1;
@@ -117,10 +117,25 @@ public class AuthService {
     }
 
     public SessionView register(RegisterRequest request) {
-        provisioning.provision(new TenantProvisioningService.NewTenant(request.tenantCode(), request.tenantName(),
+        String timeZone = validTimeZoneOrNone(request.timeZone());
+        AppUser admin = provisioning.provision(new TenantProvisioningService.NewTenant(request.tenantCode(), request.tenantName(),
                 request.currency(), request.username(), request.fullName(), request.email(), request.password(),
                 UserRole.ADMIN));
+        if (timeZone != null) {
+            Organization tenant = tenants.findById(admin.getTenantId()).orElseThrow();
+            tenant.setTimeZone(timeZone);
+            tenants.save(tenant);
+        }
         return login(new LoginRequest(request.username(), request.password()), null);
+    }
+
+    /** The browser's zone, when the server knows it (an unknown one is simply not used). */
+    private static String validTimeZoneOrNone(String timeZone) {
+        try {
+            return OrgTimeZoneService.valid(timeZone);
+        } catch (BusinessException e) {
+            return null;
+        }
     }
 
     public void logout(String token) {

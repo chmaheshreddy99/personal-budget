@@ -306,7 +306,7 @@ public class BackupService {
     private BackupInfo info(Path file) {
         try {
             return new BackupInfo(file.getFileName().toString(), Files.size(file),
-                    LocalDateTime.ofInstant(Files.getLastModifiedTime(file).toInstant(), OrgClock.zone()));
+                    LocalDateTime.ofInstant(Files.getLastModifiedTime(file).toInstant(), OrgClock.storageZone()));
         } catch (IOException e) {
             throw new StorageException("Cannot read " + file, e);
         }
