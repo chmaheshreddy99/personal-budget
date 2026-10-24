@@ -19,6 +19,7 @@ import com.aditya.personalbudget.security.FeaturePolicy;
 import com.aditya.personalbudget.security.ApprovalPolicy;
 import com.aditya.personalbudget.security.SessionRegistry;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,6 +82,7 @@ public class UserService {
     @Transactional
     public UserView update(Long id, UserRequest request) {
         AppUser user = require(id);
+        ConcurrentUpdateException.check(request.version(), user.getVersion(), "app_users", id);   // a stale form is refused
         UserRole oldRole = user.getRole();
         apply(user, request);
         if (request.password() != null && !request.password().isBlank()) {
@@ -163,7 +165,7 @@ public class UserService {
                 u.getRole().getLabel(), Boolean.TRUE.equals(u.getActive()), u.getCreatedAt(), u.getLastLoginAt(),
                 FeaturePolicy.granted(u, tenant, false), u.getFeatures() != null, !Boolean.FALSE.equals(u.getMobileAccess()),
                 Feature.parse(u.getMobileFeatures(), Feature.allMobile()),
-                ApprovalPolicy.userSetting(u), tenant != null && approvals.forUser(u, tenant));
+                ApprovalPolicy.userSetting(u), tenant != null && approvals.forUser(u, tenant), u.getVersion());
     }
 
     // ================================================================== tenants (platform owner)
@@ -174,7 +176,7 @@ public class UserService {
                 .map(t -> new TenantView(t.getId(), t.getCode(), t.getName(), t.getCurrency(),
                         Boolean.TRUE.equals(t.getActive()), t.getCreatedAt(),
                         users.findByTenantId(t.getId()).size(), accounts.findByTenantId(t.getId()).size(),
-                        FeaturePolicy.ofTenant(t), t.getFeatures() != null, t.getTimeZone()))
+                        FeaturePolicy.ofTenant(t), t.getFeatures() != null, t.getTimeZone(), t.getVersion()))
                 .toList();
     }
 
@@ -196,6 +198,7 @@ public class UserService {
     @Transactional
     public void updateTenant(Long id, TenantRequest request) {
         Organization tenant = tenants.findById(id).orElseThrow(() -> new NotFoundException("Organization", id));
+        ConcurrentUpdateException.check(request.version(), tenant.getVersion(), "organizations", id);   // a stale form is refused
         if (tenant.getId().equals(UserContext.tenantId()) && Boolean.FALSE.equals(request.active())) {
             throw new BusinessException("You cannot deactivate your own organization");
         }

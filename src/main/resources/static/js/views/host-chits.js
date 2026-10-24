@@ -156,7 +156,7 @@ function whatsapp(member, text) {
 /** A member as the update request, with some fields changed. */
 function memberBody(m, changes = {}) {
     return { name: m.name, phone: m.phone || null, email: m.email || null, payoutAccount: m.payoutAccount || null,
-        payToAccountId: m.payToAccountId || null, upiId: m.upiId || null, payToMemberId: m.payToMemberId || null, ...changes };
+        payToAccountId: m.payToAccountId || null, upiId: m.upiId || null, payToMemberId: m.payToMemberId || null, version: m.version, ...changes };
 }
 
 /**
@@ -3559,7 +3559,7 @@ async function openPayout(d, month, { edit = false, gathered = false } = {}) {
                         paymentIds: l.paymentIds || [], note: (l.note || '').trim() || null })) : null,
                     payoutTo: v('payoutTo').value.trim() || null,
                     commissionFromAccountId: keep ? c.commissionAccountId : v('commissionFrom')?.value ? Number(v('commissionFrom').value) : null,
-                    gathered: staged, deferCommissionMove: deferCommission,
+                    gathered: staged, deferCommissionMove: deferCommission, version: edit ? month.version : null,
                 };
                 let fresh = await (edit ? api.put(`/hosted-chits/${c.id}/months/${month.monthNo}/payout`, body)
                     : api.post(`/hosted-chits/${c.id}/months/${month.monthNo}/payout`, body));
@@ -3918,7 +3918,7 @@ async function openMember(d, m) {
                 if (upiId && !UPI.test(upiId)) throw new Error('The UPI ID should look like name@bank');
                 if (d.members.some(x => x.id !== m.id && x.name.trim().toLowerCase() === name.toLowerCase())) throw new Error(`Another member is already called ${name}`);
                 await afterChange(await api.put(`/hosted-chits/${d.chit.id}/members/${m.id}`, { name, phone: phone || null, email: email || null,
-                    payoutAccount: v('payoutAccount') || null, upiId: upiId || null, ...payToValue(v('payTo')) }), 'Saved');
+                    payoutAccount: v('payoutAccount') || null, upiId: upiId || null, ...payToValue(v('payTo')), version: m.version }), 'Saved');
             } },
         ],
     });

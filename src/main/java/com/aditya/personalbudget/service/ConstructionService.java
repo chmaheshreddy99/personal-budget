@@ -38,6 +38,7 @@ import com.aditya.personalbudget.repository.ConstructionStageRepository;
 import com.aditya.personalbudget.repository.ConstructionUnitRepository;
 import com.aditya.personalbudget.repository.JournalLineRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Max;
@@ -112,7 +113,26 @@ public class ConstructionService {
                                  @PositiveOrZero BigDecimal plotPrice, @PositiveOrZero @DecimalMax("100") BigDecimal landownerSharePercent,
                                  @PositiveOrZero BigDecimal refundableDeposit, @Min(0) @Max(5000) Integer flatsPlanned,
                                  @PositiveOrZero BigDecimal saleRate, @Size(max = 100) String companyName, @Size(max = 200) String companyAddress,
-                                 @Size(max = 100) String signerName, @Size(max = 60) String signerDesignation, @Size(max = 1000) String notes) {
+                                 @Size(max = 100) String signerName, @Size(max = 60) String signerDesignation, @Size(max = 1000) String notes,
+                                 /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+                                 Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public ProjectRequest(String kind, String landMode, String name, String code, String siteAddress, String city,
+                String surveyNo, String plotNo, BigDecimal plotArea, String areaUnit, String boundaries,
+                BigDecimal builtUpArea, Integer floors, String permitNo, String reraNo, LocalDate startDate,
+                LocalDate plannedEndDate, String clientName, String clientPhone, String clientAddress,
+                String clientEmail, String clientRelation, BigDecimal lateInterestPercent, Integer lateGraceDays,
+                Integer defectLiabilityMonths, BigDecimal estimatedCost, BigDecimal plotPrice,
+                BigDecimal landownerSharePercent, BigDecimal refundableDeposit, Integer flatsPlanned,
+                BigDecimal saleRate, String companyName, String companyAddress, String signerName,
+                String signerDesignation, String notes) {
+            this(kind, landMode, name, code, siteAddress, city, surveyNo, plotNo, plotArea, areaUnit, boundaries,
+                    builtUpArea, floors, permitNo, reraNo, startDate, plannedEndDate, clientName, clientPhone,
+                    clientAddress, clientEmail, clientRelation, lateInterestPercent, lateGraceDays,
+                    defectLiabilityMonths, estimatedCost, plotPrice, landownerSharePercent, refundableDeposit,
+                    flatsPlanned, saleRate, companyName, companyAddress, signerName, signerDesignation, notes, null);
+        }
     }
 
     public record StageInput(Long id, @NotBlank @Size(max = 100) String name, @Size(max = 500) String description,
@@ -527,6 +547,7 @@ public class ConstructionService {
     @Transactional
     public Detail update(Long id, ProjectRequest q) {
         ConstructionProject p = requireOpen(id);
+        ConcurrentUpdateException.check(q.version(), p.getVersion(), "construction_projects", id);   // a stale form is refused
         if (!p.getKind().equals(q.kind().trim().toUpperCase())) {
             throw new BusinessException("A project's kind cannot change: start a new project instead");
         }

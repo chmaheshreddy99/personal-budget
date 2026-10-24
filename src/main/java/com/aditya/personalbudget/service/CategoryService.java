@@ -12,6 +12,7 @@ import com.aditya.personalbudget.repository.CategoryRepository;
 import com.aditya.personalbudget.repository.ClaimRepository;
 import com.aditya.personalbudget.repository.RecurringTransactionRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -139,7 +140,7 @@ public class CategoryService {
             c.setCode(request.code().trim());
         }
         c.setActive(request.active() == null || request.active());
-        c.setVersion(request.version());   // a stale form is refused (optimistic locking)
+        c.setVersion(ConcurrentUpdateException.required(request.version(), "categories", id));   // a stale form is refused (optimistic locking)
         categories.save(c);
         return view(id);
     }

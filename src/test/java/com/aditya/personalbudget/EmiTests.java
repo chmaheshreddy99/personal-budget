@@ -140,9 +140,9 @@ class EmiTests {
         assertThat(emis.reopen(p.id()).archived()).isFalse();
         // with EMIs paid only what it was can change
         assertThatThrownBy(() -> emis.update(p.id(), new EmiRequest("CARD", "Phone", null, null, null, null, category, bd(50000), bd(12), 6,
-                bd(500), bd(18), today.minusMonths(7), null, card, false))).isInstanceOf(BusinessException.class);
+                bd(500), bd(18), today.minusMonths(7), null, card, false, emis.get(p.id()).version()))).isInstanceOf(BusinessException.class);
         assertThat(emis.update(p.id(), new EmiRequest("CARD", "Phone 16 Pro", null, null, null, "Gift", category, bd(60000), bd(12), 6,
-                bd(500), bd(18), today.minusMonths(7), null, card, false)).narration()).isEqualTo("Phone 16 Pro");
+                bd(500), bd(18), today.minusMonths(7), null, card, false, emis.get(p.id()).version())).narration()).isEqualTo("Phone 16 Pro");
     }
 
     @Test
@@ -161,7 +161,7 @@ class EmiTests {
         assertThat(accounts.list().stream().filter(a -> a.id().equals(loan.liabilityAccountId())).findFirst().orElseThrow().emiAccount()).isTrue();
         // nothing paid: everything can change
         PlanView changed = emis.update(loan.id(), new EmiRequest("LOAN", "Fridge", null, "Bajaj Finserv", null, null, category, bd(36000), bd(0), 6,
-                null, null, today.minusMonths(2), null, bank, null));
+                null, null, today.minusMonths(2), null, bank, null, emis.get(loan.id()).version()));
         assertThat(changed.months()).isEqualTo(6);
         assertThat(changed.emiAmount()).isEqualByComparingTo("6000");
         assertThat(balances().get(loan.liabilityAccountId())).isEqualByComparingTo("36000");

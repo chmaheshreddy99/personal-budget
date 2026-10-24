@@ -144,7 +144,8 @@ export function openBook(d, unit, after, sale = null) {
             const body = { unitId: Number(f.unitId.value), buyerName: v('buyerName'), buyerRelation: v('buyerRelation'), buyerPhone: phone || null, buyerEmail: v('buyerEmail'),
                 buyerAddress: v('buyerAddress'), buyerPan: v('buyerPan'), coBuyerName: v('coBuyerName'), bookedOn: v('bookedOn'), basePrice: num(f.basePrice.value),
                 otherCharges: num(f.otherCharges.value) || null, otherChargesNote: v('otherChargesNote'),
-                lateInterestPercent: f.lateInterestPercent.value === '' ? null : Number(f.lateInterestPercent.value), plan: readPlan(m.el) };
+                lateInterestPercent: f.lateInterestPercent.value === '' ? null : Number(f.lateInterestPercent.value), plan: readPlan(m.el),
+                version: sale ? s.version : null };
             if (!body.unitId) throw new Error('Pick the flat');
             if (!body.buyerName) throw new Error('Enter the buyer’s name');
             if (!body.plan.length) throw new Error('Add the payment plan');

@@ -13,6 +13,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -182,6 +184,52 @@ class TsvDataStoreTest {
 
         assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactlyInAnyOrder("home", "second");
         assertThat(otherTenants.save(tenant("third")).getId()).isEqualTo(3L);   // ids are never handed out twice
+    }
+
+    @Test
+    void neverServesAnOlderParseOfAFileRewrittenWithinTheSameClockTick() {
+        Organization home = tenants.save(tenant("home"));
+        TsvDataStore other = new TsvDataStore(dataDir.toString(), validator);
+        OrganizationRepository otherTenants = new OrganizationRepository(other);
+        // same length every time, written back to back: only the file's date can tell the versions apart
+        for (String name : List.of("Name AAA", "Name BBB", "Name CCC", "Name DDD")) {
+            assertThat(tenants.findById(home.getId())).isPresent();   // parsed (and kept) here ...
+            Organization t = otherTenants.findById(home.getId()).orElseThrow();
+            t.setName(name);
+            otherTenants.save(t);                                       // ... rewritten by another process
+            assertThat(tenants.findById(home.getId()).orElseThrow().getName()).isEqualTo(name);
+        }
+    }
+
+    @Test
+    void aRewrittenTableIsAlwaysDatedAfterTheVersionItReplaces() throws Exception {
+        tenants.save(tenant("home"));
+        Path file = dataDir.resolve("organizations.tbl");
+        // the clock has not moved past the last write yet (a coarse clock, or one set back)
+        FileTime ahead = FileTime.from(Instant.now().plusSeconds(3600));
+        Files.setLastModifiedTime(file, ahead);
+        Object stamp = new LocalFileStorage(dataDir).stamp("organizations");
+
+        Organization t = tenants.findByCode("home").orElseThrow();
+        t.setName("Organization HOME");   // same length: the size does not change either
+        tenants.save(t);
+
+        assertThat(Files.getLastModifiedTime(file)).isGreaterThan(ahead);
+        assertThat(new LocalFileStorage(dataDir).stamp("organizations")).isNotEqualTo(stamp);
+    }
+
+    @Test
+    void aRolledBackChangeNeverReachesOtherReaders() {
+        Organization home = tenants.save(tenant("home"));
+        store.begin();
+        Organization t = tenants.findById(home.getId()).orElseThrow();
+        t.setName("Never committed");
+        tenants.save(t);
+        tenants.save(tenant("ghost"));
+        store.rollback();
+
+        assertThat(tenants.findAll()).extracting(Organization::getName).containsExactly("Organization home");
+        assertThat(tenants.save(tenant("next")).getId()).isEqualTo(2L);   // the id the rolled-back save took is free again
     }
 
     @Test

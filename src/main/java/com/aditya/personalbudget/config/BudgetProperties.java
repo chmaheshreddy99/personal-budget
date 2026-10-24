@@ -30,7 +30,7 @@ public record BudgetProperties(String dataDir, Security security, Seed seed, Int
     public record Storage(StorageType type, GoogleSheets googleSheets) {
         public Storage {
             type = type == null ? StorageType.FILES : type;
-            googleSheets = googleSheets == null ? new GoogleSheets(null, null, null, false) : googleSheets;
+            googleSheets = googleSheets == null ? new GoogleSheets(null, null, null, null, false) : googleSheets;
         }
     }
 
@@ -38,12 +38,16 @@ public record BudgetProperties(String dataDir, Security security, Seed seed, Int
 
     /**
      * A Google spreadsheet, opened with a service account's JSON key. A relative {@code credentialsFile} is looked up
-     * next to the jar first, then in the working directory.
+     * next to the jar first, then in the working directory. Requests share what was read from the spreadsheet for
+     * {@code readCacheSeconds}; -1 (the default): until the next save, so only saves read it; 0: every request reads
+     * it. A save always reads it afresh.
      */
-    public record GoogleSheets(String spreadsheetId, String credentialsFile, Integer timeoutSeconds, boolean importLocalData) {
+    public record GoogleSheets(String spreadsheetId, String credentialsFile, Integer timeoutSeconds, Integer readCacheSeconds,
+                               boolean importLocalData) {
         public GoogleSheets {
             credentialsFile = credentialsFile == null || credentialsFile.isBlank() ? "config/google-credentials.json" : credentialsFile;
             timeoutSeconds = timeoutSeconds == null ? 30 : timeoutSeconds;
+            readCacheSeconds = readCacheSeconds == null ? -1 : Math.max(-1, readCacheSeconds);
         }
     }
 

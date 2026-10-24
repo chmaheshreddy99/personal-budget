@@ -51,6 +51,8 @@ final class FakeSheetsApi {
 
     final Map<String, Tab> tabs = new LinkedHashMap<>();
     final List<String> calls = new ArrayList<>();
+    /** Every block of rows written: 'tab':first row (1-based)+row count. */
+    final List<String> writtenRows = new ArrayList<>();
     private int nextId = 1;
 
     FakeSheetsApi() {
@@ -174,13 +176,17 @@ final class FakeSheetsApi {
         for (JsonElement d : request.getAsJsonArray("data")) {
             JsonObject data = d.getAsJsonObject();
             String range = data.get("range").getAsString();
-            if (!range.endsWith("!A1")) {
-                throw new IllegalStateException("Expected a range starting at A1: " + range);
+            int bang = range.lastIndexOf("!A");
+            if (bang < 0) {
+                throw new IllegalStateException("Expected a range starting in column A: " + range);
             }
-            Tab tab = tabs.get(title(range.substring(0, range.length() - 3)));
+            Tab tab = tabs.get(title(range.substring(0, bang)));
+            int top = Integer.parseInt(range.substring(bang + 2)) - 1;
+            writtenRows.add(range.substring(0, bang) + ":" + (top + 1) + "+" + data.getAsJsonArray("values").size());
             JsonArray rows = data.getAsJsonArray("values");
-            for (int r = 0; r < rows.size(); r++) {
-                JsonArray row = rows.get(r).getAsJsonArray();
+            for (int i = 0; i < rows.size(); i++) {
+                int r = top + i;
+                JsonArray row = rows.get(i).getAsJsonArray();
                 if (r >= tab.rows || row.size() > tab.cols) {
                     throw new IllegalStateException("Range exceeds grid limits");
                 }

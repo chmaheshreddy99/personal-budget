@@ -28,7 +28,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -39,18 +38,20 @@ import java.util.stream.Collectors;
  * The "database": a set of {@link TsvTable}s kept by a {@link TableStorage}: tab-separated files in the data
  * directory (the default) or the tabs of a Google spreadsheet. Everything below works the same on either.
  * <p>
- * <b>No data is kept in memory.</b> Data is read from the storage when it is needed, and dropped again:
+ * <b>The storage is the truth.</b> A parsed table is kept, shared by every request, only together with the
+ * storage's stamp of the version it was parsed from ({@link TableStorage#stamp}); every read asks the storage for
+ * the current stamp first, and parses the table again as soon as it differs (another server process, or a manual
+ * edit). A commit hands the tables it wrote to the cache as written, so nothing is parsed again for a local change.
+ * Cached rows are never changed in place: readers get copies, and a unit of work changes its own copy of the map.
  * <ul>
- *   <li>Within one request a table is parsed once and reused; it is parsed again as soon as the
- *       storage reports a change (another request committed, another server process, or a manual edit).
- *       {@link #endRequest()} drops what the request read when it ends; a unit of work drops it when it starts
- *       and when it ends. Work outside a web request (a nightly job, the startup steps) calls
- *       {@link #endRequest()} when done.</li>
+ *   <li>{@link #endRequest()} unpins what the request read when it ends. Work outside a web request (a nightly
+ *       job, the startup steps) calls {@link #endRequest()} when done.</li>
  *   <li>A read-only request ({@link #beginReadOnly()}) holds the shared lock, so it sees every table as of
  *       one moment and can never write (an attempt fails).</li>
  *   <li>A transaction takes the exclusive lock (in this JVM) plus an OS file lock on {@code data/.lock}
- *       (across processes), loads the tables it touches fresh from disk, and writes the changed tables on
- *       commit. Rollback simply forgets the changes: nothing reached the disk.</li>
+ *       (across processes), has the storage {@linkplain TableStorage#refresh() refreshed}, so it works on what the
+ *       storage holds at that moment, and writes the changed tables on commit. Rollback simply forgets the changes:
+ *       nothing reached the storage, and the shared cache never saw them.</li>
  * </ul>
  * Constraints are enforced on every write: NOT NULL, LENGTH, UNIQUE, FOREIGN KEY, bean validation, and
  * optimistic locking for entities with a {@code @Version} column (a save carrying an older version than the
@@ -69,9 +70,8 @@ public class TsvDataStore {
     private final Map<Class<?>, TsvTable<?>> tables = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
     private final ThreadLocal<UnitOfWork> currentWork = new ThreadLocal<>();
-    private final ThreadLocal<Map<TsvTable<?>, View<?>>> views = ThreadLocal.withInitial(IdentityHashMap::new);
-    /** Bumped on every commit in this process, so a request never reuses a view older than a local write. */
-    private final AtomicLong generation = new AtomicLong();
+    /** The last parse of each table with the stamp it was parsed at, shared by every thread (see the class notes). */
+    private final Map<TsvTable<?>, Parsed<?>> parsed = new ConcurrentHashMap<>();
     private final List<Consumer<Set<String>>> commitListeners = new CopyOnWriteArrayList<>();
     private final List<StoreListener> storeListeners = new CopyOnWriteArrayList<>();
 
@@ -127,9 +127,8 @@ public class TsvDataStore {
         lock.readLock().lock();
     }
 
-    /** Ends the request: releases a read-only lock if held and forgets every table read. */
+    /** Ends the request: releases a read-only lock if held and unpins what it read. */
     public void endRequest() {
-        views.remove();
         storage.forget();
         while (lock.getReadHoldCount() > 0) {
             lock.readLock().unlock();
@@ -315,10 +314,14 @@ public class TsvDataStore {
         }
         lock.writeLock().lock();
         try {
-            views.remove();
-            storage.forget();   // the unit of work reads what the storage holds now, never an earlier read
-            currentWork.set(new UnitOfWork(lockFile()));
+            currentWork.set(new UnitOfWork(lockFile()));   // the file lock first: another process may be writing
+            storage.refresh();   // the unit of work reads what the storage holds now, never an earlier read
         } catch (RuntimeException e) {
+            UnitOfWork work = currentWork.get();
+            currentWork.remove();
+            if (work != null) {
+                work.release();
+            }
             lock.writeLock().unlock();
             throw e;
         }
@@ -340,13 +343,18 @@ public class TsvDataStore {
                     written.put(table.name(), encode(table, work));
                     changed.add(table.name());
                 }
-                storage.write(written, work.sequencesChanged ? work.sequences : null);
+                try {
+                    storage.write(written, work.sequencesChanged ? work.sequences : null);
+                } catch (RuntimeException e) {
+                    work.dirty.forEach(parsed::remove);   // some of it may have been written: read it all again
+                    throw e;
+                }
+                work.dirty.forEach(table -> remember(table, work.rows.get(table)));   // what was written is the current version
             }
         } finally {
             end(work);
         }
         if (!changed.isEmpty()) {
-            generation.incrementAndGet();
             commitListeners.forEach(listener -> {
                 try {
                     listener.accept(changed);
@@ -378,7 +386,6 @@ public class TsvDataStore {
 
     private void end(UnitOfWork work) {
         currentWork.remove();
-        views.remove();
         storage.forget();
         try {
             storeListeners.forEach(StoreListener::afterEnd);
@@ -409,7 +416,8 @@ public class TsvDataStore {
 
         @SuppressWarnings("unchecked")
         <T extends Identifiable> TreeMap<Long, T> rows(TsvTable<T> table) {
-            return (TreeMap<Long, T>) rows.computeIfAbsent(table, t -> table.read());
+            // its own copy of the map: the rows themselves are never changed in place, a save puts a new one
+            return (TreeMap<Long, T>) rows.computeIfAbsent(table, t -> new TreeMap<>(current(table)));
         }
 
         Properties sequences() {
@@ -439,11 +447,10 @@ public class TsvDataStore {
 
     // ================================================================== internals
 
-    /** A table as read during the current request. */
-    private record View<T>(Object stamp, long generation, TreeMap<Long, T> rows) {
+    /** A table as parsed from the version of the storage that {@code stamp} identifies; never changed afterwards. */
+    private record Parsed<T>(Object stamp, TreeMap<Long, T> rows) {
     }
 
-    @SuppressWarnings("unchecked")
     private <T extends Identifiable> TreeMap<Long, T> rows(TsvTable<T> table) {
         UnitOfWork work = currentWork.get();
         if (work != null) {
@@ -454,20 +461,45 @@ public class TsvDataStore {
             lock.readLock().lock();   // never read a table while this process is half-way through a commit
         }
         try {
-            Object stamp = table.stamp();
-            long gen = generation.get();
-            View<T> view = (View<T>) views.get().get(table);
-            if (view != null && Objects.equals(view.stamp(), stamp) && view.generation() == gen) {
-                return view.rows();
-            }
-            TreeMap<Long, T> rows = table.read();
-            views.get().put(table, new View<>(stamp, gen, rows));
-            return rows;
+            return current(table);
         } finally {
             if (locked) {
                 lock.readLock().unlock();
             }
         }
+    }
+
+    /**
+     * The table as the storage holds it now: the shared parse when the storage still reports the version it was
+     * parsed from, else parsed again (and shared). Callers must not change the map or its rows.
+     */
+    @SuppressWarnings("unchecked")
+    private <T extends Identifiable> TreeMap<Long, T> current(TsvTable<T> table) {
+        Object stamp = table.stamp();
+        Parsed<T> last = (Parsed<T>) parsed.get(table);
+        if (last != null && stamp != null && stamp.equals(last.stamp())) {
+            return last.rows();
+        }
+        // the stamp is taken before reading: if the table changes in between, the next read sees a newer stamp
+        TreeMap<Long, T> rows = table.read();
+        if (stamp != null) {
+            parsed.put(table, new Parsed<>(stamp, rows));
+        }
+        return rows;
+    }
+
+    /** A committed table: what was written is the version the storage now reports. */
+    private <T extends Identifiable> void remember(TsvTable<T> table, TreeMap<Long, ?> rows) {
+        try {
+            Object stamp = table.stamp();
+            if (stamp != null) {
+                parsed.put(table, new Parsed<>(stamp, rows));
+                return;
+            }
+        } catch (RuntimeException e) {
+            log.debug("Could not stamp {} after writing it: {}", table.name(), e.getMessage());
+        }
+        parsed.remove(table);
     }
 
     /** Joins the current transaction, or wraps the action in its own implicit one. */

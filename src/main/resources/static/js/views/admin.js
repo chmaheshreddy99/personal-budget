@@ -161,7 +161,7 @@ async function openUserForm(user, reload) {
                 const mobile = picked('mobile').filter(k => features.includes(k));
                 data.mobileFeatures = mobile.length === FEATURES.filter(f => f.mobile).length ? null : mobile;
                 delete data.mobileAccessToggle;
-                if (user) await api.put(`/admin/users/${user.id}`, data);
+                if (user) await api.put(`/admin/users/${user.id}`, { ...data, version: user.version });
                 else await api.post('/admin/users', data);
                 toast('User saved');
                 reload();
@@ -248,7 +248,7 @@ function openTenantForm(tenant, zones, reload) {
                 if (!features.length) throw new Error('Give the organization at least one menu item');
                 data.features = features.length === FEATURES.length ? FEATURES.map(f => f.key) : features;
                 data.timeZone = form.timeZone.value;   // empty: the server's
-                if (tenant) await api.put(`/admin/tenants/${tenant.id}`, data);
+                if (tenant) await api.put(`/admin/tenants/${tenant.id}`, { ...data, version: tenant.version });
                 else await api.post('/admin/tenants', data);
                 if (tenant && tenant.id === state.user.tenantId) {   // our own: today and the times move with it
                     state.user = await api.get('/auth/me');

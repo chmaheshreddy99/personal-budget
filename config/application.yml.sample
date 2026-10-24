@@ -12,8 +12,9 @@
 #      (client_email in the JSON key, like budget@my-project.iam.gserviceaccount.com) as an Editor.
 #   4. Put the spreadsheet's id below: it is the part of its address between /d/ and /edit.
 #   5. Start the app. It adds one tab per table (and a _sequences tab for ids) by itself.
-#      To bring your existing data along, set import-local-data: true for the first start: the .tbl files in
-#      data-dir are copied into the (still empty) spreadsheet; the files themselves are left as they are.
+#   6. To bring your existing data along, stop the app and run ./app.sh migrate-to-sheets (or
+#      java -jar personal-budget-1.0.0.jar migrate-to-sheets): the .tbl files in data-dir are copied into the
+#      spreadsheet once, after you confirm; the files themselves are left as they are.
 #
 # Evidence attachments, the app settings file and the lock file stay in data-dir in either case.
 # Run one app per spreadsheet, and edit the spreadsheet by hand only while the app is stopped.
@@ -25,4 +26,4 @@ budget:
       spreadsheet-id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEf
       credentials-file: config/google-credentials.json
       timeout-seconds: 30
-      import-local-data: false
+      read-cache-seconds: -1       # -1: only saves read the spreadsheet; N: pages read it again after N seconds; 0: every request

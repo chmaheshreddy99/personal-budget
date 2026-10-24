@@ -243,6 +243,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                 reference: data.reference || null, notes: data.notes || null, categoryId: Number(data.categoryId), principal: total,
                 ratePercent: Number(form.emiRate.value) || 0, months, processingFee: Number(form.emiFee.value) || null, gstPercent: Number(form.emiGst.value) || null,
                 purchaseDate: data.entryDate, firstDueDate: form.emiFirst.value || null, payAccountId: Number(data.paidFromId), autoPost: form.emiAuto.checked,
+                version: editingEmi ? emi.version : null,
             };
             if (editingEmi && !emi.editable) {   // the terms stay as they were
                 Object.assign(body, { kind: emi.kind, principal: emi.principal, ratePercent: emi.ratePercent, months: emi.months, processingFee: emi.processingFee,

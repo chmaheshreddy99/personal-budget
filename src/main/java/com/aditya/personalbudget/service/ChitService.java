@@ -24,6 +24,7 @@ import com.aditya.personalbudget.repository.ChitInstallmentRepository;
 import com.aditya.personalbudget.repository.ChitRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -155,7 +156,7 @@ public class ChitService {
             throw new BusinessException("Installment amount, count and start date cannot change after payments. "
                     + "Undo the payments first");
         }
-        chit.setVersion(request.version());   // a stale form is refused
+        chit.setVersion(ConcurrentUpdateException.required(request.version(), "chits", chitId));   // a stale form is refused
         chit = chits.save(chit);
 
         if (scheduleChanged) {

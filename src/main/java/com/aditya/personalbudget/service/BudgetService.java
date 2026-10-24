@@ -13,6 +13,7 @@ import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.BudgetRepository;
 import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.service.LedgerSnapshot.PostedLine;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -410,8 +411,8 @@ public class BudgetService {
         budget.setNotes(request.notes());
         budget.setCommitted(Boolean.TRUE.equals(request.committed()));
         budget.setDueDay(Boolean.TRUE.equals(request.committed()) ? request.dueDay() : null);
-        if (existing && request.version() != null) {
-            budget.setVersion(request.version());   // someone else changed it meanwhile: refused
+        if (existing) {   // someone else changed it (or set it) meanwhile: refused
+            budget.setVersion(ConcurrentUpdateException.required(request.version(), "budgets", budget.getId()));
         }
         return budgets.save(budget);
     }

@@ -138,8 +138,9 @@ class ChitClosingAndAgreementTests {
         d = chits.payout(chitId, 1, payout(List.of(new LegInput(collections, bd(28500), "Bank", "U1"))));
         assertThat(d.payments()).allMatch(HostedChitService.PaymentView::locked);
         Long first = d.payments().getFirst().id();
+        Long firstVersion = d.payments().getFirst().version();
         assertThatThrownBy(() -> chits.updatePayment(chitId, first, new PaymentRequest(ids.get(0), 1, bd(9000), null, null, null,
-                LocalDate.now(), "UPI", null, false, null, null, null))).isInstanceOf(BusinessException.class).hasMessageContaining("Undo that payout");
+                LocalDate.now(), "UPI", null, false, firstVersion, null, null))).isInstanceOf(BusinessException.class).hasMessageContaining("Undo that payout");
 
         // a late payment for the month, recorded after the payout, stays editable
         d = chits.addPayment(chitId, new PaymentRequest(ids.get(1), 1, bd(100), null, null, null, LocalDate.now(), "UPI", null, true, null, null, null));
@@ -147,7 +148,8 @@ class ChitClosingAndAgreementTests {
 
         // the payout moves to two accounts: the HDFC money and the collections
         d = chits.updatePayout(chitId, 1, new PayoutRequest(LocalDate.now(), "Bank", null, true, false, null, null,
-                List.of(new LegInput(hdfc, bd(10000), "UPI", "H1"), new LegInput(collections, bd(18500), "Bank", "C1")), "SBI 9", null));
+                List.of(new LegInput(hdfc, bd(10000), "UPI", "H1"), new LegInput(collections, bd(18500), "Bank", "C1")), "SBI 9", null,
+                null, null, monthVersion(chitId, 1)));
         var month = d.schedule().getFirst();
         assertThat(month.legs()).hasSize(2);
         assertThat(month.payoutTo()).isEqualTo("SBI 9");
@@ -161,7 +163,8 @@ class ChitClosingAndAgreementTests {
         d = chits.detail(chitId);
         Long agreementId = d.agreements().getFirst().id();
         chits.markAgreementSigned(chitId, agreementId, "Ravi");
-        assertThatThrownBy(() -> chits.updatePayout(chitId, 1, payout(List.of(new LegInput(collections, bd(28500), "Bank", null)))))
+        assertThatThrownBy(() -> chits.updatePayout(chitId, 1, payout(List.of(new LegInput(collections, bd(28500), "Bank", null)),
+                monthVersion(chitId, 1))))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("agreement");
     }
 
@@ -359,7 +362,12 @@ class ChitClosingAndAgreementTests {
     }
 
     private static PayoutRequest payout(List<LegInput> legs) {
-        return new PayoutRequest(LocalDate.now(), "Bank", null, true, false, null, null, legs, "SBI 1234", null);
+        return payout(legs, null);
+    }
+
+    /** {@code version}: of the month, for an edit of its payout. */
+    private static PayoutRequest payout(List<LegInput> legs, Long version) {
+        return new PayoutRequest(LocalDate.now(), "Bank", null, true, false, null, null, legs, "SBI 1234", null, null, null, version);
     }
 
     private static BigDecimal spot(ChitMoney m, Long accountId) {
@@ -380,5 +388,10 @@ class ChitClosingAndAgreementTests {
 
     private static BigDecimal bd(long v) {
         return BigDecimal.valueOf(v);
+    }
+
+    /** The month's version, as a screen loaded now sends it with an edit of the payout. */
+    private Long monthVersion(Long chitId, int monthNo) {
+        return chits.detail(chitId).schedule().stream().filter(m -> m.monthNo() == monthNo).findFirst().orElseThrow().version();
     }
 }

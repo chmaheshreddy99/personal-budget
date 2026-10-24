@@ -60,7 +60,7 @@ public class StorageConfig {
         }
         BudgetProperties.GoogleSheets g = settings.googleSheets();
         GoogleSheetsStorage sheets = GoogleSheetsStorage.connect(PersonalBudgetApplication.resolve(g.credentialsFile()),
-                g.spreadsheetId(), Duration.ofSeconds(Math.max(5, g.timeoutSeconds())));
+                g.spreadsheetId(), Duration.ofSeconds(Math.max(5, g.timeoutSeconds())), Duration.ofSeconds(g.readCacheSeconds()));
         if (g.importLocalData() && sheets.isEmpty() && Files.isDirectory(dataDir)) {
             int tables = sheets.importFrom(new LocalFileStorage(dataDir));
             if (tables > 0) {

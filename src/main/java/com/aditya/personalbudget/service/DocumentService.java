@@ -122,7 +122,7 @@ public class DocumentService {
     @Transactional
     public DocumentView update(Long id, DocumentRequest r) {
         PersonalDocument d = require(id);
-        if (r.version() != null && !Objects.equals(r.version(), d.getVersion())) {
+        if (!Objects.equals(ConcurrentUpdateException.required(r.version(), "documents", id), d.getVersion())) {
             throw new ConcurrentUpdateException("documents", id);
         }
         apply(d, r);

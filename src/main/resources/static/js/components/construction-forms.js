@@ -451,7 +451,7 @@ export function openSettings(d, after) {
         },
         actions: [{ label: 'Cancel' }, { label: 'Save', kind: 'primary', iconName: 'check', onClick: async m => {
             const form = m.el.querySelector('[data-f]');
-            const body = { kind: p.kind, landMode: p.landMode };
+            const body = { kind: p.kind, landMode: p.landMode, version: p.version };
             form.querySelectorAll('input[name], select[name], textarea[name]').forEach(i => { body[i.name] = i.value.trim() === '' ? null : i.type === 'number' ? Number(i.value) : i.value.trim(); });
             if (!phoneOk(body.clientPhone || '')) throw new Error('The owner’s mobile should have 10 digits');
             let out = await api.put(`/construction/${p.id}`, body);

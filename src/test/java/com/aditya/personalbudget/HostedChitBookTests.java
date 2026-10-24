@@ -333,12 +333,12 @@ class HostedChitBookTests {
         Long a = d.members().get(0).id(), b = d.members().get(1).id(), c = d.members().get(2).id();
 
         // an account without a UPI ID or bank details cannot be put on a payment link
-        assertThatThrownBy(() -> chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, icici)))
+        assertThatThrownBy(() -> chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, icici, null, null, memberVersion(chitId, b))))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("no UPI ID or bank details");
-        assertThatThrownBy(() -> accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "123456789012", "Asha", "ICIC123", null, null)))
+        assertThatThrownBy(() -> accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "123456789012", "Asha", "ICIC123", null, accounts.require(icici).getVersion())))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("IFSC");
-        accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "123456789012", "Asha Organiser", "icic0001234", null, null));
-        d = chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, icici));
+        accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "123456789012", "Asha Organiser", "icic0001234", null, accounts.require(icici).getVersion()));
+        d = chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, icici, null, null, memberVersion(chitId, b)));
         assertThat(d.members().stream().filter(m -> m.id().equals(b)).findFirst().orElseThrow().payToAccountId()).isEqualTo(icici);
 
         // her link carries the bank details (no UPI ID), sealed; the others have nothing to pay into yet
@@ -360,7 +360,7 @@ class HostedChitBookTests {
         assertThat(check.current()).isTrue();
         String forged = signed.payload().replace("123456789012", "999999999999");
         assertThat(shares.checkPayTo(herToken, forged, signed.digitalSignature()).signatureValid()).isFalse();
-        accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "555566667777", "Asha Organiser", "ICIC0001234", null, null));
+        accounts.updateBankDetails(icici, new BankDetailsRequest("ICICI Bank", "555566667777", "Asha Organiser", "ICIC0001234", null, accounts.require(icici).getVersion()));
         var stale = shares.checkPayTo(herToken, signed.payload(), signed.digitalSignature());
         assertThat(stale.signatureValid()).isTrue();
         assertThat(stale.current()).isFalse();
@@ -391,11 +391,11 @@ class HostedChitBookTests {
         Long chitId = d.chit().id();
         Long a = d.members().get(0).id(), b = d.members().get(1).id(), c = d.members().get(2).id();
         // Ravi gets a UPI ID; a member can pay him only once he is a month's winner
-        chits.updateMember(chitId, a, new MemberInput("Ravi", null, null, "SBI 1234", null, "ravi@okaxis", null));
-        assertThatThrownBy(() -> chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, null, null, a)))
+        chits.updateMember(chitId, a, new MemberInput("Ravi", null, null, "SBI 1234", null, "ravi@okaxis", null, memberVersion(chitId, a)));
+        assertThatThrownBy(() -> chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, null, null, a, memberVersion(chitId, b))))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("not the winner of an open month");
         chits.setWinner(chitId, 1, new WinnerRequest(a, false, null));
-        d = chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, null, null, a));
+        d = chits.updateMember(chitId, b, new MemberInput("Lakshmi", null, null, null, null, null, a, memberVersion(chitId, b)));
         assertThat(d.members().stream().filter(m -> m.id().equals(b)).findFirst().orElseThrow().payToMemberName()).isEqualTo("Ravi");
 
         // her signed link shows Ravi's UPI ID, and the chit's short code for the note
@@ -445,5 +445,10 @@ class HostedChitBookTests {
 
     private static BigDecimal bd(long v) {
         return BigDecimal.valueOf(v);
+    }
+
+    /** The member's version, as a screen loaded now sends it with an edit. */
+    private Long memberVersion(Long chitId, Long memberId) {
+        return chits.detail(chitId).members().stream().filter(m -> m.id().equals(memberId)).findFirst().orElseThrow().version();
     }
 }

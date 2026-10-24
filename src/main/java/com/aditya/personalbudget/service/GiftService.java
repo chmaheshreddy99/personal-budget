@@ -112,7 +112,7 @@ public class GiftService {
     @Transactional
     public GiftView update(Long id, GiftRequest r) {
         Gift g = require(id);
-        if (r.version() != null && !Objects.equals(r.version(), g.getVersion())) {
+        if (!Objects.equals(ConcurrentUpdateException.required(r.version(), "gifts", id), g.getVersion())) {
             throw new ConcurrentUpdateException("gifts", id);
         }
         apply(g, r);

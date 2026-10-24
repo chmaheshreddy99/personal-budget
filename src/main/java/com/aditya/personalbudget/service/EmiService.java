@@ -19,6 +19,7 @@ import com.aditya.personalbudget.repository.EmiPlanRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.repository.JournalLineRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -90,7 +91,18 @@ public class EmiService {
                              @Size(max = 255) String notes, @NotNull Long categoryId, @NotNull @Positive BigDecimal principal,
                              @PositiveOrZero @DecimalMax("60") BigDecimal ratePercent, @NotNull @Min(1) @Max(360) Integer months,
                              @PositiveOrZero BigDecimal processingFee, @PositiveOrZero @DecimalMax("50") BigDecimal gstPercent,
-                             @NotNull LocalDate purchaseDate, LocalDate firstDueDate, @NotNull Long payAccountId, Boolean autoPost) {
+                             @NotNull LocalDate purchaseDate, LocalDate firstDueDate, @NotNull Long payAccountId, Boolean autoPost,
+                             /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+                             Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public EmiRequest(String kind, String narration, String party, String lender, String reference, String notes,
+                Long categoryId, BigDecimal principal, BigDecimal ratePercent, Integer months,
+                BigDecimal processingFee, BigDecimal gstPercent, LocalDate purchaseDate, LocalDate firstDueDate,
+                Long payAccountId, Boolean autoPost) {
+            this(kind, narration, party, lender, reference, notes, categoryId, principal, ratePercent, months,
+                    processingFee, gstPercent, purchaseDate, firstDueDate, payAccountId, autoPost, null);
+        }
     }
 
     /**
@@ -307,6 +319,7 @@ public class EmiService {
     @Transactional
     public PlanView update(Long id, EmiRequest r) {
         EmiPlan p = require(id);
+        ConcurrentUpdateException.check(r.version(), p.getVersion(), "emi_plans", id);   // a stale form is refused
         List<EmiInstallment> all = installments.findByPlanId(id);
         boolean started = all.stream().anyMatch(i -> !"DUE".equals(i.getStatus())) || !"ACTIVE".equals(p.getStatus());
         if (started) {

@@ -109,7 +109,15 @@ public class HostedChitService {
     public record MemberInput(@NotBlank @Size(max = 100) String name, @Size(max = 20) String phone,
                               @jakarta.validation.constraints.Email @Size(max = 120) String email,
                               @Size(max = 120) String payoutAccount, Long payToAccountId,
-                              @Size(max = 60) String upiId, Long payToMemberId) {
+                              @Size(max = 60) String upiId, Long payToMemberId,
+                              /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+                              Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public MemberInput(String name, String phone, String email, String payoutAccount, Long payToAccountId,
+                String upiId, Long payToMemberId) {
+            this(name, phone, email, payoutAccount, payToAccountId, upiId, payToMemberId, null);
+        }
 
         public MemberInput(String name, String phone, String email, String payoutAccount) {
             this(name, phone, email, payoutAccount, null, null, null);
@@ -261,7 +269,17 @@ public class HostedChitService {
                                    payout comes out of the collections (other accounts only for what the month pays above them) */
                                 Boolean gathered,
                                 /* the commission stays in the collections account; the organiser moves it afterwards (moveCommission) */
-                                Boolean deferCommissionMove) {
+                                Boolean deferCommissionMove,
+                                /* an edit of a payout: the version of the month the form was loaded with (refused when stale) */
+                                Long version) {
+
+        /** Without a version: to record a payout (an edit must carry the version it was made on). */
+        public PayoutRequest(LocalDate payoutDate, String mode, String reference, Boolean allowDues, Boolean createAgreement,
+                             String guarantorName, String guarantorPhone, List<LegInput> legs, String payoutTo, Long commissionFromAccountId,
+                             Boolean gathered, Boolean deferCommissionMove) {
+            this(payoutDate, mode, reference, allowDues, createAgreement, guarantorName, guarantorPhone, legs, payoutTo, commissionFromAccountId,
+                    gathered, deferCommissionMove, null);
+        }
 
         public PayoutRequest(LocalDate payoutDate, String mode, String reference, Boolean allowDues, Boolean createAgreement,
                              String guarantorName, String guarantorPhone, List<LegInput> legs, String payoutTo, Long commissionFromAccountId) {
@@ -567,7 +585,7 @@ public class HostedChitService {
     @Transactional
     public Detail update(Long id, ChitRequest r) {
         HostedChit c = editable(id);
-        if (r.version() != null && !Objects.equals(r.version(), c.getVersion())) {
+        if (!Objects.equals(ConcurrentUpdateException.required(r.version(), "hosted_chits", id), c.getVersion())) {
             throw new ConcurrentUpdateException("hosted_chits", id);
         }
         boolean locked = structureLocked(c);
@@ -867,6 +885,7 @@ public class HostedChitService {
     public Detail updateMember(Long chitId, Long memberId, MemberInput r) {
         HostedChit c = editable(chitId);
         HostedChitMember m = requireMember(c, memberId);
+        ConcurrentUpdateException.check(r.version(), m.getVersion(), "hosted_chit_members", memberId);   // a stale form is refused
         String before = m.getName();
         String name = r.name().trim().replaceAll("\\s+", " ");
         if (members.findByChitId(chitId).stream().anyMatch(x -> !x.getId().equals(memberId) && x.getName().equalsIgnoreCase(name))) {
@@ -1132,7 +1151,7 @@ public class HostedChitService {
     public Detail updatePayment(Long chitId, Long paymentId, PaymentRequest r) {
         HostedChit c = editable(chitId);
         HostedChitPayment p = requirePayment(c, paymentId);
-        if (r.version() != null && !Objects.equals(r.version(), p.getVersion())) {
+        if (!Objects.equals(ConcurrentUpdateException.required(r.version(), "hosted_chit_payments", paymentId), p.getVersion())) {
             throw new ConcurrentUpdateException("hosted_chit_payments", paymentId);
         }
         HostedChitMember member = requireMember(c, p.getMemberId());
@@ -1944,6 +1963,7 @@ public class HostedChitService {
         if (month.getPayoutDate() == null) {
             throw new BusinessException("Month " + monthNo + " is not paid out yet");
         }
+        ConcurrentUpdateException.check(r.version(), month.getVersion(), "hosted_chit_months", month.getId());   // a stale form is refused
         HostedChitMember winner = requireMember(c, month.getWinnerMemberId());
         HostedChitAgreement ag = agreementOf(c, monthNo);
         if (ag != null && !HostedChitAgreement.DRAFT.equals(ag.getStatus())) {

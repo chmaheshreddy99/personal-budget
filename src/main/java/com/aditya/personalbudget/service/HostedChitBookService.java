@@ -603,13 +603,13 @@ public class HostedChitBookService {
             throw new BusinessException(a.getName() + " is used by " + String.join(", ", usedBy(a)) + "; pick another account in the chit's settings first");
         }
         String before = a.getName();
-        accountService.update(id, new AccountRequest(a.getCode(), r.name(), r.accountType(), blank(r.institution()),
-                blank(r.accountNumber()), r.openingBalance(), r.openingDate(), null, null, null, null,
-                blank(r.description()), r.active(), r.version(), r.holderName(), r.ifsc(), r.upiId()));
-        Account saved = accountService.require(id);
-        saved.setHostedChitId(chit == null ? null : chit.getId());
-        saved.setChitRole(chit == null ? Account.ROLE_COMMON : role(r.role() != null ? r.role() : a.getChitRole()));
-        accounts.save(saved);
+        // the chit and role go in the same save as the rest: one edit, one version
+        Account saved = accountService.require(accountService.update(id, new AccountRequest(a.getCode(), r.name(), r.accountType(),
+                blank(r.institution()), blank(r.accountNumber()), r.openingBalance(), r.openingDate(), null, null, null, null,
+                blank(r.description()), r.active(), r.version(), r.holderName(), r.ifsc(), r.upiId()), edited -> {
+            edited.setHostedChitId(chit == null ? null : chit.getId());
+            edited.setChitRole(chit == null ? Account.ROLE_COMMON : role(r.role() != null ? r.role() : a.getChitRole()));
+        }).id());
         activity.record("CHANGED", AREA, "Edited a chit account · " + before + (before.equals(saved.getName()) ? "" : " → " + saved.getName()));
         return accountView(id);
     }
@@ -690,7 +690,7 @@ public class HostedChitBookService {
     @Transactional
     public TransferView updateTransfer(Long id, TransferRequest r) {
         HostedChitTransfer t = requireTransfer(id);
-        if (r.version() != null && !Objects.equals(r.version(), t.getVersion())) {
+        if (!Objects.equals(ConcurrentUpdateException.required(r.version(), "hosted_chit_transfers", id), t.getVersion())) {
             throw new ConcurrentUpdateException("hosted_chit_transfers", id);
         }
         requireOpenChit(t.getChitId());

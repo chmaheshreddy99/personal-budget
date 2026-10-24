@@ -36,6 +36,7 @@ import com.aditya.personalbudget.domain.entity.ClaimShare;
 import com.aditya.personalbudget.domain.type.InterestCollection;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -225,7 +226,7 @@ public class ClaimService {
         apply(claim, request, payer, receivable);
         ledger.repost(claim.getJournalEntryId(), draft(claim, request.reference()));
         refreshStatus(claim);
-        claim.setVersion(request.version());   // a stale form is refused
+        claim.setVersion(ConcurrentUpdateException.required(request.version(), "claims", id));   // a stale form is refused
         return toView(claims.save(claim), context());
     }
 

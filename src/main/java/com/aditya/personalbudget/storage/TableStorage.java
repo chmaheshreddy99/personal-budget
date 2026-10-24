@@ -20,7 +20,8 @@ public interface TableStorage {
 
     /**
      * Identifies the current version of a table: it changes whenever the table changes, so a reader knows when a
-     * table it parsed before is out of date. Null when the table does not exist.
+     * table it parsed before is out of date (the store keeps parsed tables, shared by every request, keyed by this).
+     * Two equal stamps of a table must mean the same content. Null when the table does not exist.
      */
     Object stamp(String table);
 
@@ -37,10 +38,18 @@ public interface TableStorage {
     Properties readSequences();
 
     /**
-     * Drops whatever this thread read so far, so the next read goes to the storage again. Called when a request ends
-     * and when a unit of work starts and ends: nothing read is kept between them.
+     * Unpins whatever this thread read so far. Called when a request and a unit of work end; the next read may be
+     * served from a copy shared by every thread, as long as it still is what the storage holds.
      */
     default void forget() {
+    }
+
+    /**
+     * A unit of work starts: what this thread reads next must be what the storage holds now, never a copy kept from
+     * an earlier read, so every save is checked (versions, unique keys, references, ids) against the real data.
+     */
+    default void refresh() {
+        forget();
     }
 
     /** How much is stored, for the footer. */

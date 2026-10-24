@@ -15,6 +15,7 @@ import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.repository.JournalLineRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -148,7 +149,8 @@ public class ExpenseService {
     @Transactional
     public EntryView update(Long entryId, ExpenseRequest request) {
         requireExpense(entryId);
-        return ledger.toViews(List.of(ledger.repost(entryId, draft(request), request.version()))).getFirst();
+        return ledger.toViews(List.of(ledger.repost(entryId, draft(request),
+                ConcurrentUpdateException.required(request.version(), "journal_entries", entryId)))).getFirst();
     }
 
     @Transactional

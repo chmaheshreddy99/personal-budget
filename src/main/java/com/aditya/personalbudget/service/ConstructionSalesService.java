@@ -13,6 +13,7 @@ import com.aditya.personalbudget.service.AttachmentService.AgreementFile;
 import com.aditya.personalbudget.service.ConstructionService.Detail;
 import com.aditya.personalbudget.service.ConstructionService.PartyInput;
 import com.aditya.personalbudget.service.ConstructionService.UnitPlan;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Max;
@@ -64,7 +65,17 @@ public class ConstructionSalesService {
                               @Size(max = 12) String buyerPan, @Size(max = 100) String coBuyerName, @NotNull LocalDate bookedOn,
                               @NotNull @PositiveOrZero BigDecimal basePrice, @PositiveOrZero BigDecimal otherCharges,
                               @Size(max = 200) String otherChargesNote, @PositiveOrZero @DecimalMax("10") BigDecimal lateInterestPercent,
-                              List<@Valid PlanRow> plan) {
+                              List<@Valid PlanRow> plan,
+                              /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+                              Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public SaleRequest(Long unitId, String buyerName, String buyerRelation, String buyerPhone, String buyerEmail,
+                String buyerAddress, String buyerPan, String coBuyerName, LocalDate bookedOn, BigDecimal basePrice,
+                BigDecimal otherCharges, String otherChargesNote, BigDecimal lateInterestPercent, List<PlanRow> plan) {
+            this(unitId, buyerName, buyerRelation, buyerPhone, buyerEmail, buyerAddress, buyerPan, coBuyerName,
+                    bookedOn, basePrice, otherCharges, otherChargesNote, lateInterestPercent, plan, null);
+        }
     }
 
     public record LoanInfo(@Size(max = 100) String loanBank, @Size(max = 100) String loanBranch, @PositiveOrZero BigDecimal loanAmount,
@@ -219,6 +230,7 @@ public class ConstructionSalesService {
     public Detail updateSale(Long id, Long saleId, SaleRequest r) {
         ConstructionProject p = requireDevelopment(id);
         ConstructionSale s = requireSale(p, saleId);
+        ConcurrentUpdateException.check(r.version(), s.getVersion(), "construction_sales", saleId);   // a stale form is refused
         if (Set.of("CLOSED", "CANCELLED").contains(s.getStatus())) throw new BusinessException("This sale is " + s.getStatus().toLowerCase());
         if (!s.getUnitId().equals(r.unitId())) throw new BusinessException("Cancel this sale and book the other flat instead");
         if (core.signedFor(p, "FLAT_SALE", s.getId())) {

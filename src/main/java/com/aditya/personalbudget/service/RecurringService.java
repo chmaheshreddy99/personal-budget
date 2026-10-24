@@ -14,6 +14,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.RecurringTransactionRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -84,7 +85,7 @@ public class RecurringService {
     public RecurringTransaction update(Long id, RecurringRequest request) {
         RecurringTransaction r = require(id);
         apply(r, request);
-        r.setVersion(request.version());   // a stale form is refused
+        r.setVersion(ConcurrentUpdateException.required(request.version(), "recurring_transactions", id));   // a stale form is refused
         return recurring.save(r);
     }
 

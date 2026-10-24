@@ -168,14 +168,18 @@ or `GoogleSheetsStorage`).
   start, and other tabs in the spreadsheet are left alone.
 - Cells are written as plain text (`RAW`): nothing is turned into a number, date or formula, and a line break in a
   note is a real line break in the cell.
-- **Nothing is kept in memory.** The data is read when it is needed: the first read of a request fetches every
-  table tab in one API call, that copy serves only that request, and it is dropped when the request ends. A save
-  reads the spreadsheet afresh and writes its changes back in one call (two when a tab must grow first) before it
-  ends. So every page shows what the spreadsheet holds at that moment, edits made by hand included.
-- Each request to the app costs one read call, and each save one more read plus one write. Google allows a service
-  account 60 read and 60 write calls a minute by default; busy calls are retried with growing pauses, so a burst of
-  clicks slows down rather than fails (the page shows it is waiting). If that limit is reached often, raise it in
-  the Google Cloud console (APIs & Services, Google Sheets API, Quotas).
+- **Only saves read the spreadsheet.** One API call fetches every table tab. Nothing polls it: pages are served from
+  what was read or saved last (read once, on first use after a start), and each request sees every table as of one
+  moment. A save always reads the spreadsheet afresh, so its checks (versions, unique keys, references, ids) run
+  against what the spreadsheet holds; it then writes back only the rows that changed, in one call (two when a tab
+  must grow first), and what it wrote is what every later page shows at once. An edit made by hand in the
+  spreadsheet shows with the next save or a restart. With `read-cache-seconds` set to a number of seconds, pages also
+  read the spreadsheet again once what was read is that old (requests arriving together wait for one read);
+  `0` makes every request read it.
+- A save costs one read and one write call; pages cost none. Google allows a service account 60
+  read and 60 write calls a minute by default. Busy calls are retried with growing pauses, so a burst of clicks
+  slows down rather than fails (the page shows it is waiting). If that limit is reached often, raise it in the
+  Google Cloud console (APIs & Services, Google Sheets API, Quotas).
 - One running app per spreadsheet, and edit it by hand only while the app is stopped: a hand edit made just before
   the app writes the same tab can be overwritten.
 - Evidence files, `app-settings.properties` and the lock file stay in `data-dir`.
@@ -295,6 +299,7 @@ holds secrets (the Google key) and is not committed.
 | `budget.storage.google-sheets.spreadsheet-id` | not set | The id in the spreadsheet's address: `docs.google.com/spreadsheets/d/<id>/edit` |
 | `budget.storage.google-sheets.credentials-file` | `config/google-credentials.json` | The service account's JSON key; a relative path is looked up next to the jar first, then in the working directory |
 | `budget.storage.google-sheets.timeout-seconds` | `30` | Connect and read timeout of each API call |
+| `budget.storage.google-sheets.read-cache-seconds` | `-1` | When pages read the spreadsheet. `-1`: never, only saves read it (and every save refreshes what pages show); a number of seconds: again once what was read is that old; `0`: every request. Saves always read it afresh |
 | `budget.storage.google-sheets.import-local-data` | `false` | On a start against an empty spreadsheet, copy the `.tbl` files of `data-dir` into it |
 | `budget.storage-time-zone` | the server's zone | The zone times are recorded in (e.g. `Asia/Kolkata`). Set it to the zone the data was recorded in before moving the app to a server in another zone (a cloud server often runs in UTC); each organization's own zone is set in the app |
 | `budget.backup.dir` | `backups` | Where backups are written; a relative path is under the app's root (the folder holding `config/`: next to the jar, else the working directory) |

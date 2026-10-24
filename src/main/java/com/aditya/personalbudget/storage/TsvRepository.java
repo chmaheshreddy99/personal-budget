@@ -5,7 +5,9 @@ import org.springframework.data.repository.ListCrudRepository;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 /**
@@ -60,7 +62,7 @@ public abstract class TsvRepository<T extends Identifiable> implements ListCrudR
 
     @Override
     public List<T> findAllById(Iterable<Long> ids) {
-        List<Long> wanted = StreamSupport.stream(ids.spliterator(), false).toList();
+        Set<Long> wanted = StreamSupport.stream(ids.spliterator(), false).collect(Collectors.toSet());
         return findWhere(row -> wanted.contains(row.getId()));
     }
 

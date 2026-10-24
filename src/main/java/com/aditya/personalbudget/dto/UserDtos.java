@@ -74,14 +74,26 @@ public final class UserDtos {
             /* null = every mobile section of features */
             Set<Feature> mobileFeatures,
             /* maker-checker: TENANT (follow the household), REQUIRED or EXEMPT; null keeps what is set */
-            String approval) {
+            String approval,
+            /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+            Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public UserRequest(String username, String fullName, String email, String password, UserRole role,
+                Boolean active, Set<Feature> features, Boolean mobileAccess, Set<Feature> mobileFeatures,
+                String approval) {
+            this(username, fullName, email, password, role, active, features, mobileAccess, mobileFeatures, approval,
+                    null);
+        }
     }
 
     public record UserView(Long id, String username, String fullName, String email, UserRole role, String roleLabel,
                            boolean active, LocalDateTime createdAt, LocalDateTime lastLoginAt,
                            Set<Feature> features, boolean limited, boolean mobileAccess, Set<Feature> mobileFeatures,
                            /* TENANT, REQUIRED or EXEMPT; and whether what the user records waits for approval now */
-                           String approval, boolean needsApproval) {
+                           String approval, boolean needsApproval,
+                           /* what an edit sends back: a save made on another version is refused */
+                           Long version) {
     }
 
     public record TenantRequest(
@@ -96,7 +108,15 @@ public final class UserDtos {
             /* the sections (menu items) the organization has; null = every section */
             Set<Feature> features,
             /* the time zone its times are shown in ("Asia/Kolkata"); empty: the server's; null (an update): unchanged */
-            @Size(max = 40) String timeZone) {
+            @Size(max = 40) String timeZone,
+            /* the version the form was loaded with: an edit made on another one (or on none) is refused */
+            Long version) {
+
+        /** Without a version: to create one (an edit must carry the version it was made on). */
+        public TenantRequest(String code, String name, String currency, Boolean active, String adminUsername,
+                String adminFullName, String adminPassword, Set<Feature> features, String timeZone) {
+            this(code, name, currency, active, adminUsername, adminFullName, adminPassword, features, timeZone, null);
+        }
     }
 
     public record TenantView(Long id, String code, String name, String currency, boolean active,
@@ -104,6 +124,8 @@ public final class UserDtos {
                              /* the sections the organization has, and whether that is fewer than all */
                              Set<Feature> features, boolean limited,
                              /* its own time zone (null: the server's applies) */
-                             String timeZone) {
+                             String timeZone,
+                             /* what an edit sends back: a save made on another version is refused */
+                             Long version) {
     }
 }

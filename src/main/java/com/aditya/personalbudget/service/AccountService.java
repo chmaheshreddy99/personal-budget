@@ -15,6 +15,7 @@ import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.BudgetRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Chart of accounts management. An account's current balance is stored on it and kept by the ledger
@@ -143,6 +145,17 @@ public class AccountService {
 
     @Transactional
     public AccountView update(Long id, AccountRequest request) {
+        return update(id, request, account -> {
+        });
+    }
+
+    /**
+     * As {@link #update(Long, AccountRequest)}, with {@code also} changing the account further (fields the request
+     * does not hold) in the same save: one edit is one new version and one line of the account's history.
+     */
+    @Transactional
+    public AccountView update(Long id, AccountRequest request, Consumer<Account> also) {
+        Long version = ConcurrentUpdateException.required(request.version(), "accounts", id);
         Account account = require(id);
         AccountClass oldClass = account.getAccountClass();
         String oldCode = account.getCode();
@@ -179,7 +192,8 @@ public class AccountService {
             account.setIfsc(stored.getIfsc());
             account.setUpiId(stored.getUpiId());
         }
-        account.setVersion(request.version());   // a stale form is refused
+        also.accept(account);
+        account.setVersion(version);   // a stale form is refused
         account = accounts.save(account);
         return get(account.getId());
     }
@@ -295,13 +309,11 @@ public class AccountService {
         if (account.getAccountType() != AccountType.BANK && account.getAccountType() != AccountType.WALLET) {
             throw new BusinessException(account.getName() + " is not a bank or wallet account");
         }
-        if (r.version() != null && !r.version().equals(account.getVersion())) {
-            throw new BusinessException(account.getName() + " was changed by someone else; reopen it and try again");
-        }
         account.setInstitution(clean(r.institution()));
         account.setAccountNumber(clean(r.accountNumber()));
         applyBankDetails(account, new AccountRequest(account.getCode(), account.getName(), account.getAccountType(), account.getInstitution(),
                 account.getAccountNumber(), null, null, null, null, null, null, null, null, null, r.holderName(), r.ifsc(), r.upiId()));
+        account.setVersion(ConcurrentUpdateException.required(r.version(), "accounts", id));   // a stale form is refused
         accounts.save(account);
         return get(id);
     }

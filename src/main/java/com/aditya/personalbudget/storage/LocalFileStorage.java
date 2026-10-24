@@ -11,6 +11,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,7 +51,7 @@ public final class LocalFileStorage implements TableStorage {
 
     @Override
     public String describe() {
-        return "Tab-separated files at " + dataDir + " (read from disk on demand)";
+        return "Tab-separated files at " + dataDir + " (a table is read again whenever its file changes)";
     }
 
     /** The names of the tables that have a file in the data folder. */
@@ -157,7 +158,33 @@ public final class LocalFileStorage implements TableStorage {
         } catch (IOException e) {
             throw new StorageException("Cannot write table file " + temp, e);
         }
+        try {
+            dateAfter(file, temp);
+        } catch (IOException e) {
+            throw new StorageException("Cannot date table file " + temp, e);
+        }
         swap(temp, file);
+    }
+
+    /**
+     * A rewritten table must never carry the stamp of the version it replaces, or a reader (in this process or
+     * another one) would take its parsed copy of the old version for the new one: the clock may not have moved since
+     * the old version was written (on Windows it moves in steps of up to 15 ms) and the size may well be the same.
+     * So the new file is always dated after the one it replaces.
+     */
+    private static void dateAfter(Path previous, Path temp) throws IOException {
+        FileTime before;
+        try {
+            before = Files.getLastModifiedTime(previous);
+        } catch (NoSuchFileException e) {
+            return;
+        }
+        if (Files.getLastModifiedTime(temp).compareTo(before) <= 0) {
+            Files.setLastModifiedTime(temp, FileTime.from(before.toInstant().plusMillis(1)));
+            if (Files.getLastModifiedTime(temp).compareTo(before) <= 0) {   // a file system keeping whole seconds only
+                Files.setLastModifiedTime(temp, FileTime.from(before.toInstant().plusSeconds(2)));
+            }
+        }
     }
 
     private void writeSequences(Properties sequences) {

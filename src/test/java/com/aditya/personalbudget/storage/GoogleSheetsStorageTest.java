@@ -12,8 +12,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -232,6 +240,194 @@ class GoogleSheetsStorageTest {
         assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactly("home", "office");
         assertThat(users.findAll()).extracting(AppUser::getUsername).containsExactly("admin");
         assertThat(tenants.save(tenant("next")).getId()).isEqualTo(3L);   // the id sequences came along
+    }
+
+    // ------------------------------------------------------------------ requests sharing what was read
+
+    private final AtomicLong now = new AtomicLong();
+
+    /** A fresh app on the same spreadsheet whose requests share what was read for a minute. */
+    private void openSharing() {
+        storage = new GoogleSheetsStorage(api.client(), "sheet-1", "budget@test.iam.gserviceaccount.com",
+                Duration.ofSeconds(60), now::get);
+        store = new TsvDataStore(dataDir, storage, validator);
+        tenants = new OrganizationRepository(store);
+        users = new AppUserRepository(store);
+    }
+
+    private long reads() {
+        return api.calls.stream().filter("batchGet"::equals).count();
+    }
+
+    @Test
+    void requestsShareOneReadUntilItIsOlderThanTheMaximumAge() {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.calls.clear();
+
+        for (int request = 0; request < 5; request++) {
+            assertThat(tenants.findAll()).hasSize(1);
+            assertThat(users.findAll()).isEmpty();
+            store.endRequest();
+        }
+        assertThat(api.calls).isEmpty();   // the save left what it wrote for every request after it
+
+        now.addAndGet(Duration.ofSeconds(61).toNanos());
+        assertThat(tenants.findAll()).hasSize(1);
+        store.endRequest();
+        assertThat(tenants.findAll()).hasSize(1);
+        assertThat(api.calls).containsExactly("batchGet");
+    }
+
+    @Test
+    void aSaveIsSeenByTheNextRequestAtOnce() {
+        openSharing();
+        assertThat(tenants.count()).isZero();
+        store.endRequest();
+
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.calls.clear();
+        assertThat(tenants.findByCode("home")).isPresent();
+        assertThat(api.calls).isEmpty();
+    }
+
+    @Test
+    void anEditByHandShowsOnceTheSharedReadIsTooOld() {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
+
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Organization home");
+        store.endRequest();
+        now.addAndGet(Duration.ofSeconds(61).toNanos());
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Renamed by hand");
+    }
+
+    @Test
+    void aSaveStillChecksAgainstWhatTheSpreadsheetHoldsNotAgainstASharedRead() {
+        openSharing();
+        Organization home = tenants.save(tenant("home"));
+        store.endRequest();
+        Organization stale = tenants.findById(home.getId()).orElseThrow();   // version 0, from the shared read
+        store.endRequest();
+        var cells = api.tabs.get("organizations").cells;
+        cells.get(1).set(cells.getFirst().indexOf("version"), "1");          // changed in the spreadsheet meanwhile
+        cells.get(1).set(cells.getFirst().indexOf("name"), "Renamed by hand");
+
+        api.calls.clear();
+        stale.setName("From a stale screen");
+        assertThatThrownBy(() -> tenants.save(stale)).isInstanceOf(ConcurrentUpdateException.class);
+        assertThat(api.calls).containsExactly("batchGet");   // read afresh, though the shared read was young
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Renamed by hand");
+    }
+
+    @Test
+    void readingOnlyWhenSavingKeepsPagesOffTheSpreadsheetAndEverySaveRefreshesThem() {
+        storage = new GoogleSheetsStorage(api.client(), "sheet-1", "budget@test.iam.gserviceaccount.com",
+                Duration.ofSeconds(-1), now::get);
+        store = new TsvDataStore(dataDir, storage, validator);
+        tenants = new OrganizationRepository(store);
+        users = new AppUserRepository(store);
+        Organization home = tenants.save(tenant("home"));
+        store.endRequest();
+        api.calls.clear();
+
+        // pages: never a read, however long it has been
+        now.addAndGet(Duration.ofDays(1).toNanos());
+        for (int request = 0; request < 3; request++) {
+            assertThat(tenants.findAll()).hasSize(1);
+            store.endRequest();
+        }
+        assertThat(api.calls).isEmpty();
+
+        // an edit by hand shows with the next save, whatever it saves
+        api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
+        assertThat(tenants.findById(home.getId()).orElseThrow().getName()).isEqualTo("Organization home");
+        store.endRequest();
+        users.save(user(home.getId(), "anna"));
+        store.endRequest();
+        api.calls.clear();
+        assertThat(tenants.findById(home.getId()).orElseThrow().getName()).isEqualTo("Renamed by hand");
+        assertThat(users.findAll()).extracting(AppUser::getUsername).containsExactly("anna");
+        assertThat(api.calls).isEmpty();
+    }
+
+    @Test
+    void requestsArrivingTogetherWaitForOneRead() throws Exception {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        now.addAndGet(Duration.ofSeconds(61).toNanos());
+        api.calls.clear();
+
+        int threads = 12;
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<Integer>> results = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    store.beginReadOnly();
+                    try {
+                        return tenants.findAll().size() + users.findAll().size();
+                    } finally {
+                        store.endRequest();
+                    }
+                }));
+            }
+            start.countDown();
+            for (Future<Integer> result : results) {
+                assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(reads()).isEqualTo(1);
+    }
+
+    @Test
+    void aTableAddedAfterTheSharedReadIsReadFromTheSpreadsheet() {
+        api.addTab("app_users", 1000, 26).cells.addAll(List.of(
+                new ArrayList<>(List.of("id", "tenantId", "username")), new ArrayList<>(List.of("1", "1", "early"))));
+        storage = new GoogleSheetsStorage(api.client(), "sheet-1", "budget@test.iam.gserviceaccount.com",
+                Duration.ofSeconds(60), now::get);
+        store = new TsvDataStore(dataDir, storage, validator);
+        tenants = new OrganizationRepository(store);
+        assertThat(tenants.count()).isZero();   // read before app_users is a table of the app
+        store.endRequest();
+
+        users = new AppUserRepository(store);
+        assertThat(store.findAll(AppUser.class, u -> true)).extracting(AppUser::getUsername).containsExactly("early");
+    }
+
+    @Test
+    void writesOnlyTheRowsThatChanged() {
+        Organization one = tenants.save(tenant("one"));
+        tenants.save(tenant("two"));
+        tenants.save(tenant("three"));
+
+        api.writtenRows.clear();
+        Organization changed = tenants.findById(one.getId()).orElseThrow();
+        changed.setName("Renamed");
+        tenants.save(changed);
+        assertThat(api.writtenRows).containsExactly("'organizations':2+1");   // header row 1, "one" row 2
+
+        api.writtenRows.clear();
+        tenants.save(tenant("four"));
+        assertThat(api.writtenRows).containsExactly("'organizations':5+1", "'_sequences':2+1");
+
+        api.writtenRows.clear();
+        tenants.deleteById(one.getId());
+        assertThat(api.writtenRows).containsExactly("'organizations':2+4");   // the rows below move up, the last is cleared
+
+        open();
+        assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactly("two", "three", "four");
+        assertThat(api.tabs.get("organizations").cell(5, 1)).isEmpty();
+        assertThat(tenants.findById(one.getId())).isEmpty();
     }
 
     @Test

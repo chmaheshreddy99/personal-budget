@@ -127,7 +127,8 @@ class ConstructionTests {
         d = projects.saveExtra(id, null, new ExtraRequest("Extra bathroom", "On the first floor", bd(150000), 20, today, null));
         Long extraId = d.extras().getFirst().getId();
         assertThat(d.figures().extrasValue()).isEqualByComparingTo("0");
-        d = projects.update(id, project("CONTRACT", null, d.project().getName(), "Suresh Reddy", "9876543210", today.minusMonths(3), today.plusMonths(6), bd(2)));
+        d = projects.update(id, project("CONTRACT", null, d.project().getName(), "Suresh Reddy", "9876543210", today.minusMonths(3), today.plusMonths(6), bd(2),
+                d.project().getVersion()));
         var contract = agreements.make(id, make("CONTRACT", null));
         assertThat(contract.title()).isEqualTo("Construction Agreement");
         assertThat(contract.terms()).contains("Arbitration and Conciliation Act, 1996").contains("PAYMENT SCHEDULE");
@@ -298,11 +299,17 @@ class ConstructionTests {
 
     private static ProjectRequest project(String kind, String landMode, String name, String client, String phone, LocalDate start, LocalDate end,
                                           BigDecimal lateRate) {
+        return project(kind, landMode, name, client, phone, start, end, lateRate, null);
+    }
+
+    /** {@code version}: of the project, for an edit. */
+    private static ProjectRequest project(String kind, String landMode, String name, String client, String phone, LocalDate start, LocalDate end,
+                                          BigDecimal lateRate, Long version) {
         return new ProjectRequest(kind, landMode, name, null, "Plot 45, Road 3", "Hyderabad", "123/A", "45", bd(240), "SQ_YD",
                 "North: road; South: plot 46", bd(2400), 2, "BP-2026-77", "DEVELOPMENT".equals(kind) ? "P02400001234" : null, start, end,
                 client, phone, client == null ? null : "Banjara Hills", null, null, lateRate, 0, 12, bd(800000), null,
                 "JOINT".equals(landMode) ? bd(40) : null, "JOINT".equals(landMode) ? bd(1000000) : null, 4, bd(5000),
-                "Sri Builders", "Madhapur", "Aditya", "Managing Partner", null);
+                "Sri Builders", "Madhapur", "Aditya", "Managing Partner", null, version);
     }
 
     private Long bank(String name) {

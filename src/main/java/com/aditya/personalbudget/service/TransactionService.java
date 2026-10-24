@@ -16,6 +16,7 @@ import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.storage.ConcurrentUpdateException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -152,7 +153,7 @@ public class TransactionService {
         JournalEntry existing = requireEditable(id);
         JournalDraft draft = toDraft(request, existing.getVoucherType(), existing.getSourceType());
         draft.source(existing.getSourceType(), existing.getSourceId());
-        return get(ledger.repost(id, draft, request.version()).getId());
+        return get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
     }
 
     @Transactional
