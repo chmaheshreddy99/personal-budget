@@ -38,7 +38,9 @@ import java.util.stream.Collectors;
  * The "database": a set of {@link TsvTable}s kept by a {@link TableStorage}: tab-separated files in the data
  * directory (the default) or the tabs of a Google spreadsheet. Everything below works the same on either.
  * <p>
- * <b>No data is kept in memory.</b> Data is read from the storage when it is needed, and dropped again:
+ * <b>No data is kept in memory here.</b> Data is read from the storage when it is needed, and dropped again (the
+ * Google Sheets storage answers reads from one shared copy of the spreadsheet, and every unit of work from the
+ * spreadsheet itself: see {@link GoogleSheetsStorage}):
  * <ul>
  *   <li>Within one request a table is parsed once and reused; it is parsed again as soon as the
  *       storage reports a change (another request committed, another server process, or a manual edit).
@@ -206,7 +208,7 @@ public class TsvDataStore {
         lock.writeLock().lock();
         try {
             views.remove();
-            storage.forget();   // the unit of work reads what the storage holds now, never an earlier read
+            storage.readFresh();   // the unit of work reads what the storage holds now, never an earlier read or a shared copy
             currentWork.set(new UnitOfWork(lockFile()));
         } catch (RuntimeException e) {
             lock.writeLock().unlock();

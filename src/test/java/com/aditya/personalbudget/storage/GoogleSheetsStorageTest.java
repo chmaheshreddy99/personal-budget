@@ -172,30 +172,125 @@ class GoogleSheetsStorageTest {
                 .isInstanceOf(DataIntegrityException.class).hasMessageContaining("still referenced");
     }
 
-    @Test
-    void theNextRequestSeesAnEditMadeInTheSpreadsheet() {
-        tenants.save(tenant("home"));
-        store.endRequest();
-        api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
-        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Renamed by hand");
+    /** The app on the same spreadsheet, its shared copy read again after {@code refresh} and not used after {@code maxAge}. */
+    private void open(java.time.Duration refresh, java.time.Duration maxAge) {
+        storage = new GoogleSheetsStorage(api.client(), "sheet-1", "budget@test.iam.gserviceaccount.com", refresh, maxAge);
+        store = new TsvDataStore(dataDir, storage, validator);
+        tenants = new OrganizationRepository(store);
+        users = new AppUserRepository(store);
     }
 
     @Test
-    void readsOncePerRequestAndKeepsNothingAfterIt() {
+    void readsComeFromTheSharedCopyAndASaveIsSeenAtOnceWithoutCallingGoogle() {
         tenants.save(tenant("home"));
         store.endRequest();
         api.calls.clear();
 
-        // one request: every table it reads comes from one call
+        // requests after the save: every table they read comes from the copy the save left, no call to Google
         assertThat(tenants.findAll()).hasSize(1);
         assertThat(users.findAll()).isEmpty();
-        assertThat(tenants.count()).isEqualTo(1);
-        assertThat(api.calls).containsExactly("batchGet");
-
-        // the request ends: what it read is gone, the next one reads again
         store.endRequest();
-        assertThat(tenants.findAll()).hasSize(1);
-        assertThat(api.calls).containsExactly("batchGet", "batchGet");
+        assertThat(tenants.count()).isEqualTo(1);
+        store.endRequest();
+        assertThat(api.calls).isEmpty();
+
+        // a save in one request is seen by the next at once, again without reading the spreadsheet for it
+        tenants.save(tenant("next"));
+        store.endRequest();
+        api.calls.clear();
+        assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactly("home", "next");
+        assertThat(api.calls).isEmpty();
+    }
+
+    @Test
+    void aRequestSeesOneMomentEvenWhenASaveLandsMeanwhile() {
+        tenants.save(tenant("home"));
+        store.endRequest();
+        assertThat(tenants.count()).isEqualTo(1);   // this request took the copy of this moment ...
+
+        Thread other = new Thread(() -> { tenants.save(tenant("other")); store.endRequest(); });
+        other.start();
+        try { other.join(); } catch (InterruptedException e) { throw new AssertionError(e); }
+
+        assertThat(tenants.count()).isEqualTo(1);   // ... and keeps it until it ends
+        store.endRequest();
+        assertThat(tenants.count()).isEqualTo(2);   // the next request sees the save
+    }
+
+    @Test
+    void anEditMadeInTheSpreadsheetIsSeenOnceTheCopyIsReadAgain() throws Exception {
+        open(java.time.Duration.ofMillis(50), java.time.Duration.ofMinutes(5));
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
+        Thread.sleep(80);
+
+        // older than the refresh time: this request still gets the copy at once, and it is read again in the background
+        api.calls.clear();
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Organization home");
+        store.endRequest();
+        long until = System.currentTimeMillis() + 5000;
+        while (!api.calls.contains("batchGet") && System.currentTimeMillis() < until) Thread.sleep(10);
+        Thread.sleep(50);
+
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Renamed by hand");
+    }
+
+    @Test
+    void afterTheAppSatIdleTheSpreadsheetIsReadBeforeTheCopyIsUsed() throws Exception {
+        open(java.time.Duration.ofMillis(20), java.time.Duration.ofMillis(40));
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
+        Thread.sleep(80);
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Renamed by hand");
+    }
+
+    @Test
+    void requestsArrivingTogetherWaitForOneReading() throws Exception {
+        tenants.save(tenant("home"));
+        open();   // a restarted app: no copy yet
+        api.calls.clear();
+        int n = 8;
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        List<java.util.concurrent.Future<Long>> counts = new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            counts.add(pool.submit(() -> { go.await(); try { return tenants.count(); } finally { store.endRequest(); } }));
+        }
+        go.countDown();
+        for (var c : counts) assertThat(c.get()).isEqualTo(1);
+        pool.shutdown();
+        assertThat(api.calls.stream().filter("batchGet"::equals).count()).isEqualTo(1);
+    }
+
+    @Test
+    void aReadingOlderThanASaveNeverReplacesWhatTheSaveWrote() throws Exception {
+        tenants.save(tenant("home"));
+        open(java.time.Duration.ofMinutes(5), java.time.Duration.ofMinutes(5));   // a restarted app: no copy yet
+
+        // a request reads the spreadsheet; before its answer arrives, another request saves
+        api.afterNextRead = () -> {
+            Thread saver = new Thread(() -> {
+                storage.readFresh();
+                List<List<String>> rows = new java.util.ArrayList<>(storage.read("organizations"));
+                List<String> renamed = new java.util.ArrayList<>(rows.get(1));
+                renamed.set(2, "Saved meanwhile");
+                rows.set(1, renamed);
+                storage.write(java.util.Map.of("organizations", rows), null);
+                storage.forget();
+            });
+            saver.start();
+            try { saver.join(); } catch (InterruptedException e) { throw new AssertionError(e); }
+        };
+        // the waiting request gets the newer moment: what the save wrote
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Saved meanwhile");
+        store.endRequest();
+
+        // and the shared copy is the save's, not the older reading's (served without asking Google)
+        api.calls.clear();
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Saved meanwhile");
+        assertThat(api.calls).isEmpty();
     }
 
     @Test

@@ -49,11 +49,20 @@ import java.util.concurrent.atomic.AtomicLong;
  * The app signs in as a Google Cloud <i>service account</i> (its JSON key file); the spreadsheet must be shared
  * with that account's e-mail address as an Editor.
  * <p>
- * <b>No data is kept in memory.</b> The spreadsheet is read when data is needed: the first read of a request (or of
- * a unit of work) fetches every table tab in one API call, that copy serves the rest of the request on that thread
- * only, and it is dropped when the request ends ({@link #forget()}). A unit of work starts by dropping it too, so a
- * save always works on what the spreadsheet holds at that moment, and its changes are written in one call before it
- * ends. What is kept is only the layout of the spreadsheet (tab names, ids and sizes), which holds no data.
+ * <b>Reads share one copy; saves work on the spreadsheet itself.</b> A call to Google takes over half a second
+ * whatever it reads, and Google allows about 60 reads a minute, so reading the whole spreadsheet for every request
+ * made every page slow (and, past the limit, made it wait seconds for Google). Instead:
+ * <ul>
+ *   <li>A request takes the latest copy of the spreadsheet (every tab, read in one call) and keeps it until it ends
+ *       ({@link #forget()}): all its reads see one moment.</li>
+ *   <li>That copy is shared by all requests. A save in this app replaces it with what it wrote, at once, so what is
+ *       done in the app is seen at once. Older than {@code refreshAfter} (10 s) it is read again in the background, so
+ *       a hand edit in the spreadsheet shows up within seconds; older than {@code maxAge} (60 s: the app sat idle)
+ *       the request reads the spreadsheet first. Requests arriving together wait for one reading.</li>
+ *   <li>A unit of work ({@link #readFresh()}) never uses the shared copy: it reads the spreadsheet itself, so a save
+ *       always checks versions, unique keys and references, and hands out ids, against what the spreadsheet holds at
+ *       that moment; its changes are written in one call before it ends.</li>
+ * </ul>
  * <p>
  * Cell text is stored as is ({@code valueInputOption=RAW}): nothing is parsed as a number, date or formula, and a
  * line break in a note is a real line break in the cell.
@@ -84,15 +93,21 @@ public final class GoogleSheetsStorage implements TableStorage {
         }
     }
 
-    /** What one request (or unit of work) read from the spreadsheet; it lives only on that thread, for that request. */
+    /**
+     * What the spreadsheet held at one moment. Never changed once made: a request pins one for all its reads (one
+     * consistent moment), and the latest is shared by all requests (see {@link #shared()}).
+     */
     private static final class Snapshot {
         /** Header first; trailing empty cells and rows left out. Tabs that do not exist are absent. */
         final Map<String, List<List<String>>> rows;
-        long version;
+        final long version;
+        /** When the reading of the spreadsheet began (System.nanoTime): a later read is newer. */
+        final long readAt;
 
-        Snapshot(Map<String, List<List<String>>> rows, long version) {
-            this.rows = rows;
+        Snapshot(Map<String, List<List<String>>> rows, long version, long readAt) {
+            this.rows = Collections.unmodifiableMap(rows);
             this.version = version;
+            this.readAt = readAt;
         }
     }
 
@@ -112,7 +127,27 @@ public final class GoogleSheetsStorage implements TableStorage {
     /** Guarded by {@code this}: tables whose tab is still to be added. */
     private final Map<String, List<String>> toCreate = new LinkedHashMap<>();
     private final ThreadLocal<Snapshot> current = new ThreadLocal<>();
+    /** This thread starts a unit of work: its next read goes to the spreadsheet itself, never to the shared copy. */
+    private final ThreadLocal<Boolean> fresh = new ThreadLocal<>();
     private final AtomicLong versions = new AtomicLong();
+    /** The latest copy of the spreadsheet, shared by every request (null until the first read). */
+    private volatile Snapshot shared;
+    /** Writes made by this process: a read that began before one finished is older than what it wrote. */
+    private final AtomicLong writes = new AtomicLong();
+    /** One reading of the spreadsheet at a time for the shared copy: requests arriving together wait for it. */
+    private final Object reading = new Object();
+    /** Guards replacing the shared copy (a reading against a save finishing at the same time). */
+    private final Object publishing = new Object();
+    private final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.ExecutorService refresher = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "sheets-refresh");
+        t.setDaemon(true);
+        return t;
+    });
+    /** A shared copy older than this is read again in the background (hand edits in the spreadsheet show up then). */
+    private final long refreshAfterNanos;
+    /** A shared copy older than this is not used: the request reads the spreadsheet first (after the app sat idle). */
+    private final long maxAgeNanos;
 
     /**
      * Signs in with a service account key file and opens the spreadsheet.
@@ -122,6 +157,18 @@ public final class GoogleSheetsStorage implements TableStorage {
      * @param timeout         connect and read timeout of each call
      */
     public static GoogleSheetsStorage connect(Path credentialsFile, String spreadsheetId, Duration timeout) {
+        return connect(credentialsFile, spreadsheetId, timeout, DEFAULT_REFRESH, DEFAULT_MAX_AGE);
+    }
+
+    /** How old the shared copy may get before it is read again in the background, and before it is not used at all. */
+    public static final Duration DEFAULT_REFRESH = Duration.ofSeconds(10);
+    public static final Duration DEFAULT_MAX_AGE = Duration.ofSeconds(60);
+
+    /**
+     * @param refreshAfter the shared copy older than this is read again in the background
+     * @param maxAge       the shared copy older than this is read again before it is used
+     */
+    public static GoogleSheetsStorage connect(Path credentialsFile, String spreadsheetId, Duration timeout, Duration refreshAfter, Duration maxAge) {
         if (spreadsheetId == null || spreadsheetId.isBlank()) {
             throw new StorageException("Google Sheets storage needs budget.storage.google-sheets.spreadsheet-id: the id in the "
                     + "spreadsheet's address, docs.google.com/spreadsheets/d/<id>/edit", null);
@@ -144,7 +191,7 @@ public final class GoogleSheetsStorage implements TableStorage {
             Sheets sheets = new Sheets.Builder(GoogleNetHttpTransport.newTrustedTransport(), GsonFactory.getDefaultInstance(), init)
                     .setApplicationName("personal-budget")
                     .build();
-            return new GoogleSheetsStorage(sheets, spreadsheetId.trim(), credentials.getClientEmail());
+            return new GoogleSheetsStorage(sheets, spreadsheetId.trim(), credentials.getClientEmail(), refreshAfter, maxAge);
         } catch (IOException | GeneralSecurityException e) {
             throw new StorageException("Google Sheets storage: cannot use the key file " + credentialsFile.toAbsolutePath()
                     + " (" + e.getMessage() + ")", e);
@@ -152,16 +199,23 @@ public final class GoogleSheetsStorage implements TableStorage {
     }
 
     GoogleSheetsStorage(Sheets sheets, String spreadsheetId, String account) {
+        this(sheets, spreadsheetId, account, DEFAULT_REFRESH, DEFAULT_MAX_AGE);
+    }
+
+    GoogleSheetsStorage(Sheets sheets, String spreadsheetId, String account, Duration refreshAfter, Duration maxAge) {
         this.sheets = sheets;
         this.spreadsheetId = spreadsheetId;
         this.account = account;
+        this.refreshAfterNanos = refreshAfter.toNanos();
+        this.maxAgeNanos = Math.max(refreshAfter.toNanos(), maxAge.toNanos());
         this.title = loadLayout();
         create(SEQUENCES, List.of("table", "lastId"));
     }
 
     @Override
     public String describe() {
-        return "Google spreadsheet \"" + title + "\" (" + spreadsheetId + ") as " + account + ", read on demand (nothing kept in memory)";
+        return "Google spreadsheet \"" + title + "\" (" + spreadsheetId + ") as " + account + ", one shared copy for reads (read again after "
+                + Duration.ofNanos(refreshAfterNanos).toSeconds() + " s), every save on what the spreadsheet holds";
     }
 
     // ================================================================== TableStorage
@@ -200,6 +254,13 @@ public final class GoogleSheetsStorage implements TableStorage {
     @Override
     public void forget() {
         current.remove();
+        fresh.remove();
+    }
+
+    @Override
+    public void readFresh() {
+        current.remove();
+        fresh.set(Boolean.TRUE);
     }
 
     @Override
@@ -234,10 +295,16 @@ public final class GoogleSheetsStorage implements TableStorage {
                 writeAll(all, before);
             }
         }
-        // the rest of this request sees what it wrote, without reading the spreadsheet again
+        // the rest of this request, and every request after it, sees what it wrote without reading the spreadsheet again
         Map<String, List<List<String>>> after = new HashMap<>(before.rows);
         all.forEach((name, rows) -> after.put(name, normalize(rows)));
-        current.set(new Snapshot(after, versions.incrementAndGet()));
+        Snapshot written;
+        synchronized (publishing) {
+            written = new Snapshot(after, versions.incrementAndGet(), System.nanoTime());
+            writes.incrementAndGet();
+            shared = written;
+        }
+        current.set(written);
     }
 
     @Override
@@ -260,7 +327,7 @@ public final class GoogleSheetsStorage implements TableStorage {
 
     /** True until the app has stored anything here: no id was ever handed out. */
     public boolean isEmpty() {
-        forget();
+        readFresh();
         try {
             return readSequences().isEmpty();
         } finally {
@@ -281,7 +348,7 @@ public final class GoogleSheetsStorage implements TableStorage {
                 tables.put(name, rows);
             }
         }
-        forget();
+        readFresh();
         try {
             if (!tables.isEmpty()) {
                 write(tables, local.readSequences());
@@ -294,14 +361,71 @@ public final class GoogleSheetsStorage implements TableStorage {
 
     // ================================================================== reading
 
-    /** This thread's copy for the current request, read from the spreadsheet on first use. */
+    /**
+     * The copy this thread works on until the request (or unit of work) ends: one moment for all its reads. A unit of
+     * work reads the spreadsheet itself, so a save always works on what the spreadsheet holds; anything else takes the
+     * shared copy.
+     */
     private Snapshot snapshot() {
         Snapshot s = current.get();
         if (s == null) {
-            s = new Snapshot(fetch(), versions.incrementAndGet());
+            s = Boolean.TRUE.equals(fresh.get()) ? read() : shared();
             current.set(s);
         }
         return s;
+    }
+
+    /**
+     * The latest copy, without calling Google: what the last reading or this process's last save left. Older than
+     * {@code refreshAfter}: it is read again in the background (hand edits in the spreadsheet show up then). Older than
+     * {@code maxAge} (the app sat idle), or none yet: the spreadsheet is read first, once for all requests waiting.
+     */
+    private Snapshot shared() {
+        Snapshot s = shared;
+        if (s != null) {
+            long age = System.nanoTime() - s.readAt;
+            if (age < maxAgeNanos) {
+                if (age >= refreshAfterNanos) refreshLater();
+                return s;
+            }
+        }
+        synchronized (reading) {
+            s = shared;
+            if (s != null && System.nanoTime() - s.readAt < maxAgeNanos) return s;   // read by a request that came first
+            Snapshot read = read();
+            Snapshot latest = shared;
+            return latest != null && latest.readAt > read.readAt ? latest : read;   // a save finished meanwhile: newer
+        }
+    }
+
+    /** Reads the spreadsheet now; the copy becomes the shared one unless something newer already is. */
+    private Snapshot read() {
+        long writesBefore = writes.get();
+        long began = System.nanoTime();
+        Snapshot s = new Snapshot(fetch(), versions.incrementAndGet(), began);
+        synchronized (publishing) {
+            // a save that finished while this was being read is newer than it: never replaced by an older picture
+            Snapshot now = shared;
+            if (writes.get() == writesBefore && (now == null || began > now.readAt)) shared = s;
+        }
+        return s;
+    }
+
+    private void refreshLater() {
+        if (!refreshing.compareAndSet(false, true)) return;
+        try {
+            refresher.execute(() -> {
+                try {
+                    read();
+                } catch (RuntimeException e) {
+                    log.warn("Google Sheets: could not refresh the shared copy ({}); the next request tries again", e.getMessage());
+                } finally {
+                    refreshing.set(false);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            refreshing.set(false);
+        }
     }
 
     /** Reads every table tab in one call. */

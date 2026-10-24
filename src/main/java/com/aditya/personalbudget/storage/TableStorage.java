@@ -43,6 +43,14 @@ public interface TableStorage {
     default void forget() {
     }
 
+    /**
+     * A unit of work starts: like {@link #forget()}, and its reads must come from the storage itself, never from a
+     * copy kept for reading (a save checks versions and hands out ids against what is really stored).
+     */
+    default void readFresh() {
+        forget();
+    }
+
     /** How much is stored, for the footer. */
     Footprint footprint();
 

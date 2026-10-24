@@ -50,7 +50,12 @@ final class FakeSheetsApi {
     }
 
     final Map<String, Tab> tabs = new LinkedHashMap<>();
-    final List<String> calls = new ArrayList<>();
+    final List<String> calls = java.util.Collections.synchronizedList(new ArrayList<>());
+    /**
+     * Run once, after the next values.batchGet was answered and before the answer reaches the app: what happens then
+     * (another request saving) is newer than what that read returns.
+     */
+    volatile Runnable afterNextRead;
     private int nextId = 1;
 
     FakeSheetsApi() {
@@ -72,6 +77,11 @@ final class FakeSheetsApi {
                     public LowLevelHttpResponse execute() throws IOException {
                         String body = getStreamingContent() == null ? "" : content(this);
                         String json = handle(method, URI.create(url), body);
+                        Runnable after = afterNextRead;
+                        if (after != null && url.contains("/values:batchGet")) {
+                            afterNextRead = null;
+                            after.run();
+                        }
                         return new MockLowLevelHttpResponse().setContentType("application/json").setContent(json);
                     }
                 };
