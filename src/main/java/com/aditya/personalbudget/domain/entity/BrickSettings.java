@@ -82,6 +82,10 @@ public class BrickSettings implements TenantOwned {
     @References(Account.class)
     private Long payAccountId;
 
+    /** The Bricks phone app: on or off, the screens of each role and user, what may be done on the phone (JSON, see BrickAppService). */
+    @Column(length = 8000)
+    private String mobileApp;
+
     /** Optimistic locking: a save based on an older version is rejected. */
     @jakarta.persistence.Version
     private Long version;

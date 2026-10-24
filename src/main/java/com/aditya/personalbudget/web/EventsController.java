@@ -21,7 +21,11 @@ public class EventsController {
 
     @GetMapping(value = "/api/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @RequiresPermission(Permission.VIEW)
-    public SseEmitter events() {
-        return notifier.subscribe(UserContext.get());
+    public org.springframework.http.ResponseEntity<SseEmitter> events() {
+        // a proxy or tunnel in between (nginx, a cloud load balancer) must pass each event on at once, not hold them back
+        return org.springframework.http.ResponseEntity.ok()
+                .header("Cache-Control", "no-cache, no-transform")
+                .header("X-Accel-Buffering", "no")
+                .body(notifier.subscribe(UserContext.get()));
     }
 }

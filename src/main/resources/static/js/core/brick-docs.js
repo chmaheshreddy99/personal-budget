@@ -40,7 +40,7 @@ export function inWords(amount) {
 
 function letterhead(c, title, no, date, extra = '') {
     return `<header class="bd-brand">
-        <div class="bd-logo">${LOGO}</div>
+        ${c.logo ? `<div class="bd-logo own"><img src="${esc(c.logo)}" alt=""></div>` : `<div class="bd-logo">${LOGO}</div>`}
         <div class="bd-co"><b>${esc(c.name || '')}</b>${c.address ? `<small>${esc(c.address)}</small>` : ''}${c.phone ? `<small>Phone ${esc(c.phone)}</small>` : ''}</div>
         <div class="bd-title"><span>${esc(title)}</span><b>${esc(no)}</b><small>${esc(date)}</small>${extra}</div>
     </header>`;
@@ -151,13 +151,15 @@ export function slipDocHtml(v) {
     const s = v.slip, r = v.resource || {}, c = v.company;
     const advance = s.kind === 'ADVANCE';
     const cancelled = s.status === 'CANCELLED';
+    // a slip worked out but not paid yet (the phone shows it before the payment is recorded)
+    const draft = s.status === 'DRAFT';
     const groups = KIND_ORDER.map(k => [k, v.lines.filter(l => l.kind === k)]).filter(([, l]) => l.length);
     const verifyText = `${s.slipNo} | ${whole(s.net)} | ${s.paidOn} | key ${v.keyFingerprint} | sig ${String(s.digitalSignature || '').slice(0, 24)}`;
     const initials = String(r.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     return `<article class="bd-doc slip ${cancelled ? 'cancelled' : ''}">
         <div class="bd-watermark">${LOGO}</div>
-        ${cancelled ? '<div class="bd-stamp void">CANCELLED</div>' : `<div class="bd-stamp paid">${advance ? 'ADVANCE' : 'PAID'}</div>`}
-        ${letterhead(c, advance ? 'Advance slip' : 'Payment slip', s.slipNo, `Paid ${day(s.paidOn)}`)}
+        ${cancelled ? '<div class="bd-stamp void">CANCELLED</div>' : draft ? '<div class="bd-stamp due">DRAFT</div>' : `<div class="bd-stamp paid">${advance ? 'ADVANCE' : 'PAID'}</div>`}
+        ${letterhead(c, advance ? 'Advance slip' : 'Payment slip', s.slipNo, draft ? `To be paid ${day(s.paidOn)}` : `Paid ${day(s.paidOn)}`)}
         <section class="bd-payee">
             <span class="bd-avatar">${esc(initials)}</span>
             <div class="bd-payee-main"><b>${esc(r.name || '')}</b><span>${esc(role(r.role))}${r.kind === 'TEAM' ? ` · team${r.memberCount ? ` of ${r.memberCount}` : ''}` : ''}</span>
@@ -181,11 +183,11 @@ export function slipDocHtml(v) {
             <div class="r"><b>${rupees(d.amount)}</b><small>${whole(d.balanceAfter)} left</small></div></div>`).join('')}</section>` : ''}
         <section class="bd-net">
             <div class="bd-net-parts">${advance ? '' : `<span>Gross <b>${rupees(s.gross)}</b></span>${Number(s.deductions) ? `<span>Deductions <b>− ${rupees(s.deductions)}</b></span>` : ''}`}</div>
-            <div class="bd-net-box"><small>${advance ? 'Advance given' : 'Net paid'}</small><b>${rupees(s.net)}</b><em>${esc(v.inWords || inWords(s.net))}</em></div>
+            <div class="bd-net-box"><small>${advance ? 'Advance given' : draft ? 'Net to pay' : 'Net paid'}</small><b>${rupees(s.net)}</b><em>${esc(v.inWords || inWords(s.net))}</em></div>
         </section>
         ${s.narrative && !advance ? `<p class="bd-note">${esc(s.narrative)}</p>` : ''}
         ${signatures(c, `<div class="bd-sig"><i class="bd-space"></i><b>${esc(r.name || '')}</b><small>Received by (signature / thumb)</small></div>`)}
-        ${digital(s.payload, s.digitalSignature, v.keyFingerprint, verifyText,
+        ${draft ? '<div class="bd-verify unsigned"><span>A draft: the slip is numbered and digitally signed when the payment is recorded.</span></div>' : digital(s.payload, s.digitalSignature, v.keyFingerprint, verifyText,
             `Issued by ${esc(s.createdBy || '')} on ${when(s.createdAt)}${v.entryNo ? ` · journal ${esc(v.entryNo)}` : ''}${cancelled ? ` · cancelled ${when(s.cancelledAt)} by ${esc(s.cancelledBy || '')}` : ''}`)}
     </article>`;
 }
@@ -202,17 +204,11 @@ export async function verifyDoc(root, payload, signature, publicKey) {
 }
 
 /**
- * Prints a document on one A4 sheet: it is laid out at the page's printable width (A4 less 10 mm margins: 190 × 277 mm),
- * measured, and scaled down just enough that all of it (the signatures, the seal and the digital signature too) fits on
- * the one page; it is never split over two.
+ * The printed sheet: the document laid out at the page's printable width (A4 less 10 mm margins: 190 × 277 mm), packed
+ * tighter when long and scaled down just enough that all of it fits on one page (never split over two). Shared by
+ * printDoc and the phone app's print (brick-doc.html), so a printed copy looks the same from either.
  */
-export function printDoc(html, title) {
-    const win = window.open('', '_blank', 'width=860,height=1100');
-    if (!win) return false;
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
-        <link rel="stylesheet" href="${location.origin}/css/theme.css"><link rel="stylesheet" href="${location.origin}/css/bond.css">
-        <link rel="stylesheet" href="${location.origin}/css/brick-docs.css">
-        <style>
+export const PRINT_CSS = `
             @page { size: A4 portrait; margin: 10mm; }
             html, body { margin: 0; padding: 0; background: #fff; }
             /* 190 mm of printable width; the sheet's height (277 mm) is what it is fitted into */
@@ -232,11 +228,10 @@ export function printDoc(html, title) {
             .bd-dense .bd-totals, .bd-dense .bd-net { margin-top: 8px; }
             .bd-dense .bd-sign { margin-top: 16px; }
             .bd-dense .bd-verify { margin-top: 8px; padding: 6px 0 4px; }
-            .bd-dense .bd-watermark { display: none; }
-        </style></head>
-        <body class="bd-print"><div class="bd-sheet">${html.replace(/<span data-verify[^>]*>[^<]*<\/span>/, '')}</div>
-        <script>
-            function fit() {
+            .bd-dense .bd-watermark { display: none; }`;
+
+/** Fits the document on the sheet (as source, to run in the printing window). */
+export const FIT_SCRIPT = `function fit() {
                 var doc = document.querySelector('.bd-doc');
                 var probe = document.createElement('div');
                 probe.style.cssText = 'position:absolute;visibility:hidden;height:276mm;width:1px';
@@ -248,7 +243,20 @@ export function printDoc(html, title) {
                 var h = doc.getBoundingClientRect().height;
                 if (h > room) { doc.classList.add('bd-dense'); h = doc.getBoundingClientRect().height; }
                 if (h > room) doc.style.zoom = Math.floor((room / h) * 1000) / 1000;
-            }
+            }`;
+
+/** Prints a document on one A4 sheet (see PRINT_CSS). */
+export function printDoc(html, title) {
+    const win = window.open('', '_blank', 'width=860,height=1100');
+    if (!win) return false;
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+        <link rel="stylesheet" href="${location.origin}/css/theme.css"><link rel="stylesheet" href="${location.origin}/css/bond.css">
+        <link rel="stylesheet" href="${location.origin}/css/brick-docs.css">
+        <style>${PRINT_CSS}
+        </style></head>
+        <body class="bd-print"><div class="bd-sheet">${html.replace(/<span data-verify[^>]*>[^<]*<\/span>/, '')}</div>
+        <script>
+            ${FIT_SCRIPT}
             window.onload = function () {
                 (document.fonts ? document.fonts.ready : Promise.resolve()).then(function () {
                     fit();

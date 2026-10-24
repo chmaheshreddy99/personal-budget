@@ -59,6 +59,14 @@ public class SessionRegistry {
 
     /** As {@link #open(AppUser, String)}; a mobile session only reaches the user's mobile sections. */
     public String open(AppUser user, String userAgent, boolean mobile) {
+        return open(user, userAgent, mobile, null);
+    }
+
+    /** The session kept for the Bricks phone app ({@link #BRICKS_APP}): Brick Management only, the screens granted to it. */
+    public static final String BRICKS_APP = "BRICKS";
+
+    /** As {@link #open(AppUser, String, boolean)}, for an app other than the web app ({@code client}, e.g. {@link #BRICKS_APP}). */
+    public String open(AppUser user, String userAgent, boolean mobile, String client) {
         LocalDateTime now = LocalDateTime.now();
         sessions.deleteAll(sessions.findExpired(now));   // housekeeping while we are writing anyway
         byte[] bytes = new byte[32];
@@ -72,8 +80,15 @@ public class SessionRegistry {
         session.setExpiresAt(now.plusHours(sessionHours));
         session.setUserAgent(userAgent == null ? null : userAgent.substring(0, Math.min(200, userAgent.length())));
         session.setMobile(mobile ? Boolean.TRUE : null);
+        session.setClient(client);
         sessions.save(session);
         return token;
+    }
+
+    /** Was the session of this token opened by the Bricks phone app? */
+    public boolean bricksApp(String token) {
+        if (token == null || token.isBlank()) return false;
+        return sessions.findByTokenHash(hash(token)).map(s -> BRICKS_APP.equals(s.getClient())).orElse(false);
     }
 
     /**

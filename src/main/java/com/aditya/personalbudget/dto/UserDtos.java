@@ -48,7 +48,9 @@ public final class UserDtos {
                          /* opened with an access link: its id, VIEW or RECORD, maker-checker, and when it ends */
                          Long linkId, String linkMode, boolean approval, LocalDateTime linkExpiresAt,
                          /* still on the default password: the app asks for a new one before anything else */
-                         boolean mustChangePassword) {
+                         boolean mustChangePassword,
+                         /* the organization's company name and logo (its address), shown in place of the app's own */
+                         String brandName, String brandLogo) {
     }
 
     public record SessionView(String token, MeView user) {

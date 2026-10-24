@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's foreground: grey hollow concrete blocks stacked, a safety-orange base line, inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFC9CDD2" android:fillType="evenOdd" android:pathData="M41,38h26v13h-26zM46,41.5h7v6h-7zM55,41.5h7v6h-7z" />
+    <path android:fillColor="#FF9AA1A9" android:pathData="M41,48.8h26v2.2h-26z" />
+    <path android:fillColor="#FFC9CDD2" android:fillType="evenOdd" android:pathData="M26.5,54h26v13h-26zM31.5,57.5h7v6h-7zM40.5,57.5h7v6h-7z" />
+    <path android:fillColor="#FF9AA1A9" android:pathData="M26.5,64.8h26v2.2h-26z" />
+    <path android:fillColor="#FFC9CDD2" android:fillType="evenOdd" android:pathData="M55.5,54h26v13h-26zM60.5,57.5h7v6h-7zM69.5,57.5h7v6h-7z" />
+    <path android:fillColor="#FF9AA1A9" android:pathData="M55.5,64.8h26v2.2h-26z" />
+    <path android:fillColor="#FFF28C38" android:pathData="M26.5,71h55v3.2h-55z" />
+</vector>

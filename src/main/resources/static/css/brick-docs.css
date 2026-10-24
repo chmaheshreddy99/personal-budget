@@ -140,3 +140,7 @@
     .bd-doc { box-shadow: none; max-width: none; border: 0; }
     .bd-lines th, .bd-totals .grand, .bd-lines tfoot td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+/* the organization's own logo (Settings → Organization) in place of the drawn mark */
+.bd-logo.own { border: 0; width: auto; height: 64px; max-width: 160px; }
+.bd-logo.own img { height: 64px; width: auto; max-width: 160px; object-fit: contain; display: block; }
+.bd-brand:has(.bd-logo.own) { grid-template-columns: auto 1fr auto; }

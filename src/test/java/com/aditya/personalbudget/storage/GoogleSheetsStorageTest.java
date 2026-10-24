@@ -204,7 +204,8 @@ class GoogleSheetsStorageTest {
         store.endRequest();
         assertThat(tenants.findAll()).hasSize(1);          // read during this request ...
         api.tabs.get("organizations").cells.get(1).set(2, "Renamed by hand");
-        api.tabs.get("organizations").cells.get(1).set(9, "1");   // ... then changed in the spreadsheet (version 1)
+        int version = api.tabs.get("organizations").cells.get(0).indexOf("version");
+        api.tabs.get("organizations").cells.get(1).set(version, "1");   // ... then changed in the spreadsheet (version 1)
 
         api.calls.clear();
         Organization stale = tenants.findById(home.getId()).orElseThrow();   // still this request's copy: version 0

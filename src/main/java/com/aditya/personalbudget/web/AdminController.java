@@ -33,10 +33,13 @@ public class AdminController {
     private final com.aditya.personalbudget.service.TenantMailService mail;
 
     private final com.aditya.personalbudget.service.HostedChitService chits;
+    private final com.aditya.personalbudget.service.OrganizationBrandService brand;
 
     public AdminController(UserService users, AppSettingsService appSettings, com.aditya.personalbudget.service.TenantMailService mail,
-                           com.aditya.personalbudget.service.HostedChitService chits) {
+                           com.aditya.personalbudget.service.HostedChitService chits,
+                           com.aditya.personalbudget.service.OrganizationBrandService brand) {
         this.chits = chits;
+        this.brand = brand;
         this.mail = mail;
         this.users = users;
         this.appSettings = appSettings;
@@ -55,6 +58,14 @@ public class AdminController {
     public com.aditya.personalbudget.service.HostedChitService.ChitSettings saveChitSettings(
             @jakarta.validation.Valid @RequestBody com.aditya.personalbudget.service.HostedChitService.ChitSettingsRequest request) {
         return chits.saveChitSettings(request);
+    }
+
+    /** The organization's company name and logo, shown by the web and phone apps in place of the app's own. */
+    @PutMapping("/brand")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public com.aditya.personalbudget.service.OrganizationBrandService.Brand saveBrand(
+            @jakarta.validation.Valid @RequestBody com.aditya.personalbudget.service.OrganizationBrandService.BrandRequest request) {
+        return brand.save(request);
     }
 
     /** The household's own e-mail account for chit reminders and receipts (password never returned). */

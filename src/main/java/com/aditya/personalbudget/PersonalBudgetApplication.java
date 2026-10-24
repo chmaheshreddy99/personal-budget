@@ -27,9 +27,31 @@ public class PersonalBudgetApplication {
     /** The folder holding the jar (the classes folder when run from the IDE): settings live in its config folder. */
     public static final String HOME_PROPERTY = "budget.home";
 
+    /** The time zone the app keeps times in, whatever the machine's clock is set to (a cloud server runs on UTC). */
+    public static final String TIME_ZONE_PROPERTY = "budget.time-zone";
+    public static final String DEFAULT_TIME_ZONE = "Asia/Kolkata";
+
     public static void main(String[] args) {
+        useTimeZone(args);
         useConfigNextToJar();
         SpringApplication.run(PersonalBudgetApplication.class, args);
+    }
+
+    /**
+     * Times (an order taken, a payment, a notice) are kept as the local time of the business: India by default, or
+     * {@code --budget.time-zone=...} (also a system property, or the BUDGET_TIME_ZONE environment variable). Without
+     * it a server whose clock runs on UTC would record an order taken at 5 pm as 11:30 am.
+     */
+    static void useTimeZone(String[] args) {
+        String zone = java.util.Arrays.stream(args).filter(a -> a.startsWith("--" + TIME_ZONE_PROPERTY + "="))
+                .map(a -> a.substring(TIME_ZONE_PROPERTY.length() + 3)).reduce((a, b) -> b)
+                .orElseGet(() -> System.getProperty(TIME_ZONE_PROPERTY, System.getenv().getOrDefault("BUDGET_TIME_ZONE", DEFAULT_TIME_ZONE)));
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(java.time.ZoneId.of(zone.trim())));
+        } catch (java.time.DateTimeException e) {
+            System.err.println("Unknown time zone '" + zone + "'; using " + DEFAULT_TIME_ZONE);
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(DEFAULT_TIME_ZONE));
+        }
     }
 
     /**

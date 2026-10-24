@@ -34,10 +34,14 @@ public class AuthInterceptor implements HandlerInterceptor {
     /** What a user still on the default password may call: who am I, set the password, sign out. */
     private static final java.util.Set<String> PASSWORD_STEP = java.util.Set.of("/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/events");
 
-    public AuthInterceptor(SessionRegistry sessions, BrickAccess brickAccess, ChangeGate changes) {
+    private final com.aditya.personalbudget.service.BrickAppService brickApp;
+
+    public AuthInterceptor(SessionRegistry sessions, BrickAccess brickAccess, ChangeGate changes,
+                           @org.springframework.context.annotation.Lazy com.aditya.personalbudget.service.BrickAppService brickApp) {
         this.sessions = sessions;
         this.brickAccess = brickAccess;
         this.changes = changes;
+        this.brickApp = brickApp;
     }
 
     public static String tokenOf(HttpServletRequest request) {
@@ -80,6 +84,13 @@ public class AuthInterceptor implements HandlerInterceptor {
         BrickRole staff = brickAccess.staffRole(user);
         if (staff != null && !BrickAccess.staffMay(request.getRequestURI())) {
             throw new ForbiddenException("Your role (" + staff.getLabel() + ") opens Brick Management only");
+        }
+        // the Bricks phone app: Brick Management only, and there the screens the web app gives it
+        if (sessions.bricksApp(tokenOf(request))) {
+            UserContext.setClient(SessionRegistry.BRICKS_APP);
+            if (!BrickAccess.staffMay(request.getRequestURI())) throw new ForbiddenException("The Bricks app opens Brick Management only");
+            String refused = brickApp.refusal(user, request.getMethod(), request.getRequestURI());
+            if (refused != null) throw new ForbiddenException(refused);
         }
         if (user.viaLink() && !FeaturePolicy.allowsLink(user, request.getMethod(), request.getRequestURI())) {
             throw new ForbiddenException("This link does not give access to that");

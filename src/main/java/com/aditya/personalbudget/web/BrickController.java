@@ -66,13 +66,15 @@ public class BrickController {
     private final com.aditya.personalbudget.service.BrickTagService tags;
     private final com.aditya.personalbudget.service.TransactionService transactions;
     private final com.aditya.personalbudget.service.ChangeReplayer replayer;
+    private final com.aditya.personalbudget.service.BrickAppService app;
 
     public BrickController(BrickService core, BrickProductionService production, BrickPayrollService payroll, BrickSalesService sales,
                            BrickInsightService insights, BrickApprovalService approvals, BrickNoticeService notices, BrickAccess access,
                            AppUserRepository users, com.aditya.personalbudget.repository.AccountRepository accounts,
                            com.aditya.personalbudget.service.BrickTagService tags, com.aditya.personalbudget.service.TransactionService transactions,
-                           com.aditya.personalbudget.service.ChangeReplayer replayer) {
+                           com.aditya.personalbudget.service.ChangeReplayer replayer, com.aditya.personalbudget.service.BrickAppService app) {
         this.replayer = replayer;
+        this.app = app;
         this.accounts = accounts;
         this.tags = tags;
         this.transactions = transactions;
@@ -269,6 +271,30 @@ public class BrickController {
     @RequiresPermission(Permission.VIEW)
     public Map<String, Integer> seenNotices(@RequestBody SeenRequest r) {
         return Map.of("read", notices.seen(r == null ? null : r.link()));
+    }
+
+    // ---------------------------------------------------------------- the Bricks phone app
+
+    /** What the phone app shows the signed-in user: their screens and what they may do there (see BrickAppService). */
+    @GetMapping(B + "/app/profile")
+    @RequiresPermission(Permission.VIEW)
+    public com.aditya.personalbudget.service.BrickAppService.Profile appProfile() {
+        return app.profile();
+    }
+
+    /** The app's set-up (web app, Settings → Bricks app): on or off, each role's and user's screens, what the phone may do. */
+    @GetMapping(B + "/app/policy")
+    @BrickGuard({BrickPermission.SETUP})
+    @RequiresPermission(Permission.VIEW)
+    public com.aditya.personalbudget.service.BrickAppService.Admin appPolicy() {
+        return app.admin();
+    }
+
+    @PutMapping(B + "/app/policy")
+    @BrickGuard({BrickPermission.SETUP})
+    @RequiresPermission(Permission.VIEW)
+    public com.aditya.personalbudget.service.BrickAppService.Admin saveAppPolicy(@RequestBody com.aditya.personalbudget.service.BrickAppService.PolicyRequest r) {
+        return app.save(r);
     }
 
     // ---------------------------------------------------------------- set-up

@@ -38,6 +38,7 @@ public class AuthService {
     private final AccessLinkRepository accessLinkRepository;
     private final ActivityService activity;
     private final ApprovalPolicy approvals;
+    private final BrickAppService brickApp;
 
     private final AppUserRepository users;
     private final OrganizationRepository tenants;
@@ -52,8 +53,9 @@ public class AuthService {
                        PasswordEncoder passwordEncoder, TenantProvisioningService provisioning,
                        BudgetProperties properties, AppSettingsService appSettings,
                        AccessLinkService accessLinks, AccessLinkRepository accessLinkRepository, ActivityService activity,
-                       ApprovalPolicy approvals) {
+                       ApprovalPolicy approvals, @org.springframework.context.annotation.Lazy BrickAppService brickApp) {
         this.approvals = approvals;
+        this.brickApp = brickApp;
         this.accessLinks = accessLinks;
         this.accessLinkRepository = accessLinkRepository;
         this.activity = activity;
@@ -95,12 +97,18 @@ public class AuthService {
             throw new UnauthorizedException("This user is deactivated");
         }
         boolean mobile = "mobile".equalsIgnoreCase(request.client());
+        // the Bricks phone app: a session of its own, for Brick Management only (see BrickAppService)
+        boolean bricksApp = "bricks".equalsIgnoreCase(request.client());
         if (mobile && FeaturePolicy.granted(user, tenants.findById(user.getTenantId()).orElse(null), true).isEmpty()) {
             throw new UnauthorizedException("The mobile version is not shared with you. Ask your admin, or use the full site.");
         }
         Organization tenant = tenants.findById(user.getTenantId()).orElseThrow();
         if (!Boolean.TRUE.equals(tenant.getActive())) {
             throw new UnauthorizedException("Organization '" + tenant.getName() + "' is deactivated");
+        }
+        if (bricksApp) {
+            String refused = brickApp.signInRefusal(user, tenant);
+            if (refused != null) throw new UnauthorizedException(refused);
         }
         user.setLastLoginAt(now);
         user.setFailedLogins(0);
@@ -110,9 +118,9 @@ public class AuthService {
         }
         user = users.save(user);
 
-        String token = sessions.open(user, userAgent, mobile);
+        String token = sessions.open(user, userAgent, mobile, bricksApp ? SessionRegistry.BRICKS_APP : null);
         activity.record(SessionRegistry.toCurrent(user, tenant, mobile), "SIGNED_IN", "Sign-in",
-                mobile ? "Signed in on the mobile version" : "Signed in", null, null);
+                bricksApp ? "Signed in on the Bricks app" : mobile ? "Signed in on the mobile version" : "Signed in", null, null);
         return new SessionView(token, toMe(user, tenant, mobile));
     }
 
@@ -169,7 +177,7 @@ public class AuthService {
                 RolePolicy.permissionsOf(user.getRole()), true,
                 FeaturePolicy.granted(user, tenant, mobile), mobile, !Boolean.FALSE.equals(user.getMobileAccess()),
                 FeaturePolicy.granted(user, tenant, true), appSettings.get().mobilePath(), null, null, approvals.forUser(user, tenant), null,
-                Boolean.TRUE.equals(user.getMustChangePassword()));
+                Boolean.TRUE.equals(user.getMustChangePassword()), OrganizationBrandService.name(tenant), OrganizationBrandService.logoUrl(tenant));
     }
 
     /** Someone opened an access link: a session with only what the link allows. */
@@ -191,6 +199,8 @@ public class AuthService {
         return new MeView(c.userId(), c.username(), c.fullName(), null, c.role(), c.role() == UserRole.VIEWER ? "View only" : "Recorder",
                 c.tenantId(), c.tenantCode(), c.tenantName(), c.currency(), RolePolicy.permissionsOf(c.role()), true,
                 c.features(), c.mobile(), true, c.features(), appSettings.get().mobilePath(),
-                link.getId(), link.getMode(), c.approval(), link.getExpiresAt(), false);
+                link.getId(), link.getMode(), c.approval(), link.getExpiresAt(), false,
+                tenants.findById(c.tenantId()).map(OrganizationBrandService::name).orElse(null),
+                tenants.findById(c.tenantId()).map(OrganizationBrandService::logoUrl).orElse(null));
     }
 }

@@ -16,6 +16,7 @@ import { openExpenseDialog } from './components/expense-dialog.js';
 import { openDebtDialog } from './components/debt-dialog.js';
 import { isTyping, runPageKeys, clearPageKeys, openShortcutMap } from './core/keys.js';
 import { startFooter, refreshFooter } from './components/footer.js';
+import { applyBrand, applyRememberedBrand, brandName } from './core/brand.js';
 import './core/autocomplete.js';   // enhances every input and select with history-based autocomplete
 import './core/datepicker.js';     // a calendar with quick picks for every date box
 import './components/evidence.js';    // fills evidence strips under expanded entries
@@ -107,6 +108,7 @@ const $ = (id) => document.getElementById(id);
 // ===================================================================== sign-in
 
 const LAST_USER = 'pb.lastUser';
+applyRememberedBrand();
 const remembered = () => { try { return localStorage.getItem(LAST_USER) || ''; } catch { return ''; } };
 
 function showLogin(message = '') {
@@ -329,6 +331,10 @@ function startLiveUpdates() {
     events.onerror = () => {
         if (!state.user) stopLiveUpdates();   // signed out: stop reconnecting
     };
+    // (re)connected: what was missed meanwhile is checked (brick-alerts.js)
+    events.onopen = () => window.dispatchEvent(new Event('pb-live-open'));
+    // who has Brick Management is alerted of new orders even when the live connection drops (and on any page)
+    if ((state.user?.features || []).includes('BRICKS')) import('./components/brick-alerts.js').then(m => m.watchNotices());
 }
 
 function stopLiveUpdates() {
@@ -392,7 +398,9 @@ async function enterApp() {
 
     $('login-screen').hidden = true;
     $('app').hidden = false;
-    $('tenant-name').textContent = state.user.tenantName;
+    applyBrand({ name: state.user.brandName, logo: state.user.brandLogo });
+    // the organization under the company name, unless it is the same
+    $('tenant-name').textContent = state.user.tenantName === state.user.brandName ? '' : state.user.tenantName;
     $('user-name').textContent = state.user.fullName;
     $('user-role').textContent = state.user.roleLabel + (readOnly() ? ' · read only' : '');
     document.body.classList.toggle('read-only', readOnly());
@@ -491,7 +499,7 @@ async function route({ silent = false } = {}) {
     if (path !== match.path) history.replaceState(null, '', `#/${match.path}`);   // a section not shared (or unknown): show the first one
 
     document.querySelectorAll('#main-menu a').forEach(a => a.classList.toggle('active', a.dataset.path === match.path));
-    document.title = `${match.label} · Personal Budget`;
+    document.title = `${match.label} · ${brandName()}`;
 
     const container = $('view');
     const token = ++renderToken;

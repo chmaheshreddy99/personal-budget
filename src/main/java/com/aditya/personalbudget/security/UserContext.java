@@ -9,6 +9,8 @@ import com.aditya.personalbudget.exception.UnauthorizedException;
 public final class UserContext {
 
     private static final ThreadLocal<CurrentUser> CURRENT = new ThreadLocal<>();
+    /** The app the request came from, when not the web app ("BRICKS": the Bricks phone app). */
+    private static final ThreadLocal<String> CLIENT = new ThreadLocal<>();
 
     private UserContext() {
     }
@@ -19,6 +21,16 @@ public final class UserContext {
 
     public static void clear() {
         CURRENT.remove();
+        CLIENT.remove();
+    }
+
+    public static void setClient(String client) {
+        CLIENT.set(client);
+    }
+
+    /** The app the request came from ("BRICKS"), or null for the web app. */
+    public static String client() {
+        return CLIENT.get();
     }
 
     public static CurrentUser get() {

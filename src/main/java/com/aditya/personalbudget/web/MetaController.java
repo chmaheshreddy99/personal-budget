@@ -24,9 +24,23 @@ import java.util.Map;
 public class MetaController {
 
     private final AppSettingsService appSettings;
+    private final com.aditya.personalbudget.service.OrganizationBrandService brand;
 
-    public MetaController(AppSettingsService appSettings) {
+    public MetaController(AppSettingsService appSettings, com.aditya.personalbudget.service.OrganizationBrandService brand) {
         this.appSettings = appSettings;
+        this.brand = brand;
+    }
+
+    /** An organization's logo, at the address the apps were given (its hash in it, so it is kept for good). */
+    @GetMapping("/brand-logo/{tenantId}/{hash}")
+    public org.springframework.http.ResponseEntity<byte[]> brandLogo(@org.springframework.web.bind.annotation.PathVariable Long tenantId,
+                                                                     @org.springframework.web.bind.annotation.PathVariable String hash) {
+        com.aditya.personalbudget.service.OrganizationBrandService.Logo logo = brand.logo(tenantId, hash);
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.parseMediaType(logo.contentType()))
+                .cacheControl(org.springframework.http.CacheControl.maxAge(java.time.Duration.ofDays(365)).cachePublic().immutable())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(logo.bytes());
     }
 
     public record Option(String value, String label, String group, String description) {
@@ -38,9 +52,19 @@ public class MetaController {
     }
 
     /** Installation settings anyone may know before signing in: where the mobile version lives. */
+    /**
+     * What a phone app asks before signing in (no sign-in needed): where the mobile version lives, and which version of
+     * the Bricks app's server side this is, so the app can say when the server needs updating. 2: notices from the app
+     * reach their maker's web app, documents (brick-doc.html), the pay run.
+     */
+    public record AppInfo(String mobilePath, int bricksApp) {
+    }
+
+    public static final int BRICKS_APP = 2;
+
     @GetMapping("/app")
-    public AppSettingsService.AppSettings app() {
-        return appSettings.get();
+    public AppInfo app() {
+        return new AppInfo(appSettings.get().mobilePath(), BRICKS_APP);
     }
 
     @GetMapping("/options")

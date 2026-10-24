@@ -53,6 +53,10 @@ public class UserSession implements TenantOwned {
     /** Opened by the mobile version: only the user's mobile sections are available. */
     private Boolean mobile;
 
+    /** The app that opened it, when not the web app: "BRICKS" for the Bricks phone app (only the screens granted to it). */
+    @Column(length = 20)
+    private String client;
+
     /** Opened with an access link: its sections, mode and expiry apply (the user is the admin who made it). */
     private Long linkId;
 }

@@ -8,7 +8,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Personal Budget · Mobile</title>
-    <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
+    <link rel="icon" href="/img/logo.svg" type="image/svg+xml" data-brand-icon>
     <!-- absolute paths: this page is served at the address set in Settings (e.g. /m/) -->
     <link rel="stylesheet" href="/css/theme.css">
     <link rel="stylesheet" href="/css/evidence.css">
@@ -19,9 +19,9 @@
 
     <section class="m-login" id="m-login" hidden>
         <div class="m-login-card">
-            <img src="/img/logo.svg" alt="" class="m-logo">
-            <h1>Personal<em>Budget</em></h1>
-            <p>Your money, on the go</p>
+            <img src="/img/logo.svg" alt="" class="m-logo" data-brand-logo>
+            <h1 data-brand-name>Personal<em>Budget</em></h1>
+            <p data-brand-tagline>Your money, on the go</p>
             <form id="m-login-form" autocomplete="on">
                 <label><span>Username</span><input name="username" autocomplete="username" autocapitalize="none" required></label>
                 <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
@@ -34,7 +34,7 @@
 
     <div class="m-app" id="m-app" hidden>
         <header class="m-top">
-            <img src="/img/logo.svg" alt="" class="m-top-logo">
+            <img src="/img/logo.svg" alt="" class="m-top-logo" data-brand-logo>
             <div class="m-top-title"><b id="m-title">Home</b><small id="m-tenant"></small></div>
             <button class="m-icon-btn" id="m-refresh" aria-label="Refresh"></button>
             <button class="m-avatar" id="m-user" aria-label="Account"></button>

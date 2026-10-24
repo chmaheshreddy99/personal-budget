@@ -164,7 +164,9 @@ public class BrickService {
 
     /** Who the business's documents (bills, invoices, payment slips) are from, and who signs them. */
     public record Company(String name, String address, String phone, String upiId, String ownerName, String ownerSignature,
-                          String accountantName, String accountantSignature) {
+                          String accountantName, String accountantSignature,
+                          /* the organization's logo (an address on this server; Settings → Organization), null: the drawn mark */
+                          String logo) {
     }
 
     /** Bricks of a type: in the yard (ready or still curing), booked for orders, free to sell; produced and delivered so far. */
@@ -196,6 +198,7 @@ public class BrickService {
     // ------------------------------------------------------------------ wiring
 
     final BrickSettingsRepository settingsRepo;
+    final com.aditya.personalbudget.repository.OrganizationRepository organizations;
     final BrickTypeRepository types;
     final BrickMaterialRepository materials;
     final BrickPricingModelRepository models;
@@ -233,8 +236,10 @@ public class BrickService {
                         BrickTripItemRepository tripItems, BrickPaymentRepository payments, BrickOrderLinkRepository links,
                         AccountRepository accounts, AccountService accountService, LedgerService ledger, ActivityService activity,
                         ReportService reports, AppSettingsService appSettings,
-                        com.aditya.personalbudget.repository.JournalEntryRepository entries) {
+                        com.aditya.personalbudget.repository.JournalEntryRepository entries,
+                        com.aditya.personalbudget.repository.OrganizationRepository organizations) {
         this.entries = entries;
+        this.organizations = organizations;
         this.settingsRepo = settingsRepo;
         this.types = types;
         this.materials = materials;
@@ -477,12 +482,18 @@ public class BrickService {
         });
     }
 
-    /** The business as its documents name it: the company name set (else the organization's), address and signatures. */
+    /**
+     * The business as its documents name it: the company name set for it (else the organization's company name, else
+     * the organization's name), the organization's logo, the address and signatures.
+     */
     Company company() {
         BrickSettings s = settings();
-        String org = UserContext.current().map(com.aditya.personalbudget.security.CurrentUser::tenantName).orElse("");
+        com.aditya.personalbudget.domain.entity.Organization t = organizations.findById(s.getTenantId()).orElse(null);
+        // the name set for the business, else the organization's company name (Settings → Organization), else its name
+        String org = t != null && OrganizationBrandService.name(t) != null ? OrganizationBrandService.name(t)
+                : UserContext.current().map(com.aditya.personalbudget.security.CurrentUser::tenantName).orElse("");
         return new Company(s.getCompanyName() != null ? s.getCompanyName() : org, s.getAddress(), s.getPhone(), s.getUpiId(), s.getOwnerName(),
-                s.getOwnerSignature(), s.getAccountantName(), s.getAccountantSignature());
+                s.getOwnerSignature(), s.getAccountantName(), s.getAccountantSignature(), t == null ? null : OrganizationBrandService.logoUrl(t));
     }
 
     static List<String> heads(BrickSettings s) {

@@ -258,3 +258,17 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
     .page { height: auto; grid-template-columns: 1fr !important; grid-template-rows: none !important; }
     .page > * { min-height: 320px; }
 }
+
+/* the organization's own logo (Settings → Organization): on a white tile, so a dark logo shows on the dark bars; as
+   large as the bar allows, its own shape kept (a wide logo is shown wide, not squeezed into a square) */
+img.brand-custom { object-fit: contain; background: #fff; border-radius: 8px; padding: 3px; filter: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); image-rendering: auto; }
+.brand-logo.brand-custom { width: auto; height: 42px; max-width: 150px; }
+.login-logo.brand-custom { width: auto; height: 84px; max-width: 220px; padding: 5px; border-radius: 12px; box-shadow: 0 6px 18px rgba(10, 79, 128, 0.22); }
+.foot-brand img.brand-custom { width: auto; height: 22px; max-width: 70px; padding: 1px 2px; border-radius: 4px; box-shadow: none; }
+/* the company's name stays beside its logo once the menu is icons only (from 1440px down: there is room) */
+@media (max-width: 1440px) and (min-width: 901px) {
+    .brand.branded .brand-text { display: flex; }
+    .brand.branded .brand-text small { display: none; }
+    .brand.branded .brand-text strong { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

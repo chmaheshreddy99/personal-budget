@@ -7,6 +7,7 @@ import com.aditya.personalbudget.security.BrickAccess;
 import com.aditya.personalbudget.security.BrickPermission;
 import com.aditya.personalbudget.security.BrickRole;
 import com.aditya.personalbudget.security.CurrentUser;
+import com.aditya.personalbudget.security.SessionRegistry;
 import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.storage.TsvDataStore;
 import org.springframework.stereotype.Service;
@@ -29,8 +30,13 @@ public class BrickNoticeService {
     public static final String ALL = "ALL";
     public static final String CHECKERS = "APPROVE";
 
-    /** data: what it is about, for its alert (JSON: a new order's number, customer, bricks …), or null. */
-    public record NoticeView(Long id, String kind, String title, String body, String link, String actor, LocalDateTime createdAt, String data) {
+    /**
+     * data: what it is about, for its alert (JSON: a new order's number, customer, bricks …), or null. ageSeconds: how
+     * long ago it was posted, by the server's clock, so a browser in another time zone (or with its clock off) still
+     * knows a new order from an old one.
+     */
+    public record NoticeView(Long id, String kind, String title, String body, String link, String actor, LocalDateTime createdAt, String data,
+                             Long ageSeconds) {
     }
 
     private final BrickNoticeRepository notices;
@@ -72,6 +78,7 @@ public class BrickNoticeService {
         n.setAudience(audience);
         n.setActorId(by == null ? null : by.userId());
         n.setActor(by == null ? "The customer" : by.fullName());
+        n.setOrigin(UserContext.client());
         n.setCreatedAt(LocalDateTime.now());
         n.setData(data == null || data.length() > 2000 ? null : data);
         queued.get().add(notices.save(n));
@@ -89,7 +96,10 @@ public class BrickNoticeService {
                 .collect(java.util.stream.Collectors.toSet());
         // older than a month: no longer news
         LocalDateTime since = LocalDateTime.now().minusDays(30);
+        // on the phone, what they did there themselves is not news to them
+        boolean phone = SessionRegistry.BRICKS_APP.equals(UserContext.client());
         return notices.findByTenantId(me.tenantId()).stream().filter(n -> !seen.contains(n.getId()) && reaches(n, me.userId(), role))
+                .filter(n -> !(phone && me.userId().equals(n.getActorId())))
                 .filter(n -> n.getCreatedAt() == null || n.getCreatedAt().isAfter(since))
                 .sorted(Comparator.comparing(BrickNotice::getId).reversed()).toList();
     }
@@ -142,9 +152,13 @@ public class BrickNoticeService {
         return access.roleOf(userId, appRole);
     }
 
-    /** Is the notice for this user? Not their own doing; the whole yard, the checkers, or them. */
+    /**
+     * Is the notice for this user? Not their own doing on the web app (they saw it happen); what they did on the phone
+     * does reach their web app (an order taken at the site alerts the office, even signed in as the same person). Then
+     * the whole yard, the checkers, or them.
+     */
     static boolean reaches(BrickNotice n, Long userId, BrickRole role) {
-        if (userId != null && userId.equals(n.getActorId())) return false;
+        if (userId != null && userId.equals(n.getActorId()) && n.getOrigin() == null) return false;
         String a = n.getAudience() == null ? ALL : n.getAudience();
         if (a.startsWith("U:")) return a.equals(user(userId));
         if (CHECKERS.equals(a)) return role.allows(BrickPermission.APPROVE);
@@ -152,6 +166,7 @@ public class BrickNoticeService {
     }
 
     private static NoticeView view(BrickNotice n) {
-        return new NoticeView(n.getId(), n.getKind(), n.getTitle(), n.getBody(), n.getLink(), n.getActor(), n.getCreatedAt(), n.getData());
+        return new NoticeView(n.getId(), n.getKind(), n.getTitle(), n.getBody(), n.getLink(), n.getActor(), n.getCreatedAt(), n.getData(),
+                n.getCreatedAt() == null ? null : Math.max(0, java.time.Duration.between(n.getCreatedAt(), LocalDateTime.now()).getSeconds()));
     }
 }

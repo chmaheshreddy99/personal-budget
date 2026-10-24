@@ -1,6 +1,7 @@
 /**
  * Settings: categories (add, rename, switch off), the dashboard layout, view preferences, the
- * keyboard shortcut list, the mobile version and the household's e-mail account. Routes: #/settings, #/settings/<section>.
+ * keyboard shortcut list, the organization's company name and logo, the mobile version, the Bricks phone app and the
+ * household's e-mail account. Routes: #/settings, #/settings/<section>.
  */
 import { api } from '../core/api.js';
 import { loadCategories, can, state } from '../core/store.js';
@@ -11,18 +12,23 @@ import { moneyShort } from '../core/format.js';
 import { getPref, setPref, clearPrefs } from '../core/prefs.js';
 import { SHORTCUTS, setPageKeys, listNavigator } from '../core/keys.js';
 import { customizerHtml, bindCustomizer } from '../components/dashboard-customizer.js';
+import { applyBrand } from '../core/brand.js';
 
-const SECTIONS = [
+const ALL_SECTIONS = [
+    { id: 'organization', label: 'Organization', iconName: 'building', hint: 'Company name and logo' },
     { id: 'categories', label: 'Categories', iconName: 'tag', hint: 'Expense and income categories' },
     { id: 'dashboard', label: 'Dashboard', iconName: 'dashboard', hint: 'Panels, order and size' },
     { id: 'preferences', label: 'Preferences', iconName: 'settings', hint: 'How pages open' },
     { id: 'shortcuts', label: 'Keyboard', iconName: 'keyboard', hint: 'Every shortcut' },
     { id: 'mobile', label: 'Mobile app', iconName: 'phone', hint: 'Address and who can use it' },
+    { id: 'bricks-app', label: 'Bricks app', iconName: 'brick', hint: 'Phone app screens and access', feature: 'BRICKS' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },
     { id: 'chits', label: 'Host a Chit', iconName: 'hand-coins', hint: 'Company name for new chits' },
 ];
 
 export async function render(container, params, isCurrent) {
+    // a business's own settings only for those who have the business
+    const SECTIONS = ALL_SECTIONS.filter(s => !s.feature || (state.user?.features || []).includes(s.feature));
     const section = SECTIONS.some(s => s.id === params[0]) ? params[0] : 'categories';
     container.innerHTML = `
     <div class="page settings-page">
@@ -54,7 +60,9 @@ export async function render(container, params, isCurrent) {
     }
     if (section === 'preferences') renderPreferences(body);
     if (section === 'mobile') await renderMobile(body, () => render(container, params, isCurrent));
+    if (section === 'bricks-app') await renderBricksApp(body);
     if (section === 'email') await renderMail(body, () => render(container, params, isCurrent));
+    if (section === 'organization') renderOrganization(body);
     if (section === 'chits') await renderChitSettings(body, () => render(container, params, isCurrent));
     if (section === 'shortcuts') {
         body.innerHTML = panel({ title: 'Keyboard shortcuts', iconName: 'keyboard',
@@ -101,6 +109,141 @@ async function renderMobile(body, reload) {
             reload();
         } catch (error) { toast(error.message, 'error'); }
     });
+}
+
+// ===================================================================== the Bricks phone app
+
+const APP_ICONS = { DASHBOARD: 'dashboard', APPROVALS: 'shield', ORDERS: 'cart', DELIVERIES: 'truck', PAYMENTS: 'cash', STOCK: 'box',
+    PRODUCTION: 'factory', PURCHASES: 'receipt', TEAM: 'users', CASHBOOK: 'bank', REPORTS: 'report', ALERTS: 'bell' };
+const APP_SWITCHES = [
+    ['enabled', 'Bricks app', 'phone', 'On: the people given screens below can sign in on the phone. Off: nobody can, and signed-in phones stop at once.'],
+    ['decide', 'Approve on the phone', 'shield', 'Checkers review requests and their evidence, and approve or reject them with a reason.'],
+    ['record', 'Record on the phone', 'edit', 'Orders, batches, purchases, payments and delivery steps. Off: the app only shows.'],
+    ['evidence', 'Evidence on the phone', 'camera', 'Photos of bills, delivery proof and the customer’s message, from the camera or files.'],
+];
+
+/**
+ * Settings → Bricks app: what the Bricks phone app shows and lets each person do. The app asks the server for its screens
+ * at every start and the server checks every call against them, so a change here reaches the phones at once.
+ */
+async function renderBricksApp(body) {
+    let data;
+    try {
+        data = await api.get('/bricks/app/policy');
+    } catch (error) {
+        body.innerHTML = panel({ title: 'Bricks app', iconName: 'brick', body: emptyState(error.status === 403
+            ? 'Only who sets up Brick Management (the manager) decides what the Bricks app shows.' : error.message, 'lock') });
+        return;
+    }
+    const mods = data.modules;
+    const label = k => mods.find(m => m.key === k)?.label || k;
+    // what is being changed: the switches, the roles' screens (null: back to the role's own), people (null: as their role)
+    const draft = { ...data.policy, roles: {}, users: {} };
+    const roleMods = r => draft.roles[r.key] !== undefined ? (draft.roles[r.key] ?? r.possible) : r.modules;
+    const personRule = p => draft.users[p.userId] !== undefined ? draft.users[p.userId] : { access: p.access, modules: p.custom };
+    const dirty = () => APP_SWITCHES.some(([k]) => draft[k] !== data.policy[k]) || Object.keys(draft.roles).length || Object.keys(draft.users).length;
+
+    const draw = () => {
+        const server = location.origin;
+        body.innerHTML = panel({ title: 'Bricks app', iconName: 'brick', sub: 'The phone app for the grey blocks business',
+            actions: `<span class="badge ${draft.enabled ? 'aqua' : 'gray'}">${icon('phone')}${draft.enabled ? 'On' : 'Off'}</span>
+                <button class="btn sm primary" data-save ${dirty() ? '' : 'disabled'}>${icon('check')}Save</button>`,
+            body: `<div class="ba-wrap">
+            <div class="ba-hero">
+                <div class="ms-qr">${qrSvg(server, { size: 132 })}<small>The server address</small></div>
+                <div class="ba-hero-text">
+                    <p>Install <b>Bricks</b> (bricks-app.apk) on the phone, enter this address and sign in with the usual username and password.
+                        Each person sees only the screens given to them here, and only what their role in Brick Management allows.</p>
+                    <div class="ba-addr"><code>${esc(server)}</code><button class="btn sm ghost" data-copy>${icon('copy')}Copy</button></div>
+                </div>
+            </div>
+            <div class="ba-switches">${APP_SWITCHES.map(([k, title, ic, hint]) => `
+                <label class="ba-switch ${draft[k] ? 'on' : ''} ${k !== 'enabled' && !draft.enabled ? 'muted' : ''}">
+                    <span class="chip-icon sm">${icon(ic)}</span>
+                    <span class="grow min-0"><b>${title}</b><small>${hint}</small></span>
+                    <span class="switch"><input type="checkbox" data-switch="${k}" ${draft[k] ? 'checked' : ''}><span></span></span></label>`).join('')}
+            </div>
+            <div class="section-title">${icon('layers')}Screens by role</div>
+            <p class="small muted">A role gets every screen its permissions open until you choose otherwise. A dash: the role cannot open that screen
+                (its permissions in Brick Management do not reach it).</p>
+            <div class="ba-matrix"><table class="grid compact">
+                <thead><tr><th>Role</th>${mods.map(m => `<th class="c" title="${esc(m.description)}"><span class="ba-mh">${icon(APP_ICONS[m.key] || 'layers')}<small>${esc(m.label)}</small></span></th>`).join('')}<th></th></tr></thead>
+                <tbody>${data.roles.map(r => {
+                    const has = roleMods(r);
+                    const custom = draft.roles[r.key] !== undefined ? draft.roles[r.key] !== null : r.custom;
+                    return `<tr><td><b>${esc(r.label)}</b><small class="muted ba-rd">${esc(r.description)}</small></td>
+                        ${mods.map(m => `<td class="c">${r.possible.includes(m.key)
+                            ? `<input type="checkbox" class="ba-cb" data-role="${r.key}" data-mod="${m.key}" ${has.includes(m.key) ? 'checked' : ''} title="${esc(m.label)}">`
+                            : '<span class="muted">—</span>'}</td>`).join('')}
+                        <td class="r">${custom ? `<button class="btn sm ghost" data-reset-role="${r.key}" title="Every screen the role opens">${icon('undo')}Default</button>` : '<small class="muted">default</small>'}</td></tr>`;
+                }).join('')}</tbody></table></div>
+            <div class="section-title">${icon('users')}People</div>
+            <div class="ba-people">${data.people.map(p => {
+                const rule = personRule(p);
+                const role = data.roles.find(r => r.key === p.role);
+                const possible = role ? role.possible : [];
+                const own = rule.modules !== null && rule.modules !== undefined;
+                const shown = !draft.enabled || !p.bricks || rule.access === false || p.role === 'NONE' ? []
+                    : (own ? rule.modules : role ? roleMods(role) : []).filter(k => possible.includes(k));
+                const why = !p.active ? 'deactivated' : !p.bricks ? 'Brick Management is not shared with them' : p.role === 'NONE' ? 'no access to Brick Management'
+                    : rule.access === false ? 'no app' : !draft.enabled ? 'the app is off' : '';
+                return `<div class="ba-person ${shown.length ? '' : 'off'}">
+                    <div class="ba-ph"><span class="avatar sm">${esc(p.fullName.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</span>
+                        <div class="grow min-0"><b>${esc(p.fullName)}</b> <span class="badge gray sm">${esc(p.roleLabel)}</span>
+                            <small class="muted">@${esc(p.username)}${p.appSignedInAt ? ` · signed in on the app ${esc(String(p.appSignedInAt).slice(0, 10))}` : ' · not signed in on the app yet'}</small></div>
+                        ${p.bricks && p.role !== 'NONE' ? `<select data-mode="${p.userId}" class="sm">
+                            <option value="role" ${rule.access !== false && !own ? 'selected' : ''}>Screens of their role</option>
+                            <option value="own" ${rule.access !== false && own ? 'selected' : ''}>Screens of their own</option>
+                            <option value="off" ${rule.access === false ? 'selected' : ''}>No app</option></select>` : ''}</div>
+                    ${own && rule.access !== false ? `<div class="ba-own">${possible.map(k => `<label class="ba-chip ${rule.modules.includes(k) ? 'on' : ''}">
+                        <input type="checkbox" data-own="${p.userId}" data-mod="${k}" ${rule.modules.includes(k) ? 'checked' : ''}>${icon(APP_ICONS[k] || 'layers')}${esc(label(k))}</label>`).join('')}</div>` : ''}
+                    <div class="ba-sees">${shown.length ? shown.map(k => `<span class="ba-tag">${icon(APP_ICONS[k] || 'layers')}${esc(label(k))}</span>`).join('')
+                        : `<small class="muted">${icon('lock')} ${esc(why || 'no screens')}</small>`}</div>
+                </div>`;
+            }).join('')}</div>
+        </div>` });
+    };
+
+    body.onchange = e => {
+        const t = e.target;
+        if (t.dataset.switch) draft[t.dataset.switch] = t.checked;
+        else if (t.dataset.role) {
+            const r = data.roles.find(x => x.key === t.dataset.role);
+            const set = new Set(roleMods(r));
+            t.checked ? set.add(t.dataset.mod) : set.delete(t.dataset.mod);
+            draft.roles[r.key] = r.possible.filter(k => set.has(k));
+        } else if (t.dataset.mode) {
+            const p = data.people.find(x => String(x.userId) === t.dataset.mode);
+            const role = data.roles.find(r => r.key === p.role);
+            draft.users[p.userId] = t.value === 'off' ? { access: false, modules: null }
+                : t.value === 'own' ? { access: null, modules: personRule(p).modules ?? (role ? roleMods(role) : []) } : { access: null, modules: null };
+        } else if (t.dataset.own) {
+            const p = data.people.find(x => String(x.userId) === t.dataset.own);
+            const set = new Set(personRule(p).modules || []);
+            t.checked ? set.add(t.dataset.mod) : set.delete(t.dataset.mod);
+            draft.users[p.userId] = { access: null, modules: [...set] };
+        } else return;
+        draw();
+    };
+    body.onclick = async e => {
+        if (e.target.closest('[data-copy]')) {
+            try { await navigator.clipboard.writeText(location.origin); toast('Address copied'); } catch { toast(location.origin, 'info'); }
+            return;
+        }
+        const reset = e.target.closest('[data-reset-role]');
+        if (reset) { draft.roles[reset.dataset.resetRole] = null; draw(); return; }
+        if (!e.target.closest('[data-save]')) return;
+        const roles = {}, users = {};
+        Object.entries(draft.roles).forEach(([k, v]) => { roles[k] = v; });
+        Object.entries(draft.users).forEach(([k, v]) => { users[k] = v; });
+        try {
+            data = await api.put('/bricks/app/policy', { enabled: draft.enabled, decide: draft.decide, record: draft.record, evidence: draft.evidence, roles, users });
+            Object.assign(draft, data.policy, { roles: {}, users: {} });
+            toast('Saved · the phones follow at their next step');
+            draw();
+        } catch (error) { toast(error.message, 'error'); }
+    };
+    draw();
 }
 
 // ===================================================================== categories
@@ -262,6 +405,144 @@ const MAIL_PRESETS = [
  * The household's own e-mail account: Host a Chit reminders and receipts go out from it. Admins only; the password
  * is stored encrypted and never shown again.
  */
+// ===================================================================== organization: company name and logo
+
+/** The longest logo kept (a data URL, as the server takes it). */
+const MAX_LOGO = 44000;
+
+/**
+ * The company name and logo the web app, its mobile version and the Bricks phone app show in place of "Personal
+ * Budget" (bills and slips carry the logo too). An admin sets them; the picture is made small here (256 px at most)
+ * before it is sent.
+ */
+function renderOrganization(body) {
+    const admin = can('MANAGE_USERS');
+    const me = state.user;
+    let logo = me.brandLogo || null;   // what is shown: the saved logo's address, or a new one (data URL)
+    let changed = false;               // a new logo chosen, or the logo removed
+    body.innerHTML = panel({ title: 'Organization', iconName: 'building', sub: 'The company name and logo on every screen',
+        body: `<form class="form-grid one org-brand" id="org-brand" onsubmit="return false" style="max-width:620px">
+            <label class="field"><span>Company name</span>
+                <input type="text" name="name" maxlength="60" value="${esc(me.brandName || '')}" placeholder="${esc(me.tenantName || 'e.g. Sri Sai Cement Bricks')}" ${admin ? '' : 'disabled'} data-plain>
+                <small>Shown in place of “Personal Budget” on the web app, the mobile version and the Bricks phone app. Empty: Personal Budget.</small></label>
+            <div class="field"><span>Company logo</span>
+                <div class="ob-logo">
+                    <div class="ob-tile" data-logo-box></div>
+                    <div class="ob-actions">
+                        ${admin ? `<label class="btn sm">${icon('upload')}Choose an image<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-file hidden></label>
+                        <button type="button" class="btn sm ghost" data-remove>${icon('trash')}Remove</button>` : ''}
+                        <small class="muted">PNG, JPEG, WebP or SVG. A square logo looks best; it is made 256 px at most. Bills and payment slips carry it too.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="field"><span>How it looks</span><div class="ob-preview" data-preview></div></div>
+            ${admin ? `<div class="row"><button class="btn primary" type="submit">${icon('check')}Save</button></div>`
+                : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
+        </form>` });
+    const form = body.querySelector('#org-brand');
+    const draw = () => {
+        const name = form.name.value.trim().replace(/\s+/g, ' ');
+        const pic = logo ? `<img src="${esc(logo)}" alt="" class="brand-custom">` : '<img src="/img/logo.svg" alt="">';
+        body.querySelector('[data-logo-box]').innerHTML = logo ? `<img src="${esc(logo)}" alt="Company logo">` : `<span class="muted small">No logo: the app's own</span>`;
+        const remove = body.querySelector('[data-remove]');
+        if (remove) remove.hidden = !logo;
+        body.querySelector('[data-preview]').innerHTML = `<div class="ob-bar">${pic}<span><b>${name ? esc(name) : 'Personal<em>Budget</em>'}</b>
+            <small>${esc(me.tenantName || '')}</small></span></div>`;
+    };
+    draw();
+    form.name.addEventListener('input', draw);
+    body.querySelector('[data-remove]')?.addEventListener('click', () => { logo = null; changed = true; draw(); });
+    body.querySelector('[data-file]')?.addEventListener('change', async e => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            logo = await smallLogo(file);
+            changed = true;
+            draw();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    });
+    form.addEventListener('submit', async () => {
+        const name = form.name.value.trim().replace(/\s+/g, ' ');
+        if (name && !/^[\p{L}\p{N} .,&'()/-]{2,60}$/u.test(name)) { toast(`Use letters, digits, spaces and . , & ' ( ) / - (2 to 60 characters)`, 'error'); return; }
+        try {
+            const out = await api.put('/admin/brand', { name: name || null, logo: changed && logo ? logo : null, removeLogo: changed && !logo });
+            Object.assign(state.user, { brandName: out.name, brandLogo: out.logo });
+            applyBrand(out);
+            logo = out.logo;
+            changed = false;
+            draw();
+            toast('Saved');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    });
+}
+
+/**
+ * A picture made ready to keep: the empty margin around the logo (white or transparent) cut away, so the logo fills
+ * the space it is shown in, then the largest size that fits (512 px at most on its longer side, down to 192), as PNG
+ * (transparency kept) or else sharp WebP.
+ */
+async function smallLogo(file) {
+    if (file.size > 5 * 1024 * 1024) throw new Error('Choose an image under 5 MB');
+    const url = URL.createObjectURL(file);
+    try {
+        const img = await new Promise((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = () => reject(new Error('That image could not be read'));
+            i.src = url;
+        });
+        const box = logoBox(img);
+        for (const side of [512, 448, 384, 320, 256, 192]) {
+            const k = Math.min(1, side / Math.max(box.w, box.h));
+            const canvas = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(box.w * k)), height: Math.max(1, Math.round(box.h * k)) });
+            const g = canvas.getContext('2d');
+            g.imageSmoothingQuality = 'high';
+            g.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, canvas.width, canvas.height);
+            for (const [type, q] of [['image/png'], ['image/webp', 0.95], ['image/webp', 0.9]]) {
+                const data = canvas.toDataURL(type, q);
+                if (data.startsWith(`data:${type}`) && data.length <= MAX_LOGO) return data;
+            }
+        }
+        throw new Error('That image is too detailed to keep; try a simpler or smaller logo');
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+/** The part of the picture that holds the logo: its margin of white (or transparent) cut away, a little room kept. */
+function logoBox(img) {
+    const w0 = img.naturalWidth || 512, h0 = img.naturalHeight || 512;
+    // looked at no larger than 1024 px (enough to find the edges)
+    const k = Math.min(1, 1024 / Math.max(w0, h0));
+    const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k));
+    const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
+    const g = canvas.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    let px;
+    try { px = g.getImageData(0, 0, w, h).data; } catch { return { x: 0, y: 0, w: w0, h: h0 }; }
+    const empty = i => px[i + 3] < 24 || (px[i] > 238 && px[i + 1] > 238 && px[i + 2] > 238);
+    let top = h, left = w, bottom = -1, right = -1;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (empty((y * w + x) * 4)) continue;
+            if (y < top) top = y;
+            if (y > bottom) bottom = y;
+            if (x < left) left = x;
+            if (x > right) right = x;
+        }
+    }
+    if (bottom < 0) return { x: 0, y: 0, w: w0, h: h0 };   // nothing but margin: keep it as it is
+    const pad = Math.round(Math.max(right - left, bottom - top) * 0.04);
+    left = Math.max(0, left - pad); top = Math.max(0, top - pad);
+    right = Math.min(w - 1, right + pad); bottom = Math.min(h - 1, bottom + pad);
+    return { x: left / k, y: top / k, w: (right - left + 1) / k, h: (bottom - top + 1) / k };
+}
+
 /**
  * Host a Chit: the name the household runs its chits under. New chits are named after it, with the chit's value and
  * the months it runs ("Aditya Chitfunds 5L (Oct26–May28)"); an admin sets it.

@@ -25,6 +25,7 @@ import { money, moneyShort, percent, date, shortDate, isoDate, setCurrency, days
 import { kindChip } from '../core/entry-kind.js';
 import { evidenceFieldHtml, bindEvidenceField, openViewer, fileUrl } from '../components/evidence.js';
 import { DOC_TYPES } from '../views/documents.js';
+import { applyBrand, applyRememberedBrand } from '../core/brand.js';
 
 useTokenKey('pb.mobile.token');
 
@@ -98,6 +99,8 @@ async function start() {
     enter().catch(() => showLogin());
 }
 
+applyRememberedBrand();
+
 function showLogin(message = '') {
     me = null;
     $('m-app').hidden = true;
@@ -119,7 +122,8 @@ async function enter() {
     setCurrency(me.currency);
     $('m-login').hidden = true;
     $('m-app').hidden = false;
-    $('m-tenant').textContent = me.tenantName;
+    applyBrand({ name: me.brandName, logo: me.brandLogo });
+    $('m-tenant').textContent = me.brandName || me.tenantName;
     $('m-user').textContent = initials(me.fullName);
     const many = barTabs().length > 4;
     $('m-tabs').innerHTML = barTabs().map(t => `<a href="#${t.key}" data-tab="${t.key}">${icon(t.iconName)}<span>${many && t.short ? t.short : t.label}</span></a>`).join('');

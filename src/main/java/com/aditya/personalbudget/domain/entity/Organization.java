@@ -59,6 +59,17 @@ public class Organization implements Identifiable {
     @Column(length = 60)
     private String chitCompanyName;
 
+    /** The company name the web and phone apps show in place of "Personal Budget" (empty: the app's own name). */
+    @Column(length = 60)
+    private String brandName;
+
+    /**
+     * The company logo the web and phone apps show, as a data URL ({@code data:image/png;base64,...}); the browser
+     * makes it small (256 px) before it is saved, so it fits one cell of any table store.
+     */
+    @Column(length = 45000)
+    private String brandLogo;
+
     /**
      * The sections (menu items) the organization has, e.g. "EXPENSES,CHITS" ({@code Feature} names); empty = every
      * section. Its users get at most these.

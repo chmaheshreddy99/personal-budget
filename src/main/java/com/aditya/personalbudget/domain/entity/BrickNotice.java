@@ -53,6 +53,10 @@ public class BrickNotice implements TenantOwned {
     private Long actorId;
     private String actor;
 
+    /** Where it was done: "BRICKS" from the Bricks phone app (then the actor's web app is told too), empty from the web app. */
+    @Column(length = 20)
+    private String origin;
+
     private LocalDateTime createdAt;
 
     /** What the notice is about, for its alert (a new order: its number, customer, bricks, address, day needed), as JSON. */

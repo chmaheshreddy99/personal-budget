@@ -16,6 +16,9 @@ import { esc } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
 
+/** When a notice came, on this browser's clock: from its age by the server's clock (the two may be in different time zones). */
+const postedAt = n => n.ageSeconds != null ? new Date(Date.now() - n.ageSeconds * 1000) : n.createdAt;
+
 const NOTE_ICON = { ORDER: 'cart', APPROVAL: 'shield', DECISION: 'check-circle', SIGNED: 'signature', PAID: 'arrow-in' };
 const NOTE_TONE = { ORDER: 'aqua', APPROVAL: 'gold', DECISION: 'violet', SIGNED: 'aqua', PAID: 'gold' };
 const count = n => Number(n || 0).toLocaleString('en-IN');
@@ -68,7 +71,7 @@ export function bindBell(btn) {
                 <div class="bk-bell-list">${notices.length ? notices.map(n => `<div class="bk-note new" data-go="${esc(n.link || '')}" data-id="${n.id}">
                     <span class="chip-icon sm ${NOTE_TONE[n.kind] || ''}">${icon(NOTE_ICON[n.kind] || 'bell')}</span>
                     <span class="grow min-0"><b class="ellipsis">${esc(n.title)}</b><small>${esc(n.body || '')}</small>
-                    <small class="muted">${esc(n.actor || '')} · ${dateTime(n.createdAt)}</small></span>
+                    <small class="muted">${esc(n.actor || '')} · ${dateTime(postedAt(n))}</small></span>
                     <button class="btn sm ghost icon bk-note-x" data-read="${n.id}" title="Seen: clear it">${icon('x')}</button></div>`).join('')
                     : `<p class="small muted bk-bell-empty">${icon('check-circle')} All caught up: new orders, approvals and signed deliveries show here.</p>`}</div>
                 ${'Notification' in window && Notification.permission === 'default' ? '<div class="bk-bell-foot"><button class="link-btn" data-desktop>Also show them on the desktop</button></div>' : ''}`;
@@ -195,7 +198,7 @@ function drawAlert() {
     back.innerHTML = `<div class="bk-alert" role="alertdialog" aria-live="assertive" aria-label="New order">
         <div class="bk-alert-top">
             <span class="bk-alert-ring">${icon('cart')}</span>
-            <div class="grow min-0"><small>${queue.length > 1 ? `${queue.length} new orders` : 'New order'} · ${esc(n.actor || '')} · ${dateTime(n.createdAt)}</small>
+            <div class="grow min-0"><small>${queue.length > 1 ? `${queue.length} new orders` : 'New order'} · ${esc(n.actor || '')} · ${dateTime(postedAt(n))}</small>
                 <h2>${esc(o.orderNo || '')} <span>${esc(o.customer || '')}</span></h2></div>
             <button class="btn sm ghost icon" data-a="sound" title="${pref('sound', true) ? 'Mute sound and voice' : 'Sound and voice'}">${icon(pref('sound', true) ? 'volume' : 'volume-x')}</button>
             <button class="btn sm ghost icon" data-a="later" title="Later (it stays in the bell)">${icon('x')}</button>
@@ -214,7 +217,9 @@ function drawAlert() {
         <div class="bk-alert-foot">
             ${queue.length > 1 ? `<span class="bk-alert-nav"><button class="btn sm ghost icon" data-a="prev" ${shown ? '' : 'disabled'}>${icon('chevron-left')}</button>
                 <small>${shown + 1} of ${queue.length}</small><button class="btn sm ghost icon" data-a="next" ${shown < queue.length - 1 ? '' : 'disabled'}>${icon('chevron-right')}</button></span>` : ''}
-            <button class="btn ghost" data-a="say" title="Read it out again">${icon('volume')}Read out</button>
+            ${navigator.userActivation && !navigator.userActivation.hasBeenActive
+                ? `<button class="btn primary" data-a="say" title="The browser plays sound only after the page was clicked">${icon('volume')}Tap to hear it</button>`
+                : `<button class="btn ghost" data-a="say" title="Read it out again">${icon('volume')}Read out</button>`}
             <span class="spacer"></span>
             <button class="btn" data-a="seen" title="Seen: clear it without opening">${icon('check')}Seen</button>
             <button class="btn" data-a="later">Later</button>
@@ -276,9 +281,14 @@ function orderAlert(n) {
 
 // ===================================================================== a notice arriving live
 
-window.addEventListener('brick-notice', e => {
-    const n = e.detail?.notice;
-    if (!n) return;
+window.addEventListener('brick-notice', e => arrive(e.detail?.notice));
+
+/** Notices already shown on this page (live, or found by the check below): each is shown once. */
+const shownIds = new Set();
+
+function arrive(n) {
+    if (!n || shownIds.has(n.id)) return;
+    shownIds.add(n.id);
     if (notices && !notices.some(x => x.id === n.id)) notices.unshift(n);
     paintCount();
     if (n.kind === 'APPROVAL' || n.kind === 'DECISION') window.dispatchEvent(new Event('brick-approvals-changed'));
@@ -296,12 +306,41 @@ window.addEventListener('brick-notice', e => {
     });
     box.appendChild(card);
     chime(1);
+    // a request for the checker (an order below the lowest price taken on the phone …) is read out too
+    if (n.kind === 'APPROVAL') speak(`${sayable(n.title)}. ${sayable(String(n.body || '').replace(/ · /g, '. '))}`);
     setTimeout(() => card.classList.add('out'), 9000);
     setTimeout(() => card.remove(), 9600);
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
         try { new Notification(n.title, { body: n.body || '', tag: `bk-${n.id}` }).onclick = () => { window.focus(); if (n.link) location.hash = `#/${n.link}`; }; } catch { /* not shown */ }
     }
-});
+}
+
+// ===================================================================== what the live connection missed
+
+/**
+ * The live connection (server-sent events) can drop without a sign: a laptop asleep, a tunnel (ngrok) or a proxy closing
+ * it, Wi-Fi changing. What was sent meanwhile would be lost, so the unseen notices are also checked every 20 seconds,
+ * when the page comes back to the front and when the connection opens again: a new order (or a request to approve)
+ * of the last half hour not shown yet gets its alert then.
+ */
+let watching = false;
+const FRESH_MS = 30 * 60 * 1000;
+
+async function check() {
+    const list = await loadNotices();
+    const now = Date.now();
+    list.filter(n => (n.kind === 'ORDER' || n.kind === 'APPROVAL') && !shownIds.has(n.id) && now - new Date(postedAt(n)).getTime() < FRESH_MS)
+        .reverse().forEach(arrive);
+}
+
+export function watchNotices() {
+    if (watching) return;
+    watching = true;
+    check();
+    setInterval(check, 20000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    window.addEventListener('pb-live-open', check);
+}
 
 // what a notice is about, opened anywhere (an order, a request): its notices are seen
 window.addEventListener('hashchange', () => {
