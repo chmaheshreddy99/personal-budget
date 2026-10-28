@@ -21,13 +21,14 @@
  * #/expenses/owe (money you borrowed and bills still to pay), #/expenses/claim/<id> (opens that lent / borrowed
  * item, wherever the link came from: this is where it is managed).
  */
-import { api } from '../core/api.js';
+import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, can, categoriesOf, state } from '../core/store.js';
-import { esc, panel, emptyState, toast, confirmDialog, accountOptions, categoryOptions, openModal, field, readForm } from '../core/ui.js';
+import { esc, panel, emptyState, toast, confirmDialog, accountOptions, categoryOptions, openModal, field, readForm, listTotalRow, totalsToggle } from '../core/ui.js';
 import { icon, categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, percent, date, dateTime, shortDate, isoDate } from '../core/format.js';
 import { barChart, donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
+import { openEntryDetail } from '../components/transaction-forms.js';
 import { claimPanelHtml, bindClaimPanel, claimBadge } from '../components/claim-panel.js';
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -60,10 +61,96 @@ const TYPES = [
     { key: 'emi', label: 'EMIs', iconName: 'calendar' },
 ];
 
+/**
+ * Filters, each a set (any of its values matches) or a single choice, ANDed together. Expense filters (categories,
+ * expense status) and Paid for / Lent filters (kind, person, status, due, interest) each keep the other kind of item
+ * out of the list once set; account and amount apply to both.
+ */
+const FILTERS = { cats: [], payers: [], xstatus: [], kinds: [], people: [], cstatus: [], due: '', interest: '', min: '', max: '' };
+
 const view = {
-    period: 'month', from: isoDate(), to: isoDate(), type: 'all', categoryId: '', paidFromId: '', q: '',
-    min: '', max: '', side: 'mix', open: null, morePeriods: false, moreFilters: false,
+    period: 'month', from: isoDate(), to: isoDate(), type: 'all', q: '',
+    side: 'mix', open: null, morePeriods: false, moreFilters: false, ...structuredClone(FILTERS),
 };
+
+function clearFilters() {
+    Object.assign(view, structuredClone(FILTERS));
+}
+
+/** Adds a value to a filter set, or takes it out when it is in already. */
+function toggleIn(list, value) {
+    const v = String(value);
+    const i = list.indexOf(v);
+    if (i >= 0) list.splice(i, 1); else list.push(v);
+}
+
+/** What an expense can be, beyond its category: refunded, reversed, linked to other charges, with or without a bill. */
+const EXPENSE_STATUS = [
+    { key: 'refunded', label: 'Refunded', iconName: 'arrow-in', test: r => r.status === 'REFUNDED' },
+    { key: 'partly', label: 'Part refunded', iconName: 'arrow-in', test: r => r.status === 'PARTLY_REFUNDED' },
+    { key: 'reversed', label: 'Reversed', iconName: 'undo', test: r => r.status === 'REVERSED' },
+    { key: 'charges', label: 'Has linked charges', iconName: 'link', test: r => r.raw?.linked?.length > 0 },
+    { key: 'charge', label: 'Is a linked charge', iconName: 'split', test: r => Boolean(r.raw?.parentEntryId) },
+    { key: 'evidence', label: 'With bill / proof', iconName: 'paperclip', test: r => r.raw?.attachmentCount > 0 },
+    { key: 'noevidence', label: 'No bill yet', iconName: 'camera', test: r => !r.raw?.attachmentCount },
+];
+/** Where a lent / paid-for / borrowed item stands. */
+const CLAIM_STATUS = [
+    { key: 'open', label: 'Open', iconName: 'clock', test: c => c.status === 'OPEN' && !c.overdue },
+    { key: 'partial', label: 'Part repaid', iconName: 'hourglass', test: c => c.status === 'PARTIAL' && !c.overdue },
+    { key: 'overdue', label: 'Overdue', iconName: 'alert', test: c => c.overdue },
+    { key: 'settled', label: 'Settled', iconName: 'check-circle', test: c => c.status === 'SETTLED' },
+    { key: 'written', label: 'Written off', iconName: 'x', test: c => c.status === 'WRITTEN_OFF' },
+];
+const isOpenClaim = c => ['OPEN', 'PARTIAL'].includes(c.status);
+const CLAIM_DUE = [
+    { key: 'overdue', label: 'Past due', test: c => c.overdue },
+    { key: 'week', label: 'Due in 7 days', test: c => isOpenClaim(c) && c.dueDate && !c.overdue && c.daysToDue <= 7 },
+    { key: 'month', label: 'Due in 30 days', test: c => isOpenClaim(c) && c.dueDate && !c.overdue && c.daysToDue <= 30 },
+    { key: 'none', label: 'No due date', test: c => !c.dueDate },
+];
+const CLAIM_INTEREST = [
+    { key: 'with', label: 'With interest', test: c => Number(c.interestRate) > 0 },
+    { key: 'free', label: 'Interest-free', test: c => !Number(c.interestRate) },
+];
+const AMOUNT_PRESETS = [['', '500', 'Under ₹500'], ['500', '2000', '₹500 – 2k'], ['2000', '10000', '₹2k – 10k'], ['10000', '', 'Over ₹10k']];
+
+/** Which filters a list takes: expense filters on expenses (and EMIs), Paid for / Lent filters on those items. */
+const takesExpenseFilters = type => ['all', 'EXPENSE', 'emi'].includes(type);
+const takesClaimFilters = type => type === 'all' || CLAIM_VIEWS.includes(type);
+
+function claimFiltersOn(type) {
+    return takesClaimFilters(type) && Boolean(view.kinds.length || view.people.length || view.cstatus.length || view.due || view.interest);
+}
+
+/** The row test for a list: shared filters, then those of its own kind (the other kind's filters leave it out). */
+function matchesFor(type, query) {
+    const catsOn = takesExpenseFilters(type) && view.cats.length > 0;
+    const statusOn = (type === 'all' || type === 'EXPENSE') && view.xstatus.length > 0;
+    const claimsOn = claimFiltersOn(type);
+    const statuses = EXPENSE_STATUS.filter(s => view.xstatus.includes(s.key));
+    return r => {
+        if (view.payers.length && !view.payers.includes(String(r.paidFromId))) return false;
+        if (view.min !== '' && r.amount < Number(view.min)) return false;
+        if (view.max !== '' && r.amount > Number(view.max)) return false;
+        if (r.claim) {
+            if (catsOn || statusOn) return false;
+            if (claimsOn) {
+                const c = r.claim;
+                if (view.kinds.length && !view.kinds.includes(r.type)) return false;
+                if (view.people.length && !view.people.includes((r.party || '').trim().toLowerCase())) return false;
+                if (view.cstatus.length && !CLAIM_STATUS.filter(s => view.cstatus.includes(s.key)).some(s => s.test(c))) return false;
+                if (view.due && !CLAIM_DUE.find(d => d.key === view.due)?.test(c)) return false;
+                if (view.interest && !CLAIM_INTEREST.find(d => d.key === view.interest)?.test(c)) return false;
+            }
+        } else {
+            if (claimsOn) return false;
+            if (catsOn && !view.cats.includes(String(r.categoryId))) return false;
+            if (statusOn && !statuses.some(s => s.test(r))) return false;
+        }
+        return queryMatches(r, query);
+    };
+}
 
 const prefs = getPref('expenses', { grouped: false, sort: { key: 'date', dir: 'desc' } });
 const savePrefs = () => setPref('expenses', prefs);
@@ -98,8 +185,9 @@ function queryMatches(r, q) {
         if (flag === 'settled' && r.claim?.status !== 'SETTLED') return false;
         if (flag === 'refunded' && !['REFUNDED', 'PARTLY_REFUNDED'].includes(r.raw?.status)) return false;
         if (flag === 'reversed' && r.raw?.status !== 'REVERSED') return false;
+        if ((flag === 'linked' || flag === 'fee') && !(r.raw?.linked?.length || r.raw?.parentEntryId)) return false;
     }
-    const hay = [r.description, r.party, r.reference, r.category, r.entryNo, r.notes, r.paidFrom].filter(Boolean).join(' ').toLowerCase();
+    const hay = [r.description, r.party, r.reference, r.category, r.entryNo, r.notes, r.paidFrom, r.raw?.parentEntryNo].filter(Boolean).join(' ').toLowerCase();
     return q.text.every(t => hay.includes(t));
 }
 
@@ -109,7 +197,28 @@ export async function render(container, params, isCurrent) {
     if (params[0] === 'owe') { view.type = 'owe'; }
     if (params[0] === 'emi') { view.type = 'emi'; if (params[1]) view.focusEmi = Number(params[1]); }
     if (params[0] === 'claim' && params[1]) { view.focusClaim = Number(params[1]); view.q = ''; }
+    if (params[0] === 'emi-entry' && params[1]) view.focusEmiEntry = Number(params[1]);
+    // a category over a period (#/expenses/category/<id>/<from>/<to>, from a report): just its expenses, those dates
+    if (params[0] === 'category' && /^\d+$/.test(params[1] || '')) {
+        clearFilters();
+        Object.assign(view, { type: 'EXPENSE', q: '', cats: [params[1]], open: null });
+        const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+        if (isDate(params[2]) && isDate(params[3])) Object.assign(view, { period: 'custom', from: params[2], to: params[3] });
+    }
     if (params.length) history.replaceState(null, '', '#/expenses');
+    // opened for an expense (#/expenses/entry/<id>): the month it is in, every type, no filters, that expense open
+    if (params[0] === 'entry' && /^\d+$/.test(params[1] || '')) {
+        const entry = await api.get(`/transactions/${params[1]}`).catch(() => null);
+        if (!isCurrent()) return;
+        if (entry) {
+            const month = entry.entryDate.slice(0, 7);
+            const end = isoDate(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0));
+            if (month === isoDate().slice(0, 7)) view.period = 'month';
+            else Object.assign(view, { period: 'custom', from: `${month}-01`, to: end < isoDate() ? end : isoDate() });
+            Object.assign(view, { type: 'all', q: '', focusEntry: entry.id });
+            clearFilters();
+        }
+    }
 
     const today = new Date(isoDate() + 'T00:00:00');
     const [fromD, toD] = PERIODS[view.period].range(today);
@@ -170,35 +279,51 @@ export async function render(container, params, isCurrent) {
             view.type = payable ? 'owe' : open ? 'collect' : focus.type;
             if (!all[view.type].includes(focus)) all[view.type].push(focus);
             view.open = focus.key;
-            view.categoryId = null; view.paidFromId = null; view.min = ''; view.max = '';
+            clearFilters();
         }
         view.focusClaim = null;
     }
+    if (view.focusEmiEntry) {   // an EMI's purchase or instalment opens its plan
+        view.focusEmi = emiByEntry.get(view.focusEmiEntry)?.plan.id ?? null;
+        view.focusEmiEntry = null;
+    }
+    if (view.focusEntry) {
+        const focus = all.EXPENSE.find(r => r.raw.entryId === view.focusEntry);
+        if (focus) { view.open = focus.key; view.flash = focus.key; }
+        else if (emiByEntry.has(view.focusEntry)) view.focusEmi = emiByEntry.get(view.focusEntry).plan.id;
+        view.focusEntry = null;
+    }
     if (view.focusEmi) {
         const focus = emiRows.find(r => r.emi.id === view.focusEmi);
-        if (focus) { view.type = 'emi'; if (!all.emi.includes(focus)) all.emi.push(focus); view.open = focus.key; view.categoryId = null; view.paidFromId = null; }
+        if (focus) { view.type = 'emi'; if (!all.emi.includes(focus)) all.emi.push(focus); view.open = focus.key; clearFilters(); }
         view.focusEmi = null;
     }
+    // a person who owes you is filtered by name, however it was typed
+    view.people = view.people.map(p => p.trim().toLowerCase());
     const query = parseQuery(view.q);
-    const matches = r => (!view.categoryId || String(r.categoryId) === String(view.categoryId))
-        && (!view.paidFromId || String(r.paidFromId) === String(view.paidFromId))
-        && (view.min === '' || r.amount >= Number(view.min))
-        && (view.max === '' || r.amount <= Number(view.max))
-        && queryMatches(r, query);
-    const list = sortRows(all[view.type].filter(matches));
+    const list = sortRows(all[view.type].filter(matchesFor(view.type, query)));
 
     // ---- figures (expenses only, so lending never inflates spending)
-    const expenses = all.EXPENSE.filter(matches);
+    const expenses = all.EXPENSE.filter(matchesFor('EXPENSE', query));
     const total = sum(expenses);
-    const previousTotal = sum(previous);
+    // the previous period under the same filters, so the change compares like with like
+    const previousTotal = sum(previous.map(expenseRow).filter(matchesFor('EXPENSE', query)));
+    const spendFiltered = expenses.length !== all.EXPENSE.length;
+    const filteredTag = on => (on ? ` <span class="filtered-tag" title="Follows the filters of the list">${icon('filter')}filtered</span>` : '');
     const change = previousTotal ? ((total - previousTotal) / previousTotal) * 100 : null;
     const elapsed = Math.max(1, Math.min(days, Math.round((today - fromD) / 86400000) + 1));
     const dailyAverage = total / elapsed;
     const byCategory = groupSum(expenses, r => r.categoryId, r => r.category);
     const byPayer = groupSum(expenses, r => r.paidFromId, r => r.paidFrom, r => r.paidFromType);
     const singleMonth = from.slice(0, 7) === to.slice(0, 7);
-    const s = claimData.summary;
-    const advancedCount = [view.categoryId, view.paidFromId, view.min, view.max].filter(v => v !== '' && v !== null).length;
+    // who owes you, narrowed by the same filters as the list (person, status, account, amount, search)
+    const collectShown = all.collect.filter(matchesFor('collect', query));
+    const collectFiltered = collectShown.length !== all.collect.length;
+    const s = collectFiltered ? { ...claimData.summary, outstanding: collectShown.reduce((t, r) => t + Number(r.claim.outstanding), 0),
+        openCount: collectShown.length, overdueCount: collectShown.filter(r => r.claim.overdue).length } : claimData.summary;
+    const chips = activeFilterChips({ accounts, expenseCategories, claimRows });
+    const advancedCount = chips.length;
+    const filtered = chips.some(c => c.applies) || Boolean(view.q);
     const periodHidden = !QUICK_PERIODS.includes(view.period);
     const queryChips = [
         query.min !== null ? `≥ ${moneyShort(query.min)}` : '', query.max !== null ? `≤ ${moneyShort(query.max)}` : '',
@@ -241,15 +366,12 @@ export async function render(container, params, isCurrent) {
         ${panel({ title: 'Transactions', iconName: 'list', cls: 'p-xp-list', bodyClass: 'flush',
                   sub: `${list.length} · ${money(sum(list))}`,
                   actions: `<div class="seg-chips sm" id="xp-types">${TYPES.map(t => `<button class="seg-chip ${view.type === t.key ? 'active' : ''}" data-type="${t.key}">
-                        ${t.iconName ? icon(t.iconName) : ''}${t.label}<span class="count">${all[t.key].filter(matches).length}</span></button>`).join('')}</div>
-                        <label class="switch" title="Group the list by day with daily totals"><input type="checkbox" id="xp-grouped" ${prefs.grouped ? 'checked' : ''}><span></span>By day</label>`,
+                        ${t.iconName ? icon(t.iconName) : ''}${t.label}<span class="count">${all[t.key].filter(matchesFor(t.key, query)).length}</span></button>`).join('')}</div>
+                        <label class="switch" title="Group the list by day with daily totals"><input type="checkbox" id="xp-grouped" ${prefs.grouped ? 'checked' : ''}><span></span>By day</label>
+                        ${totalsToggle()}`,
                   body: `
-                    ${view.moreFilters || advancedCount ? `<div class="xp-more-filters">
-                        <select id="xp-category" data-combo>${categoryOptions(expenseCategories, view.categoryId, 'All categories')}</select>
-                        <select id="xp-payer" data-combo>${accountOptions(accounts, a => ['BANK', 'CASH', 'WALLET', 'CREDIT_CARD', 'PAYABLE'].includes(a.accountType), view.paidFromId, 'Any account')}</select>
-                        <span class="xp-amounts">${icon('cash')}<input type="number" id="xp-min" placeholder="Min ₹" value="${esc(view.min)}" data-plain>–<input type="number" id="xp-max" placeholder="Max ₹" value="${esc(view.max)}" data-plain></span>
-                        ${advancedCount ? `<button class="btn sm ghost" id="xp-clear" title="Clear filters">${icon('x')}Clear</button>` : ''}
-                    </div>` : ''}
+                    ${view.moreFilters ? filterPanelHtml({ rows: all.EXPENSE, claimRows, accounts, expenseCategories, emiRows }) : ''}
+                    ${chips.length ? activeFiltersHtml(chips) : ''}
                     ${queryChips.length ? `<div class="xp-query">${icon('sparkles')}${queryChips.map(c => `<span class="tag">${esc(c)}</span>`).join('')}</div>` : ''}
                     ${submissionsBar(mine)}
                     ${openTypes.includes(view.type) ? `<div class="xp-open-note">${icon('clock')}<span>${view.type === 'emi'
@@ -258,12 +380,12 @@ export async function render(container, params, isCurrent) {
                         : ['collect', 'owe'].includes(view.type)
                         ? 'Every open item, whatever the period'
                         : `Every open item, whatever the period${olderOpen ? ` (${olderOpen} from before ${date(from)})` : ''}, plus those settled in this period`}</span></div>` : ''}
-                    <div class="scroll xp-list" id="xp-list">${tableHtml(list)}</div>` })}
+                    <div class="scroll xp-list" id="xp-list">${tableHtml(list, filtered)}</div>` })}
 
         <div class="xp-side">
-            ${panel({ title: 'Summary', iconName: 'pie', cls: 'p-xp-summary', sub: PERIODS[view.period].label,
+            ${panel({ title: 'Summary', iconName: 'pie', cls: 'p-xp-summary', sub: PERIODS[view.period].label + filteredTag(spendFiltered || collectFiltered),
                       body: summaryHtml({ total, change, days, expenses, dailyAverage, today, budgets, singleMonth, byCategory, s, to }) })}
-            ${panel({ title: view.side === 'payer' ? 'Paid from' : 'Where it went', iconName: view.side === 'payer' ? 'wallet' : 'pie', cls: 'p-xp-cat',
+            ${panel({ title: view.side === 'payer' ? 'Paid from' : 'Where it went', iconName: view.side === 'payer' ? 'wallet' : 'pie', cls: 'p-xp-cat', sub: filteredTag(spendFiltered),
                       bodyClass: view.side === 'mix' ? 'chart' : '',
                       actions: `<div class="seg-chips sm" id="xp-side-tabs">
                           <button class="seg-chip ${view.side === 'mix' ? 'active' : ''}" data-side="mix" title="Category mix">${icon('pie')}</button>
@@ -271,14 +393,14 @@ export async function render(container, params, isCurrent) {
                           <button class="seg-chip ${view.side === 'payer' ? 'active' : ''}" data-side="payer">Paid from</button></div>`,
                       body: view.side === 'mix' ? (byCategory.length ? '<div class="xp-donut"><div class="chart" id="xp-donut"></div><div class="xp-donut-legend scroll" id="xp-donut-legend"></div></div>' : emptyState('Nothing spent yet', 'pie'))
                           : view.side === 'category' ? categoryBars(byCategory, budgets, total, singleMonth) : payerList(byPayer, total) })}
-            ${panel({ title: days > 62 ? 'Monthly spending' : 'Daily spending', iconName: 'calendar', cls: 'p-xp-daily', bodyClass: 'chart',
+            ${panel({ title: days > 62 ? 'Monthly spending' : 'Daily spending', iconName: 'calendar', cls: 'p-xp-daily', bodyClass: 'chart', sub: filteredTag(spendFiltered),
                       body: expenses.length ? '<div class="chart" id="xp-daily"></div>' : emptyState('No expenses') })}
             ${panel({ title: sideTab === 'emi' ? 'EMIs' : 'Owed to you', iconName: sideTab === 'emi' ? 'calendar' : 'hand', cls: 'p-xp-owed',
-                      sub: sideTab === 'emi' ? (emiBook.summary ? `${moneyShort(emiBook.summary.outstanding)} owed` : '') : money(s.outstanding),
+                      sub: sideTab === 'emi' ? (emiBook.summary ? `${moneyShort(emiBook.summary.outstanding)} owed` : '') : money(s.outstanding) + filteredTag(collectFiltered),
                       actions: hasEmis ? `<div class="seg-chips sm" id="xp-owed-tabs">
                           <button class="seg-chip ${sideTab === 'owed' ? 'active' : ''}" data-owed-tab="owed" title="Who owes you">${icon('hand')}</button>
                           <button class="seg-chip ${sideTab === 'emi' ? 'active' : ''}" data-owed-tab="emi" title="Your EMIs">${icon('calendar')}EMIs</button></div>` : '',
-                      body: sideTab === 'emi' ? emiSideHtml(emiBook) : owedList(all.collect) })}
+                      body: sideTab === 'emi' ? emiSideHtml(emiBook) : owedList(collectShown) })}
         </div>
     </div>`;
 
@@ -287,7 +409,7 @@ export async function render(container, params, isCurrent) {
         const items = foldOthers(byCategory.map(c => ({ label: c.label, value: c.value, key: c.key })));
         donutChart(container.querySelector('#xp-donut'), { items, format: v => money(v), centerValue: moneyShort(total), centerLabel: 'spent' });
         container.querySelector('#xp-donut-legend').innerHTML = items.map((it, i) => `
-            <button class="legend-row ${String(view.categoryId) === String(it.key) ? 'active' : ''}" ${it.key ? `data-filter-category="${it.key}"` : ''} title="Filter by ${esc(it.label)}">
+            <button class="legend-row ${view.cats.includes(String(it.key)) ? 'active' : ''}" ${it.key ? `data-filter-category="${it.key}"` : ''} title="Filter by ${esc(it.label)}">
                 <i class="legend-swatch" style="background:${seriesColor(i)}"></i><span class="ellipsis">${esc(it.label)}</span>
                 <small>${percent((it.value / (total || 1)) * 100, 0)}</small><b>${moneyShort(it.value)}</b></button>`).join('');
     }
@@ -326,14 +448,45 @@ export async function render(container, params, isCurrent) {
         const b = e.target.closest('[data-side]');
         if (b) { view.side = b.dataset.side; reload(); }
     });
-    on('#xp-category', 'change', e => { view.categoryId = e.target.value; reload(); });
-    on('#xp-payer', 'change', e => { view.paidFromId = e.target.value; reload(); });
+    // the filter panel: a chip adds its value to a set (or picks the one choice), the amounts set a range
+    on('.xp-fpanel', 'click', e => {
+        const chip = e.target.closest('[data-f]');
+        if (chip) {
+            const { f, v } = chip.dataset;
+            if (Array.isArray(view[f])) toggleIn(view[f], v); else view[f] = view[f] === v ? '' : v;
+            reload();
+            return;
+        }
+        const preset = e.target.closest('[data-amount]');
+        if (preset) {
+            const [min, max] = preset.dataset.amount.split('-');
+            const same = view.min === min && view.max === max;
+            view.min = same ? '' : min; view.max = same ? '' : max;
+            reload();
+            return;
+        }
+        const all = e.target.closest('[data-f-all]');
+        if (all) { view[all.dataset.fAll] = []; reload(); return; }
+        const more = e.target.closest('[data-f-more]');
+        if (more) { view.allCategories = !view.allCategories; reload(); }
+    });
+    on('.xp-fpanel', 'input', e => {
+        // narrows the chips of a group as you type, without a reload
+        if (!e.target.matches('[data-f-search]')) return;
+        const text = e.target.value.trim().toLowerCase();
+        e.target.closest('.xf-group').querySelectorAll('.xf-chip').forEach(c => { c.hidden = text && !c.textContent.toLowerCase().includes(text); });
+    });
     on('#xp-min', 'change', e => { view.min = e.target.value; reload(); });
     on('#xp-max', 'change', e => { view.max = e.target.value; reload(); });
-    on('#xp-clear', 'click', () => { view.categoryId = ''; view.paidFromId = ''; view.min = ''; view.max = ''; reload(); });
+    on('.xp-active', 'click', e => {
+        const pill = e.target.closest('[data-unfilter]');
+        if (pill) { chips.find(c => c.id === pill.dataset.unfilter)?.clear(); reload(); return; }
+        if (e.target.closest('[data-unfilter-all]')) { clearFilters(); reload(); }
+    });
     on('#xp-search-clear', 'click', () => { view.q = ''; reload(); });
     on('#xp-clear-all', 'click', () => {
-        Object.assign(view, { period: 'month', type: 'all', categoryId: '', paidFromId: '', min: '', max: '', q: '', open: null, moreFilters: false });
+        Object.assign(view, { period: 'month', type: 'all', q: '', open: null, moreFilters: false });
+        clearFilters();
         reload();
     });
     let timer;
@@ -343,18 +496,18 @@ export async function render(container, params, isCurrent) {
     });
     on('.p-xp-summary', 'click', e => {
         const cat = e.target.closest('[data-filter-category]');
-        if (cat) { view.categoryId = String(view.categoryId) === cat.dataset.filterCategory ? '' : cat.dataset.filterCategory; reload(); }
+        if (cat) { toggleIn(view.cats, cat.dataset.filterCategory); reload(); }
     });
     on('.p-xp-cat', 'click', e => {
         const row = e.target.closest('[data-filter-category], [data-filter-payer]');
         if (!row) return;
-        if (row.dataset.filterCategory) view.categoryId = String(view.categoryId) === row.dataset.filterCategory ? '' : row.dataset.filterCategory;
-        if (row.dataset.filterPayer) view.paidFromId = String(view.paidFromId) === row.dataset.filterPayer ? '' : row.dataset.filterPayer;
+        if (row.dataset.filterCategory) toggleIn(view.cats, row.dataset.filterCategory);
+        if (row.dataset.filterPayer) toggleIn(view.payers, row.dataset.filterPayer);
         reload();
     });
     on('.p-xp-owed', 'click', e => {
         const row = e.target.closest('[data-person]');
-        if (row) { view.type = 'collect'; view.q = row.dataset.person; reload(); }
+        if (row) { view.type = 'collect'; view.people = [row.dataset.person.trim().toLowerCase()]; reload(); }
     });
     bindExport(container.querySelector('.xp-toolbar'), () => ({
         title: `Expenses · ${TYPES.find(t => t.key === view.type)?.label || 'All'}`,
@@ -364,10 +517,10 @@ export async function render(container, params, isCurrent) {
             ...(byCategory[0] ? [['Top category', `${byCategory[0].label} · ${money(byCategory[0].value)}`]] : [])],
         sheets: [
             { name: 'Transactions', columns: [{ label: 'Date', type: 'date' }, { label: 'Kind' }, { label: 'Category' }, { label: 'Description' },
-                { label: 'Shop / person' }, { label: 'Paid from' }, { label: 'Reference' }, { label: 'Notes' }, { label: 'Amount', type: 'money' }, { label: 'Outstanding', type: 'money' }],
+                { label: 'Shop / person' }, { label: 'Paid from' }, { label: 'Reference' }, { label: 'Notes' }, { label: 'Charge of' }, { label: 'Amount', type: 'money' }, { label: 'Outstanding', type: 'money' }],
               rows: list.map(r => [r.date, r.typeLabel, r.claim ? '' : r.category, r.description, r.party || '', r.paidFrom || '', r.reference || '',
-                  r.notes || '', r.amount, r.claim ? Number(r.claim.outstanding) : '']),
-              totals: ['Total', '', '', '', '', '', '', '', sum(list), ''] },
+                  r.notes || '', r.raw?.parentEntryNo || '', r.amount, r.claim ? Number(r.claim.outstanding) : '']),
+              totals: ['Total', '', '', '', '', '', '', '', '', sum(list), ''] },
             { name: 'By category', columns: [{ label: 'Category' }, { label: 'Items', type: 'number' }, { label: 'Spent', type: 'money' }, { label: 'Share', type: 'percent' }],
               rows: byCategory.map(c => [c.label, c.count, c.value, total ? (c.value / total) * 100 : 0]),
               totals: ['Total', expenses.length, total, 100] },
@@ -389,8 +542,8 @@ export async function render(container, params, isCurrent) {
         const fc = e.target.closest('[data-row-filter-category]'), fp = e.target.closest('[data-row-filter-payer]');
         if (fc || fp) {
             e.stopPropagation();
-            if (fc) view.categoryId = String(view.categoryId) === fc.dataset.rowFilterCategory ? '' : fc.dataset.rowFilterCategory;
-            if (fp) view.paidFromId = String(view.paidFromId) === fp.dataset.rowFilterPayer ? '' : fp.dataset.rowFilterPayer;
+            if (fc) toggleIn(view.cats, fc.dataset.rowFilterCategory);
+            if (fp) toggleIn(view.payers, fp.dataset.rowFilterPayer);
             reload();
             return;
         }
@@ -405,6 +558,15 @@ export async function render(container, params, isCurrent) {
                 if (action.dataset.xpAction === 'emi-plan') { view.type = 'emi'; view.open = `m${action.dataset.plan}`; reload(); }
                 if (action.dataset.xpAction === 'refund') openRefundDialog(r, reload);
                 if (action.dataset.xpAction === 'reverse') openReverseDialog(r, reload);
+                if (action.dataset.xpAction === 'add-charge') openChargeDialog(r, { accounts, expenseCategories, onSaved: saved => { view.open = r.key; toast(`${saved.entryNo} linked to ${r.raw.entryNo}`); reload(); } });
+                if (action.dataset.xpAction === 'paid-for') openPaidForDialog(r, claimRows, claim => { view.focusClaim = claim.id; reload(); });
+                if (action.dataset.xpAction === 'open-linked') {
+                    const entryId = Number(action.dataset.entry);
+                    const target = all.EXPENSE.find(x => x.raw.entryId === entryId);
+                    const tr = target && listEl.querySelector(`tr[data-key="${target.key}"]`);
+                    if (tr) { await toggleRow(tr, list.find(x => x.key === target.key)); tr.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+                    else openEntryDetail(entryId, { onChanged: reload });   // outside this period or filtered out
+                }
                 if (action.dataset.xpAction === 'undo-refund') {
                     const f = r.raw.refunds.find(x => String(x.entryId) === action.dataset.refund);
                     if (f && await confirmDialog(`Undo the ${f.reversal ? 'reversal' : 'refund'} of ${money(f.amount)} (${f.entryNo})? The expense counts again.`)) {
@@ -413,7 +575,7 @@ export async function render(container, params, isCurrent) {
                         reload();
                     }
                 }
-                if (action.dataset.xpAction === 'delete' && await confirmDialog(`Delete "${r.description}" (${money(r.amount)})?`)) {
+                if (action.dataset.xpAction === 'delete' && await confirmDialog(`Delete "${r.description}" (${money(r.amount)})?${r.raw.parentEntryId ? ` It is a charge of ${r.raw.parentEntryNo}; that expense stays.` : ''}`)) {
                     await api.del(`/expenses/${r.raw.entryId}`);
                     toast('Expense deleted');
                     reload();
@@ -466,8 +628,14 @@ export async function render(container, params, isCurrent) {
 
     // keep the previously opened row open after a reload (e.g. after recording a repayment)
     const reopen = view.open && listEl.querySelector(`tr[data-key="${view.open}"]`);
-    if (reopen) { toggleRow(reopen, list.find(x => x.key === view.open)).then(() => { if (!reopen.classList.contains('is-claim')) reopen.scrollIntoView({ block: 'nearest' }); }); }
-    else view.open = null;
+    if (reopen) {
+        const flash = view.flash === view.open;   // opened from a link elsewhere: show where it is
+        view.flash = null;
+        toggleRow(reopen, list.find(x => x.key === view.open)).then(() => {
+            if (!reopen.classList.contains('is-claim')) reopen.scrollIntoView({ block: flash ? 'center' : 'nearest', behavior: flash ? 'smooth' : 'auto' });
+            if (flash) { reopen.classList.add('flash'); setTimeout(() => reopen.classList.remove('flash'), 2600); }
+        });
+    } else view.open = null;
 
     if (view.focusSearch) {
         const search = container.querySelector('#xp-search');
@@ -499,6 +667,140 @@ function submissionsBar(mine) {
     return `<button type="button" class="xp-subs-bar ${back ? 'has-rejected' : ''}" data-my-subs title="What you sent for approval">
         ${icon(back ? 'alert' : 'hourglass')}<span>${back ? `<b>${back} sent back</b> to correct · ` : ''}${waiting} waiting for approval</span>
         <span class="spacer"></span><span class="link-btn">${back ? 'Correct now' : 'View'}</span></button>`;
+}
+
+// ===================================================================== filters
+
+const fchip = (f, v, label, { on = false, count, iconHtml = '', title = '' } = {}) => `
+    <button type="button" class="xf-chip ${on ? 'on' : ''}" data-f="${f}" data-v="${esc(v)}" ${title ? `title="${esc(title)}"` : ''}>
+        ${iconHtml}<span class="ellipsis">${esc(label)}</span>${count !== undefined ? `<small>${count}</small>` : ''}${on ? `<i class="xf-tick">${icon('check')}</i>` : ''}</button>`;
+
+/** How many rows and how much per key, biggest first. */
+function tally(rows, keyOf) {
+    const map = new Map();
+    rows.forEach(r => {
+        const k = keyOf(r);
+        if (k === null || k === undefined || k === '') return;
+        const t = map.get(k) || { count: 0, total: 0 };
+        t.count++; t.total += Number(r.amount) || 0;
+        map.set(k, t);
+    });
+    return map;
+}
+
+/**
+ * The filter panel, in groups: what the money was (categories, expense status), where it came from and how much,
+ * and, on its own, Paid for / Lent (kind, person, where it stands, due, interest). A list shows only the groups that
+ * apply to it; each chip says how many items it would match in the period.
+ */
+function filterPanelHtml({ rows, claimRows, accounts, expenseCategories, emiRows }) {
+    const expenseSide = takesExpenseFilters(view.type);
+    const claimSide = takesClaimFilters(view.type);
+    const payable = view.type === 'owe';
+    const group = (title, iconName, body, { cls = '', tools = '' } = {}) => `
+        <section class="xf-group ${cls}"><header>${icon(iconName)}<b>${title}</b>${tools}</header><div class="xf-chips">${body}</div></section>`;
+
+    // categories with spend in the period first; the rest on demand; chosen ones always
+    const byCat = tally(rows, r => String(r.categoryId));
+    const cats = expenseCategories
+        .map(c => ({ c, t: byCat.get(String(c.id)), on: view.cats.includes(String(c.id)) }))
+        .filter(x => x.t || x.on || view.allCategories)
+        .sort((a, b) => (b.t?.total || 0) - (a.t?.total || 0) || a.c.name.localeCompare(b.c.name));
+    const catChips = cats.map(({ c, t, on }) => {
+        const ci = categoryIcon(c.name);
+        return fchip('cats', c.id, c.name, { on, count: t ? t.count : 0, title: t ? `${t.count} · ${money(t.total)}` : 'Nothing in this period',
+            iconHtml: `<span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>` });
+    }).join('');
+    const hiddenCats = expenseCategories.length - cats.length;
+
+    // accounts that paid for something in the period (or are chosen)
+    const used = tally([...rows, ...claimRows, ...emiRows], r => String(r.paidFromId));
+    const payers = accounts.filter(a => used.has(String(a.id)) || view.payers.includes(String(a.id)))
+        .sort((a, b) => (used.get(String(b.id))?.total || 0) - (used.get(String(a.id))?.total || 0));
+    const payerChips = payers.map(a => fchip('payers', a.id, a.name, { on: view.payers.includes(String(a.id)),
+        count: used.get(String(a.id))?.count || 0, iconHtml: icon(accountTypeIcon(a.accountType).name) })).join('');
+
+    const amount = `
+        <span class="xp-amounts">${icon('cash')}<input type="number" id="xp-min" placeholder="Min ₹" value="${esc(view.min)}" data-plain>–<input type="number" id="xp-max" placeholder="Max ₹" value="${esc(view.max)}" data-plain></span>
+        ${AMOUNT_PRESETS.map(([min, max, label]) => `<button type="button" class="xf-chip ${view.min === min && view.max === max ? 'on' : ''}" data-amount="${min}-${max}">${label}</button>`).join('')}`;
+
+    const statusChips = EXPENSE_STATUS.map(s => fchip('xstatus', s.key, s.label, { on: view.xstatus.includes(s.key),
+        count: rows.filter(s.test).length, iconHtml: icon(s.iconName) })).join('');
+
+    // ---- Paid for / Lent (or, in "You owe", borrowed and bills)
+    const kinds = payable ? ['BORROWED', 'BILL_DUE'] : ['PAID_FOR', 'LENT'];
+    const items = claimRows.filter(r => kinds.includes(r.type));
+    const kindChips = kinds.map(k => fchip('kinds', k, CLAIM_KIND[k][2], { on: view.kinds.includes(k),
+        count: items.filter(r => r.type === k && (isOpenClaim(r.claim) || r.date >= view.periodFrom)).length,
+        iconHtml: `<span class="chip-icon xs ${CLAIM_KIND[k][0]}">${icon(CLAIM_KIND[k][1])}</span>` })).join('');
+    const people = new Map();
+    items.forEach(r => {
+        const key = (r.party || '').trim().toLowerCase();
+        if (!key) return;
+        const p = people.get(key) || { name: r.party.trim(), count: 0, owed: 0 };
+        p.count++; p.owed += isOpenClaim(r.claim) ? Number(r.claim.outstanding) : 0;
+        people.set(key, p);
+    });
+    const peopleChips = [...people.entries()].sort((a, b) => b[1].owed - a[1].owed || a[1].name.localeCompare(b[1].name))
+        .map(([key, p]) => fchip('people', key, p.name, { on: view.people.includes(key), count: p.count,
+            title: p.owed ? `${money(p.owed)} still owed` : 'Nothing owed now', iconHtml: `<span class="avatar xs">${esc(initials(p.name))}</span>` })).join('');
+    const cstatusChips = CLAIM_STATUS.map(s => fchip('cstatus', s.key, s.label, { on: view.cstatus.includes(s.key),
+        count: items.filter(r => s.test(r.claim)).length, iconHtml: icon(s.iconName) })).join('');
+    const dueChips = CLAIM_DUE.map(d => fchip('due', d.key, d.label, { on: view.due === d.key, count: items.filter(r => d.test(r.claim)).length })).join('');
+    const interestChips = CLAIM_INTEREST.map(d => fchip('interest', d.key, d.label, { on: view.interest === d.key, count: items.filter(r => d.test(r.claim)).length })).join('');
+
+    const search = `<input class="xf-search" data-f-search placeholder="Find…" data-plain>`;
+    const clear = key => view[key].length ? `<button type="button" class="link-btn" data-f-all="${key}">Clear</button>` : '';
+    return `
+    <div class="xp-fpanel">
+        ${expenseSide ? `<div class="xf-side">
+            <div class="xf-side-head">${icon('receipt')}Expenses</div>
+            ${group('Category', 'tag', catChips || '<span class="muted small">Nothing spent in this period</span>', { cls: 'wide',
+                tools: `<small class="muted">${view.cats.length ? `${view.cats.length} chosen` : 'any'}</small>${search}${clear('cats')}
+                    ${hiddenCats > 0 || view.allCategories ? `<button type="button" class="link-btn" data-f-more>${view.allCategories ? 'Only with spend' : `+${hiddenCats} more`}</button>` : ''}` })}
+            ${view.type !== 'emi' ? group('Status', 'flag', statusChips, { tools: clear('xstatus') }) : ''}
+        </div>` : ''}
+        ${claimSide ? `<div class="xf-side claims">
+            <div class="xf-side-head">${icon(payable ? 'card' : 'hand')}${payable ? 'Borrowed &amp; bills' : 'Paid for &amp; lent'}</div>
+            ${group('Kind', 'layers', kindChips, { tools: clear('kinds') })}
+            ${group(payable ? 'Lender / payee' : 'Person', 'users', peopleChips || '<span class="muted small">Nobody yet</span>', { cls: 'wide', tools: `${search}${clear('people')}` })}
+            ${group('Where it stands', 'clock', cstatusChips, { tools: clear('cstatus') })}
+            <div class="xf-pair">${group('Due', 'calendar', dueChips)}${group('Interest', 'percent', interestChips)}</div>
+        </div>` : ''}
+        <div class="xf-side shared">
+            <div class="xf-side-head">${icon('wallet')}For both</div>
+            ${group('Paid from / into', 'wallet', payerChips || '<span class="muted small">No account used yet</span>', { cls: 'wide', tools: clear('payers') })}
+            ${group('Amount', 'cash', amount)}
+        </div>
+    </div>`;
+}
+
+/** Every filter in force, as a removable pill; one that does not apply to the list shown is dimmed. */
+function activeFilterChips({ accounts, expenseCategories, claimRows }) {
+    const chips = [];
+    const expenseUse = takesExpenseFilters(view.type), claimUse = takesClaimFilters(view.type);
+    const add = (id, label, iconName, applies, clear) => chips.push({ id, label, iconName, applies, clear });
+    const drop = (key, v) => () => { view[key] = view[key].filter(x => x !== v); };
+    view.cats.forEach(id => add(`cats:${id}`, expenseCategories.find(c => String(c.id) === id)?.name || 'Uncategorised', 'tag', expenseUse, drop('cats', id)));
+    view.xstatus.forEach(k => add(`xstatus:${k}`, EXPENSE_STATUS.find(s => s.key === k)?.label || k, 'flag', ['all', 'EXPENSE'].includes(view.type), drop('xstatus', k)));
+    view.kinds.forEach(k => add(`kinds:${k}`, CLAIM_KIND[k]?.[2] || k, CLAIM_KIND[k]?.[1] || 'hand', claimUse, drop('kinds', k)));
+    view.people.forEach(p => add(`people:${p}`, claimRows.find(r => (r.party || '').trim().toLowerCase() === p)?.party || p, 'user', claimUse, drop('people', p)));
+    view.cstatus.forEach(k => add(`cstatus:${k}`, CLAIM_STATUS.find(s => s.key === k)?.label || k, 'clock', claimUse, drop('cstatus', k)));
+    if (view.due) add('due', CLAIM_DUE.find(d => d.key === view.due)?.label || view.due, 'calendar', claimUse, () => { view.due = ''; });
+    if (view.interest) add('interest', CLAIM_INTEREST.find(d => d.key === view.interest)?.label || view.interest, 'percent', claimUse, () => { view.interest = ''; });
+    view.payers.forEach(id => add(`payers:${id}`, accounts.find(a => String(a.id) === id)?.name || 'Account', 'wallet', true, drop('payers', id)));
+    if (view.min !== '' || view.max !== '') {
+        add('amount', view.min !== '' && view.max !== '' ? `${moneyShort(view.min)} – ${moneyShort(view.max)}` : view.min !== '' ? `≥ ${moneyShort(view.min)}` : `≤ ${moneyShort(view.max)}`,
+            'cash', true, () => { view.min = ''; view.max = ''; });
+    }
+    return chips;
+}
+
+function activeFiltersHtml(chips) {
+    return `<div class="xp-active">${icon('filter')}
+        ${chips.map(c => `<button type="button" class="xf-pill ${c.applies ? '' : 'idle'}" data-unfilter="${esc(c.id)}"
+            title="${c.applies ? 'Remove this filter' : 'Not used in this list · remove'}">${icon(c.iconName)}<span class="ellipsis">${esc(c.label)}</span>${icon('x')}</button>`).join('')}
+        ${chips.length > 1 ? '<button type="button" class="link-btn" data-unfilter-all>Clear all</button>' : ''}</div>`;
 }
 
 /** The period at a glance: spend and its change, budget use, pace, top category and money to collect. */
@@ -604,13 +906,13 @@ function th(key, label, cls) {
         <span>${label}</span>${on ? `<i class="sort-arrow">${sort.dir === 'asc' ? '▲' : '▼'}</i>` : ''}</th>`;
 }
 
-function tableHtml(rows) {
+function tableHtml(rows, filtered = false) {
     if (!rows.length) return emptyState(view.type === 'collect' ? 'Nobody owes you anything right now.'
         : view.type === 'owe' ? 'You owe nobody right now. Press B to record money borrowed or a bill to pay later.'
         : view.type === 'emi' ? 'Nothing on EMI. Add an expense and pick “On EMI”: a card EMI or a loan from a finance company.'
         : 'Nothing for this selection. Press E to add an expense.', 'receipt');
     const grouped = prefs.grouped;
-    if (view.type === 'emi') return emiTableHtml(rows);
+    if (view.type === 'emi') return emiTableHtml(rows, filtered);
     const claims = CLAIM_VIEWS.includes(view.type);
     const w = claimWords();
     const heads = claims
@@ -622,7 +924,11 @@ function tableHtml(rows) {
     const cols = heads.filter(Boolean).length + 1;
     const cls = `grid xp-table ${claims ? 'xp-claims' : 'xp-expenses'}`;
     const line = r => (claims ? claimRowHtml(r, !grouped) : rowHtml(r, !grouped));
-    if (!grouped) return `<table class="${cls}">${head}<tbody>${rows.map(line).join('')}</tbody></table>`;
+    // the total of what is listed, as the last line: amount (and, for lent / borrowed, what is still owed)
+    const owed = rows.reduce((s, r) => s + (r.claim && isOpenClaim(r.claim) ? Number(r.claim.outstanding) : 0), 0);
+    const foot = `<tfoot>${listTotalRow({ count: rows.length, span: cols - (claims ? 3 : 2), filtered,
+        totals: [money(sum(rows)), ...(claims ? [owed ? `<span class="neg">${money(owed)}</span>` : '—'] : [])] })}</tfoot>`;
+    if (!grouped) return `<table class="${cls}">${head}<tbody>${nestLinked(rows).map(line).join('')}</tbody>${foot}</table>`;
     const days = new Map();
     [...rows].sort((a, b) => b.date.localeCompare(a.date)).forEach(r => { if (!days.has(r.date)) days.set(r.date, []); });
     rows.forEach(r => days.get(r.date).push(r));   // days newest first, each day in the chosen order
@@ -631,12 +937,48 @@ function tableHtml(rows) {
             <span class="day-date"><b>${date(day)}</b> <span class="muted">${dayName(day)}</span></span>
             <span class="muted">${items.length} item${items.length > 1 ? 's' : ''}</span>
             <span class="spacer"></span><b class="mono">${money(sum(items))}</b></div></td></tr>
-        ${items.map(line).join('')}`).join('');
-    return `<table class="${cls}">${head}<tbody>${body}</tbody></table>`;
+        ${nestLinked(items).map(line).join('')}`).join('');
+    return `<table class="${cls}">${head}<tbody>${body}</tbody>${foot}</table>`;
+}
+
+/**
+ * Puts each linked charge right under the expense it came with, whatever the sort, marked as the middle or last
+ * branch so the rows draw as a small tree. A charge whose expense is not in the list stays where it is.
+ */
+function nestLinked(rows) {
+    const shown = new Set(rows.filter(r => r.raw).map(r => r.raw.entryId));
+    const children = new Map();
+    rows.forEach(r => {
+        const parent = r.raw?.parentEntryId;
+        if (parent && shown.has(parent)) children.set(parent, [...(children.get(parent) || []), r]);
+    });
+    if (!children.size) return rows;
+    const out = [];
+    rows.forEach(r => {
+        if (r.raw?.parentEntryId && shown.has(r.raw.parentEntryId)) return;   // drawn with its expense
+        out.push(r);
+        const kids = children.get(r.raw?.entryId) || [];
+        kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid' }));
+    });
+    return out;
+}
+
+/** The link marks of an expense row: the charges that came with it, or the expense it came with. */
+function linkFlags(r) {
+    const e = r.raw;
+    if (!e) return '';
+    if (e.linked?.length) {
+        const extra = e.linked.reduce((s, l) => s + Number(l.netAmount), 0);
+        return `<span class="mini-flag link" title="${esc(`${e.linked.length} linked charge${e.linked.length === 1 ? '' : 's'}: ${e.linked.map(l => `${l.narration} ${money(l.netAmount)}`).join(', ')} · all-in ${money(r.amount + extra)}`)}">${icon('link')}${e.linked.length}</span>`;
+    }
+    if (e.parentEntryId && !r.nested) {
+        return `<span class="mini-flag link child" title="${esc(`Charged with ${e.parentNarration} (${e.parentEntryNo})`)}">${icon('split')}${esc(e.parentEntryNo)}</span>`;
+    }
+    return '';
 }
 
 /** The EMIs list: what and from where, its progress and next EMI, the instalment, the price and what is still owed. */
-function emiTableHtml(rows) {
+function emiTableHtml(rows, filtered) {
     const head = `<thead><tr>${th('date', 'Bought on', 'c-date')}${th('description', 'What / lender', 'c-desc')}<th class="c-prog">Progress</th>
         ${th('next', 'Next EMI', 'c-status')}${th('paidFrom', 'Billed to / paid from', 'c-pay')}${th('amount', 'Price', 'r c-amt')}${th('owed', 'Still owed', 'r c-owed')}<th class="c-caret"></th></tr></thead>`;
     return `<table class="grid xp-table xp-claims xp-emis">${head}<tbody>${rows.map(r => {
@@ -656,7 +998,8 @@ function emiTableHtml(rows) {
             <td class="r c-amt"><b class="mono claim-amt">${money(r.amount)}</b></td>
             <td class="r c-owed" title="${money(p.stillToPay)} still to pay with interest">${Number(p.outstanding) ? `<b class="mono neg">${money(p.outstanding)}</b>` : '<span class="muted">paid off</span>'}</td>
             <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td></tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}</tbody><tfoot>${listTotalRow({ count: rows.length, span: 5, filtered, noun: 'plan',
+        totals: [money(sum(rows)), `<span class="neg">${money(rows.reduce((s, r) => s + Number(r.emi.outstanding || 0), 0))}</span>`] })}</tfoot></table>`;
 }
 
 const CLAIM_KIND = { LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],
@@ -681,21 +1024,23 @@ function rowHtml(r, withDate) {
     const owed = r.claim && Number(r.claim.outstanding) > 0;
     const status = r.status ? STATUS_META[r.status] : null;
     const old = r.claim && view.periodFrom && r.date < view.periodFrom;
+    const extra = r.raw?.linked?.length ? r.raw.linked.reduce((s, l) => s + Number(l.netAmount), 0) : 0;
     return `
-    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''}" data-key="${r.key}">
+    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${extra ? 'xp-parent' : ''}" data-key="${r.key}">
         ${withDate ? `<td class="c-date ${old ? 'old' : ''}" title="${old ? `Before the selected period, still open · ${ageOf(r.date)}` : dayName(r.date)}"><b>${date(r.date)}</b>${old ? icon('clock') : ''}</td>` : ''}
-        <td class="c-cat"><div class="xd-cat">${category}</div></td>
+        <td class="c-cat"><div class="xd-cat">${r.nested ? '<i class="xp-branch" aria-hidden="true"></i>' : ''}${category}</div></td>
         <td class="c-desc"><div class="xd-cell">
             <span class="xd-text"><b class="ellipsis" title="${esc(r.description)}">${esc(r.description)}</b>${evidenceBadge(r.raw?.attachmentCount)}
                 ${status ? `<span class="mini-flag ${status.tone}" title="${r.status === 'REVERSED' ? 'Reversed: counts for nothing' : `${status.label}: ${money(r.gross - r.amount)} came back`}">${icon(status.iconName)}</span>` : ''}
                 ${r.claim ? claimBadge(r.claim) : ''}
-                ${r.emiOf ? `<span class="mini-flag aqua emi" title="${esc(`${r.emiOf.what === 'purchase' ? 'Bought on EMI' : `Interest of ${r.emiOf.what}`} · ${r.emiOf.plan.narration}`)}">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'EMI' : esc(r.emiOf.what.replace('EMI ', ''))}</span>` : ''}
+                ${linkFlags(r)}
+                ${r.emiOf ?`<span class="mini-flag aqua emi" title="${esc(`${r.emiOf.what === 'purchase' ? 'Bought on EMI' : `Interest of ${r.emiOf.what}`} · ${r.emiOf.plan.narration}`)}">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'EMI' : esc(r.emiOf.what.replace('EMI ', ''))}</span>` : ''}
                 ${r.reference ? `<span class="xp-ico" title="Reference: ${esc(r.reference)}">${icon('tag')}</span>` : ''}
                 ${r.notes ? `<span class="xp-ico" title="${esc(r.notes)}">${icon('info')}</span>` : ''}</span>
             ${party ? `<span class="xd-party" title="${r.claim ? 'Person' : 'Paid to'}: ${esc(r.party)}">${party}</span>` : ''}</div></td>
         <td class="c-pay">${r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
             title="${r.type === 'BORROWED' ? 'Into' : 'Paid from'} ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button>` : '<span class="muted">—</span>'}</td>
-        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : 'neg'}">${money(r.amount)}</b></td>
+        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : 'neg'}">${money(r.amount)}</b>${extra ? `<span class="xd-int" title="With its linked charges: ${money(r.amount + extra)} all-in">+${moneyShort(extra)}</span>` : ''}</td>
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
     </tr>`;
 }
@@ -770,7 +1115,9 @@ async function expenseDetail(r, ctx = {}) {
                 ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
                 ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
                     <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
-                ${manage && e.editable ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
+                ${manage && e.linkable && !r.emiOf ? `<button class="btn xs" data-xp-action="add-charge" data-key="${r.key}" title="A fee, tax, tip or delivery that came with this: its own expense, linked here">${icon('link')}Add charge</button>` : ''}
+                ${manage && e.convertible && !r.emiOf ? `<button class="btn xs" data-xp-action="paid-for" data-key="${r.key}" title="You paid this for someone who will pay you back: track it under Paid for">${icon('users')}Paid for…</button>` : ''}
+                ${manage && e.editable && !e.linked?.length ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
             </span>
         </div>
         <div class="xd-cards">
@@ -797,8 +1144,43 @@ async function expenseDetail(r, ctx = {}) {
             </div>
         </div>
         ${e.memo ? `<div class="xd-note">${icon('info')}<span>${esc(e.memo)}</span></div>` : ''}
+        ${linkedHtml(r)}
         ${refundsHtml(e, manage)}
         <div class="xp-evidence" data-ev-entry="${e.entryId}" data-ev-count="${e.attachmentCount || 0}"></div>
+    </div>`;
+}
+
+/**
+ * How an expense and its charges hang together: the expense at the root and each charge on a branch under it, with
+ * the all-in total; or, for a charge, the expense it came with. Every node opens that entry.
+ */
+function linkedHtml(r) {
+    const e = r.raw;
+    if (e.parentEntryId) {
+        return `<div class="xp-linked is-child">${icon('split')}<span class="muted">Charged with</span>
+            <button type="button" class="xl-parent" data-xp-action="open-linked" data-entry="${e.parentEntryId}" data-key="${r.key}" title="Open ${esc(e.parentEntryNo)}">
+                <b>${esc(e.parentNarration || '')}</b><span class="muted small">${esc(e.parentEntryNo)}</span>${icon('chevron-right')}</button></div>`;
+    }
+    if (!e.linked?.length) return '';
+    const charges = e.linked.reduce((s, l) => s + Number(l.netAmount), 0);
+    const node = (cls, catName, title, sub, amount, attrs = '', flag = '') => {
+        const ci = categoryIcon(catName);
+        return `<${attrs ? 'button type="button"' : 'div'} class="xl-node ${cls}" ${attrs}>
+            <span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>
+            <span class="xl-what"><b class="ellipsis">${esc(title)}</b><small class="muted">${sub}</small></span>${flag}
+            <b class="mono">${money(amount)}</b></${attrs ? 'button' : 'div'}>`;
+    };
+    return `
+    <div class="xp-linked">
+        <div class="section-title">${icon('link')} Linked charges
+            <span class="muted">· ${money(r.amount)} + ${e.linked.length} charge${e.linked.length === 1 ? '' : 's'} ${money(charges)} = <b>${money(r.amount + charges)}</b> all-in</span></div>
+        <div class="xl-tree">
+            ${node('root', e.categoryName, e.narration, `${esc(e.entryNo)} · ${esc(e.categoryName)}`, r.amount)}
+            ${e.linked.map((l, i) => node(`branch ${i === e.linked.length - 1 ? 'last' : ''}`, l.categoryName, l.narration,
+                `${esc(l.entryNo)} · ${esc(l.categoryName)} · ${shortDate(l.date)}`, Number(l.netAmount),
+                `data-xp-action="open-linked" data-entry="${l.entryId}" data-key="${r.key}" title="Open ${esc(l.entryNo)}"`,
+                l.status ? `<span class="mini-flag ${STATUS_META[l.status].tone}" title="${STATUS_META[l.status].label}">${icon(STATUS_META[l.status].iconName)}</span>` : '')).join('')}
+        </div>
     </div>`;
 }
 
@@ -888,6 +1270,120 @@ async function openReverseDialog(r, reload) {
     });
 }
 
+/** Charges that commonly come with an expense, and the category each one most likely belongs to. */
+const CHARGE_KINDS = [
+    { label: 'Transaction fee', iconName: 'bank', match: /bank|fee|charge/i },
+    { label: 'Convenience fee', iconName: 'card', match: /fee|charge|bank/i },
+    { label: 'GST / tax', iconName: 'percent', match: /gst|tax/i },
+    { label: 'Tip', iconName: 'heart', match: null },
+    { label: 'Delivery', iconName: 'send', match: /deliver|shipping|courier/i },
+    { label: 'Late fee', iconName: 'alert', match: /penal|late|fine|fee|charge/i },
+];
+
+/**
+ * A charge that came with an expense: a fee, tax, tip or delivery. It is booked as its own expense (its own category,
+ * account and date, refundable on its own), linked to the expense so the two show together.
+ */
+function openChargeDialog(r, { accounts, expenseCategories, onSaved }) {
+    const e = r.raw;
+    const saveKey = newRequestKey();
+    const guess = kind => (kind.match && expenseCategories.find(c => c.active !== false && kind.match.test(c.name))?.id) || e.categoryId;
+    const modal = openModal({
+        title: `Add a charge · ${e.narration}`, iconName: 'link',
+        body: `<form class="form-grid two">
+            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.narration)}</b><span class="spacer"></span><b>${money(r.amount)}</b></div>
+                <div class="small muted">${date(e.date)} · ${esc(e.categoryName)} · paid from ${esc(e.paidFrom)}${e.linked?.length ? ` · ${e.linked.length} charge${e.linked.length === 1 ? '' : 's'} already` : ''}</div></div>
+            <div class="span-2 xc-kinds">${CHARGE_KINDS.map((k, i) => `<button type="button" class="xf-chip ${i === 0 ? 'on' : ''}" data-kind="${i}">${icon(k.iconName)}${k.label}</button>`).join('')}</div>
+            <label class="field"><span>Charge *</span><input name="amount" type="number" step="any" min="0.01" required data-plain placeholder="₹"></label>
+            ${field({ label: 'Date', name: 'entryDate', type: 'date', value: e.date, required: true })}
+            ${field({ label: 'Category', name: 'categoryId', type: 'select', required: true, options: categoryOptions(expenseCategories, guess(CHARGE_KINDS[0])) })}
+            ${field({ label: 'Paid from', name: 'paidFromId', type: 'select', required: true,
+                      options: accountOptions(accounts, a => (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY') && !['CHIT_FUND', 'RECEIVABLE'].includes(a.accountType), e.paidFromId) })}
+            ${field({ label: 'Description', name: 'narration', value: `${CHARGE_KINDS[0].label} · ${e.narration}`, span: 'span-2' })}
+            ${field({ label: 'Note', name: 'notes', placeholder: 'e.g. 1.8% card surcharge', span: 'span-2' })}
+            <div class="span-2 xc-total" data-total></div>
+            <div class="span-2">${evidenceFieldHtml({ label: 'Proof', hint: 'Bill line, SMS or screenshot showing the charge' })}</div>
+        </form>`,
+        onOpen: m => {
+            const form = m.el.querySelector('form');
+            const drawTotal = () => {
+                const charge = Number(form.amount.value || 0);
+                form.querySelector('[data-total]').innerHTML = `${icon('link')}<span>${money(r.amount)} + this ${money(charge)}${e.linked?.length ? ` + earlier ${money(e.linked.reduce((s, l) => s + Number(l.netAmount), 0))}` : ''}</span>
+                    <b>= ${money(r.amount + charge + (e.linked || []).reduce((s, l) => s + Number(l.netAmount), 0))} all-in</b>`;
+            };
+            form.addEventListener('click', ev => {
+                const b = ev.target.closest('[data-kind]');
+                if (!b) return;
+                const kind = CHARGE_KINDS[Number(b.dataset.kind)];
+                form.querySelectorAll('[data-kind]').forEach(x => x.classList.toggle('on', x === b));
+                form.narration.value = `${kind.label} · ${e.narration}`;
+                form.categoryId.value = guess(kind);
+                form.categoryId.dispatchEvent(new Event('change', { bubbles: true }));   // a combo box shows the new pick
+                form.amount.focus();
+            });
+            form.amount.addEventListener('input', drawTotal);
+            drawTotal();
+            setTimeout(() => form.amount.focus(), 50);
+        },
+        actions: [{ label: 'Cancel' }, {
+            label: 'Add charge', kind: 'primary', iconName: 'check',
+            onClick: async m => {
+                const form = m.el.querySelector('form');
+                if (!form.reportValidity()) return true;
+                const d = readForm(form);
+                const saved = await api.post(`/expenses/${e.entryId}/linked`, { entryDate: d.entryDate, amount: d.amount, categoryId: Number(d.categoryId),
+                    paidFromId: Number(d.paidFromId), narration: d.narration, party: e.party, reference: e.reference, notes: d.notes }, { key: saveKey });
+                await proof.uploadTo(saved.id);
+                onSaved(saved);
+            },
+        }],
+    });
+    const proof = bindEvidenceField(modal.el);
+}
+
+/**
+ * Turns an expense into money paid for someone: it leaves your spending and is tracked under Paid for, with its
+ * date, amount, account and bill, until they pay you back.
+ */
+function openPaidForDialog(r, claimRows, onDone) {
+    const e = r.raw;
+    const known = [...new Set(claimRows.map(c => (c.party || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const plus = days => { const d = new Date(e.date + 'T00:00:00'); d.setDate(d.getDate() + days); return isoDate(d); };
+    openModal({
+        title: `Paid for someone · ${e.narration}`, iconName: 'users',
+        body: `<form class="form-grid two">
+            <div class="span-2 xc-convert">
+                <div class="xc-from"><small>Now</small><span class="chip-icon xs coral">${icon('receipt')}</span><b>Expense</b><span class="muted small">${esc(e.categoryName)} · counts as your spending</span></div>
+                <span class="xc-arrow">${icon('chevron-right')}</span>
+                <div class="xc-to"><small>Becomes</small><span class="chip-icon xs aqua">${icon('users')}</span><b>Paid for</b><span class="muted small">owed back to you · not your spending</span></div>
+            </div>
+            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.narration)}</b><span class="spacer"></span><b>${money(e.amount)}</b></div>
+                <div class="small muted">${date(e.date)} · paid from ${esc(e.paidFrom)}. The money left the account once and that stays as it is; the bill${e.attachmentCount ? ` (${e.attachmentCount})` : ''} moves with it.</div></div>
+            <label class="field"><span>Paid for (person) *</span><input name="party" value="${esc(e.party || '')}" required maxlength="100" list="xp-people" placeholder="Who will pay you back?" data-plain>
+                <datalist id="xp-people">${known.map(p => `<option value="${esc(p)}">`).join('')}</datalist></label>
+            <label class="field"><span>Pay back by</span><input name="dueDate" type="date" min="${e.date}" data-plain>
+                <span class="chips">${[[7, '1 week'], [30, '1 month']].map(([d, l]) => `<button type="button" class="date-chip" data-due="${plus(d)}">${l}</button>`).join('')}</span></label>
+            ${field({ label: 'Description', name: 'narration', value: e.narration, span: 'span-2' })}
+            ${field({ label: 'Note', name: 'notes', value: e.memo || '', placeholder: 'e.g. Split of the dinner bill', span: 'span-2' })}
+        </form>`,
+        onOpen: m => m.el.querySelector('form').addEventListener('click', ev => {
+            const b = ev.target.closest('[data-due]');
+            if (b) m.el.querySelector('[name=dueDate]').value = b.dataset.due;
+        }),
+        actions: [{ label: 'Cancel' }, {
+            label: 'Move to Paid for', kind: 'primary', iconName: 'users',
+            onClick: async m => {
+                const form = m.el.querySelector('form');
+                if (!form.reportValidity()) return true;
+                const d = readForm(form);
+                const claim = await api.post(`/expenses/${e.entryId}/paid-for`, { party: d.party, narration: d.narration, dueDate: d.dueDate || null, notes: d.notes });
+                toast(`${e.entryNo} is now Paid for ${claim.party} · ${claim.entryNo}`);
+                onDone(claim);
+            },
+        }],
+    });
+}
+
 // ===================================================================== side panels
 
 function categoryBars(byCategory, budgets, total, singleMonth) {
@@ -900,7 +1396,7 @@ function categoryBars(byCategory, budgets, total, singleMonth) {
         const ci = categoryIcon(c.label);
         const over = limit && c.value > limit;
         return `
-        <div class="cat-bar ${String(view.categoryId) === String(c.key) ? 'active' : ''}" data-filter-category="${c.key}">
+        <div class="cat-bar ${view.cats.includes(String(c.key)) ? 'active' : ''}" data-filter-category="${c.key}">
             <span class="chip-icon sm ${ci.tone}">${icon(ci.name)}</span>
             <div class="grow">
                 <div class="row small"><span class="ellipsis">${esc(c.label)}</span><span class="muted tiny">${c.count}×</span><span class="spacer"></span>
@@ -917,7 +1413,7 @@ function payerList(byPayer, total) {
     if (!byPayer.length) return emptyState('Nothing spent yet', 'wallet');
     return `<div class="cat-bars">${byPayer.map(p => {
         const t = accountTypeIcon(p.extra);
-        return `<div class="cat-bar ${String(view.paidFromId) === String(p.key) ? 'active' : ''}" data-filter-payer="${p.key}">
+        return `<div class="cat-bar ${view.payers.includes(String(p.key)) ? 'active' : ''}" data-filter-payer="${p.key}">
             <span class="chip-icon sm ${t.tone}">${icon(t.name)}</span>
             <div class="grow"><div class="row small"><span class="ellipsis">${esc(p.label)}</span><span class="muted tiny">${p.count}×</span><span class="spacer"></span><b class="mono">${money(p.value)}</b></div>
                 <div class="bar-track"><span class="bar-fill alt" style="width:${(p.value / (total || 1)) * 100}%"></span></div>

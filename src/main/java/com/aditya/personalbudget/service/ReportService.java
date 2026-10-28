@@ -18,6 +18,7 @@ import com.aditya.personalbudget.dto.ReportDtos.SheetGroup;
 import com.aditya.personalbudget.dto.ReportDtos.SheetSection;
 import com.aditya.personalbudget.dto.ReportDtos.TrialBalance;
 import com.aditya.personalbudget.dto.ReportDtos.TrialBalanceRow;
+import com.aditya.personalbudget.dto.ReportDtos.TopExpense;
 import com.aditya.personalbudget.dto.ReportDtos.ValuePoint;
 import com.aditya.personalbudget.service.LedgerSnapshot.PostedLine;
 import com.aditya.personalbudget.exception.NotFoundException;
@@ -343,12 +344,12 @@ public class ReportService {
                 .sorted(Comparator.comparing(CategoryShare::amount).reversed())
                 .toList();
 
-        List<ValuePoint> top = books.lines().stream()
+        List<TopExpense> top = books.lines().stream()
                 .filter(l -> books.account(l.accountId()).getAccountClass() == AccountClass.EXPENSE
                         && !l.date().isBefore(from) && !l.date().isAfter(to) && l.debit().signum() > 0)
                 .sorted(Comparator.comparing(PostedLine::debit).reversed())
                 .limit(10)
-                .map(l -> new ValuePoint(l.date() + "  " + l.narration() + "  ·  " + books.displayName(l), l.debit()))
+                .map(l -> new TopExpense(l.entryId(), l.date() + "  " + l.narration() + "  ·  " + books.displayName(l), l.debit()))
                 .toList();
 
         return new ExpenseAnalysis(from, to, labels, total,

@@ -16,7 +16,10 @@ import com.aditya.personalbudget.dto.ChitDtos.InstallmentView;
 import com.aditya.personalbudget.dto.ChitDtos.InterestRow;
 import com.aditya.personalbudget.dto.ChitDtos.InterestStatus;
 import com.aditya.personalbudget.dto.ChitDtos.PayInstallmentRequest;
+import com.aditya.personalbudget.dto.ChitDtos.PayoutReceiptRequest;
+import com.aditya.personalbudget.dto.ChitDtos.PayoutReceiptView;
 import com.aditya.personalbudget.dto.ChitDtos.PayoutRequest;
+import com.aditya.personalbudget.dto.JournalDtos.LineView;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
@@ -49,6 +52,9 @@ import java.util.List;
  *       and the difference goes to Income [Chit gains] (gain) or Expenses [Chit commission &amp; discount] (loss).
  *       If installments remain after an early prize, the chit account carries a credit balance = what you still owe,
  *       which the balance sheet shows as a liability.</li>
+ *   <li><b>Payout in parts</b> (the organizer pays in instalments): the payout entry also debits the chit with what is
+ *       still to come, so the chit carries it as money the organizer owes you; each later part is
+ *       Dr Bank / Cr Chit Funds [chit]. All parts share the payout's source; the first is the one that settles the chit.</li>
  * </ul>
  * Returns: the implied monthly rate is the IRR of paying the installment every month and receiving the maturity
  * amount one month after the last installment. The month-by-month interest schedule uses that rate,
@@ -101,7 +107,31 @@ public class ChitService {
                     from == null ? null : from.getName(), i.getJournalEntryId(), i.getStatus(),
                     i.getStatus() == InstallmentStatus.PENDING && i.getDueDate().isBefore(today));
         }).toList();
-        return new ChitDetail(toView(chit, schedule, books), rows, interestSchedule(chit, schedule, today));
+        return new ChitDetail(toView(chit, schedule, books), rows, interestSchedule(chit, schedule, today), payoutReceipts(chit));
+    }
+
+    /** The payout entries of a chit, oldest first: the first settled the chit, the others are later parts. */
+    private List<PayoutReceiptView> payoutReceipts(Chit chit) {
+        if (chit.getPayoutAmount() == null) {
+            return List.of();
+        }
+        List<JournalEntry> sourced = payoutEntries(chit);
+        Long firstId = sourced.isEmpty() ? null : sourced.getFirst().getId();
+        return ledger.toViews(sourced).stream().map(e -> {
+            // what came in: the debit on the money account (not the chit's own receivable, not a loss on Expenses)
+            LineView deposit = e.lines().stream()
+                    .filter(l -> l.debit().signum() > 0 && l.chitId() == null && l.accountClass() == AccountClass.ASSET)
+                    .findFirst().orElse(null);
+            return new PayoutReceiptView(e.id(), e.entryNo(), e.entryDate(), deposit == null ? Money.ZERO : deposit.debit(),
+                    deposit == null ? null : deposit.accountId(), deposit == null ? null : deposit.ledgerAccountName(),
+                    deposit == null ? null : deposit.memo(), e.id().equals(firstId), e.attachmentCount());
+        }).toList();
+    }
+
+    private List<JournalEntry> payoutEntries(Chit chit) {
+        return entries.findBySource(chit.getTenantId(), LedgerService.SOURCE_CHIT_PAYOUT, chit.getId()).stream()
+                .sorted(Comparator.comparing(JournalEntry::getEntryDate).thenComparing(JournalEntry::getId))
+                .toList();
     }
 
     /** The one asset account all chits post to. */
@@ -263,10 +293,7 @@ public class ChitService {
         if (chit.getStatus() != ChitStatus.ACTIVE) {
             throw new BusinessException("Payout already recorded for this chit");
         }
-        Account deposit = accountService.require(request.depositAccountId());
-        if (deposit.getAccountClass() != AccountClass.ASSET || deposit.getId().equals(chit.getAccountId())) {
-            throw new BusinessException("Deposit the payout into a bank, cash or wallet account");
-        }
+        Account deposit = depositAccount(chit, request.depositAccountId());
         BigDecimal paidIn = ledger.snapshot().chitBalanceAsOf(chit.getId(), LocalDate.MAX);
         BigDecimal stillDue = installments.findByChitIdOrderByInstallmentNo(chitId).stream()
                 .filter(i -> i.getStatus() == InstallmentStatus.PENDING)
@@ -274,15 +301,24 @@ public class ChitService {
                 .reduce(Money.ZERO, BigDecimal::add);
         BigDecimal settled = paidIn.add(stillDue);          // what the chit account is worth in total
         BigDecimal amount = Money.round(request.amount());
+        BigDecimal received = request.receivedNow() == null ? amount : Money.round(request.receivedNow());
+        if (received.compareTo(amount) > 0) {
+            throw new BusinessException("The amount received now cannot be more than the payout of " + amount.toPlainString());
+        }
+        BigDecimal toCome = amount.subtract(received);       // the organizer still owes this part
         BigDecimal difference = amount.subtract(settled);    // >0 gain, <0 discount / commission
 
         JournalDraft draft = JournalDraft.of(request.payoutDate(), VoucherType.CHIT_PAYOUT,
-                        chit.getName() + (stillDue.signum() > 0 ? " - prize money" : " - maturity payout"))
-                .debit(deposit.getId(), amount)
+                        chit.getName() + (stillDue.signum() > 0 ? " - prize money" : " - maturity payout")
+                                + (toCome.signum() > 0 ? " (part 1)" : ""))
+                .debit(deposit.getId(), received, toCome.signum() > 0 ? "Part 1 of the payout of " + amount.toPlainString() : null)
                 .credit(chit.getAccountId(), settled, stillDue.signum() > 0
                         ? "Includes future installments of " + stillDue.toPlainString() : null).chit(chit.getId())
                 .party(chit.getOrganizer())
                 .source(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());
+        if (toCome.signum() > 0) {
+            draft.debit(chit.getAccountId(), toCome, "Payout still to come from the organizer").chit(chit.getId());
+        }
         if (difference.signum() > 0) {
             draft.credit(accountService.systemAccount(DefaultChartOfAccounts.INCOME).getId(), difference,
                     "Gain on chit").category(categories.system(DefaultChartOfAccounts.CHIT_GAINS).getId());
@@ -295,9 +331,78 @@ public class ChitService {
 
         chit.setPayoutAmount(amount);
         chit.setPayoutDate(request.payoutDate());
+        chit.setPayoutReceived(received);
         chits.save(chit);
         refreshStatus(chit);
         return detail(chitId);
+    }
+
+    /** A later part of a payout the organizer pays in instalments: Dr the account it came into, Cr the chit. */
+    @Transactional
+    public ChitDetail receivePayoutPart(Long chitId, PayoutReceiptRequest request) {
+        Chit chit = require(chitId);
+        requireOpen(chit);
+        if (chit.getPayoutAmount() == null) {
+            throw new BusinessException("Record the payout first");
+        }
+        BigDecimal pending = payoutPending(chit);
+        BigDecimal amount = Money.round(request.amount());
+        if (pending.signum() <= 0) {
+            throw new BusinessException("The payout of " + chit.getName() + " is already received in full");
+        }
+        if (amount.compareTo(pending) > 0) {
+            throw new BusinessException("Only " + pending.toPlainString() + " of the payout is still to come");
+        }
+        if (request.date().isBefore(chit.getPayoutDate())) {
+            throw new BusinessException("A part of the payout cannot be dated before the payout (" + chit.getPayoutDate() + ")");
+        }
+        Account deposit = depositAccount(chit, request.depositAccountId());
+        int part = payoutEntries(chit).size() + 1;
+        boolean last = amount.compareTo(pending) == 0;
+        ledger.post(JournalDraft.of(request.date(), VoucherType.CHIT_PAYOUT,
+                        chit.getName() + " - payout part " + part + (last ? " (final)" : ""))
+                .debit(deposit.getId(), amount, blankToNull(request.notes()))
+                .credit(chit.getAccountId(), amount, "Part " + part + " of the payout of " + chit.getPayoutAmount().toPlainString())
+                .chit(chit.getId())
+                .party(chit.getOrganizer())
+                .source(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId()));
+        chit.setPayoutReceived(received(chit).add(amount));
+        chits.save(chit);
+        return detail(chitId);
+    }
+
+    /** Undoes a later part of the payout; the first part is the payout itself, undone with {@link #undoPayout}. */
+    @Transactional
+    public ChitDetail undoPayoutPart(Long chitId, Long entryId) {
+        Chit chit = require(chitId);
+        requireOpen(chit);
+        PayoutReceiptView part = payoutReceipts(chit).stream().filter(p -> p.entryId().equals(entryId)).findFirst()
+                .orElseThrow(() -> new NotFoundException("Payout part", entryId));
+        if (part.first()) {
+            throw new BusinessException(part.entryNo() + " is the payout itself. Undo the payout to take it out");
+        }
+        ledger.delete(entryId);
+        chit.setPayoutReceived(received(chit).subtract(part.amount()).max(Money.ZERO));
+        chits.save(chit);
+        return detail(chitId);
+    }
+
+    private Account depositAccount(Chit chit, Long accountId) {
+        Account deposit = accountService.require(accountId);
+        if (deposit.getAccountClass() != AccountClass.ASSET || deposit.getId().equals(chit.getAccountId())) {
+            throw new BusinessException("Deposit the payout into a bank, cash or wallet account");
+        }
+        return deposit;
+    }
+
+    /** Received so far; a payout recorded before parts were possible was received in full. */
+    private static BigDecimal received(Chit chit) {
+        return chit.getPayoutReceived() != null ? chit.getPayoutReceived() : Money.nz(chit.getPayoutAmount());
+    }
+
+    /** What the organizer still owes of the payout (0 before the payout and once it is in full). */
+    private static BigDecimal payoutPending(Chit chit) {
+        return chit.getPayoutAmount() == null ? Money.ZERO : chit.getPayoutAmount().subtract(received(chit)).max(Money.ZERO);
     }
 
     @Transactional
@@ -307,9 +412,10 @@ public class ChitService {
         if (chit.getPayoutAmount() == null) {
             throw new BusinessException("No payout recorded for this chit");
         }
-        ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());
+        ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());   // every part of it
         chit.setPayoutAmount(null);
         chit.setPayoutDate(null);
+        chit.setPayoutReceived(null);
         chits.save(chit);
         refreshStatus(chit);
         return detail(chitId);
@@ -327,7 +433,9 @@ public class ChitService {
         List<ChitInstallment> pending = installments.findByChitIdOrderByInstallmentNo(chitId).stream()
                 .filter(i -> i.getStatus() == InstallmentStatus.PENDING).toList();
         if (!closable(chit, pending, OrgClock.today())) {
-            throw new BusinessException("A chit can be closed after its payout, or once every installment is paid and it has matured");
+            throw new BusinessException(chit.getPayoutAmount() != null
+                    ? payoutPending(chit).toPlainString() + " of the payout is still to come from the organizer. Record it before closing"
+                    : "A chit can be closed after its payout, or once every installment is paid and it has matured");
         }
         chit.setStatus(ChitStatus.CLOSED);
         chit.setClosedAt(OrgClock.now());
@@ -479,7 +587,8 @@ public class ChitService {
                 c.getMaturityAmount(), c.getMonthlyInstallment(), c.getNumberOfInstallments(), c.getStartDate(),
                 c.getEndDate(), maturityDate, ChronoUnit.DAYS.between(today, maturityDate),
                 c.getCommissionPercent(), c.getInterestRate(), c.getStatus(), c.getAccountId(),
-                account == null ? null : account.getName(), c.getPayoutAmount(), c.getPayoutDate(), c.getNotes(),
+                account == null ? null : account.getName(), c.getPayoutAmount(), c.getPayoutDate(),
+                c.getPayoutAmount() == null ? null : received(c), c.getPayoutAmount() == null ? null : payoutPending(c), c.getNotes(),
                 c.getOrganizerUpi(), c.getUpiNote(), c.getDefaultPaymentAccountId(),
                 c.getDefaultPaymentAccountId() == null || books.account(c.getDefaultPaymentAccountId()) == null
                         ? null : books.account(c.getDefaultPaymentAccountId()).getName(),
@@ -492,14 +601,17 @@ public class ChitService {
                 BigDecimal.valueOf(impliedAnnual).setScale(2, RoundingMode.HALF_UP), rateUsed, rateBasis,
                 compoundEarned, simpleEarned, compoundProjected, simpleProjected,
                 Money.round(currentValue), realizedGain, c.getVersion(),
-                c.getPayoutAmount() == null ? null : entries.findBySource(c.getTenantId(), LedgerService.SOURCE_CHIT_PAYOUT, c.getId())
-                        .stream().findFirst().map(com.aditya.personalbudget.domain.entity.JournalEntry::getId).orElse(null),
+                c.getPayoutAmount() == null ? null : payoutEntries(c).stream().findFirst().map(JournalEntry::getId).orElse(null),
                 c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today));
     }
 
-    /** A chit can be closed once it is paid out, or once every installment is paid and its maturity date has passed. */
+    /**
+     * A chit can be closed once it is paid out (all of the payout received), or once every installment is paid and its
+     * maturity date has passed.
+     */
     private static boolean closable(Chit c, List<ChitInstallment> pending, LocalDate today) {
-        return c.getPayoutAmount() != null || (pending.isEmpty() && !c.getEndDate().plusMonths(1).isAfter(today));
+        return c.getPayoutAmount() != null ? payoutPending(c).signum() == 0
+                : pending.isEmpty() && !c.getEndDate().plusMonths(1).isAfter(today);
     }
 
     /** Sum of compound or simple interest; earnedOnly keeps only completed months. */

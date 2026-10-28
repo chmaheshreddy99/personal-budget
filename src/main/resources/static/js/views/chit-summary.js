@@ -81,7 +81,7 @@ export async function chitSummaryReport(el, toolbarHost) {
                     <th>Next due</th><th>Maturity</th><th class="r">Gain</th><th class="r">Return</th></tr></thead>
                 <tbody>${list.map(c => {
                     const gain = c.payoutAmount !== null ? Number(c.realizedGain) : Number(c.projectedNetGain);
-                    return `<tr>
+                    return `<tr data-href="#/chits/${c.id}" title="Open ${esc(c.name)}">
                         <td><b>${esc(c.name)}</b> ${statusBadge(c.status)}</td>
                         <td class="small">${esc(c.organizer || '—')}${c.ticketNo ? ` · ${esc(c.ticketNo)}` : ''}</td>
                         <td class="r">${money(c.maturityAmount)}</td>

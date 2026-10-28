@@ -11,7 +11,7 @@ import { loadAccounts, can } from '../core/store.js';
 import { panel, esc, field, readForm, openModal, toast, confirmDialog, emptyState, statusBadge, accountOptions, accountChip } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, percent, isoDate, daysFromToday } from '../core/format.js';
-import { toggleEntryRow } from '../components/entry-inline.js';
+import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
 import { openUpiDialog, upiCardHtml, upiNote, bindUpiCopy } from '../components/upi-pay.js';
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -25,7 +25,15 @@ const savePrefs = () => setPref('chits', prefs);
 
 const isRunning = c => c.status === 'ACTIVE' || c.status === 'PRIZED';
 
-export async function render(container, _params, isCurrent) {
+export async function render(container, params, isCurrent) {
+    // opened for an entry (#/chits/<chit>/entry/<entry>): that chit, on the tab holding the entry, the entry expanded
+    let focusEntry = null;
+    if (/^\d+$/.test(params[0] || '')) {
+        view.selectedId = Number(params[0]);
+        view.search = '';
+        if (params[1] === 'entry' && /^\d+$/.test(params[2] || '')) focusEntry = Number(params[2]);
+    }
+    if (params.length) history.replaceState(null, '', '#/chits');
     const chits = await api.get('/chits');
     if (!isCurrent()) return;
     Object.assign(prefs, getPref('chits', { includeMatured: false }));
@@ -99,7 +107,11 @@ export async function render(container, _params, isCurrent) {
         view.selectedId = id;
         container.querySelectorAll('#chit-list [data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const detail = await api.get(`/chits/${id}`);
+        const entry = focusEntry;
+        focusEntry = null;
+        if (entry) view.tab = detail.payoutReceipts.some(p => p.entryId === entry) ? 'payout' : 'installments';
         drawDetail(container.querySelector('#chit-detail'), detail, reload);
+        if (entry) focusEntryRow(container.querySelector('#chit-detail'), entry, { onChanged: reload });
     }
 
     // ↑ / ↓ move through the chits, Enter pays the next installment
@@ -301,14 +313,15 @@ function chitRows(chits) {
         <div class="acct-item rich chit-item accent-${accent} status-${c.status.toLowerCase()} ${c.id === view.selectedId ? 'selected' : ''}" data-id="${c.id}">
             ${accountChip('CHIT_FUND', true)}
             <div class="acct-main">
-                <div class="acct-line"><span class="acct-name">${esc(c.name)}</span><b class="acct-bal" title="${c.payoutAmount !== null ? 'Received' : 'At maturity'}">${money(c.payoutAmount ?? c.maturityAmount)}</b></div>
+                <div class="acct-line"><span class="acct-name">${esc(c.name)}</span><b class="acct-bal" title="${c.payoutAmount !== null ? (Number(c.payoutPending) ? `Payout ${money(c.payoutAmount)}: ${money(c.payoutReceived)} received` : 'Received') : 'At maturity'}">${money(c.payoutAmount ?? c.maturityAmount)}</b></div>
                 <div class="acct-line sub">
                     <span class="acct-meta">${esc(c.organizer || '—')} · ${c.installmentsPaid}/${c.numberOfInstallments}</span>
                     <span class="acct-facts"><span class="fact good" title="Compound ${percent(r.compound, 2)} · simple ${percent(r.simple, 2)} a year">${percent(r.compound, 1)}</span>${dueFact}</span>
                     <span class="acct-delta pos" title="Interest earned so far">+${moneyShort(c.compoundInterestEarned)}</span>
                 </div>
                 <div class="chit-prog"><div class="acct-util good" title="${percent(paidPct, 0)} paid in"><span style="width:${paidPct}%"></span></div>
-                    <small>${c.status === 'CLOSED' ? `${icon('lock')}closed` : c.payoutAmount !== null ? `${icon('gift')}paid out ${shortDate(c.payoutDate)}`
+                    <small>${c.status === 'CLOSED' ? `${icon('lock')}closed` : Number(c.payoutPending) ? `<span class="gold-ink">${icon('hourglass')}${moneyShort(c.payoutPending)} of payout to come</span>`
+                        : c.payoutAmount !== null ? `${icon('gift')}paid out ${shortDate(c.payoutDate)}`
                         : `${percent(paidPct, 0)} · ${c.daysToMaturity >= 0 ? `matures ${shortDate(c.maturityDate)}` : 'matured'}`}</small></div>
             </div>
         </div>`;
@@ -322,12 +335,14 @@ function chitRows(chits) {
 
 // ===================================================================== detail
 
-function drawDetail(container, { chit: c, installments, interestSchedule }, reload) {
+function drawDetail(container, { chit: c, installments, interestSchedule, payoutReceipts = [] }, reload) {
     // fresh element each time so handlers of a previously shown chit do not pile up
     const target = container.cloneNode(false);
     container.replaceWith(target);
     const manage = can('MANAGE_CHITS');
     const paidOut = c.payoutAmount !== null;
+    const toCome = paidOut ? Number(c.payoutPending || 0) : 0;   // the organizer still owes this part of the payout
+    if (view.tab === 'payout' && !paidOut) view.tab = 'installments';
     const nextPending = installments.find(i => i.status === 'PENDING');
     const total = Number(c.totalContribution) || 1;
     const upcoming = Number(c.stillToPay) - Number(c.overdueAmount);
@@ -341,6 +356,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
         ${nextPending && c.organizerUpi ? `<button class="btn sm on-dark" data-upi="${nextPending.id}" title="Pay #${nextPending.installmentNo} by UPI QR">${icon('qr')}UPI</button>` : ''}
         ${nextPending ? `<button class="btn sm primary" data-pay="${nextPending.id}">${icon('check')}Pay #${nextPending.installmentNo}</button>` : ''}
         ${c.closable ? `<button class="btn sm gold-btn" data-act="close" title="Finished: put it away (it can be reopened)">${icon('lock')}Close chit</button>` : ''}
+        ${toCome ? `<button class="btn sm gold-btn" data-act="payout-part" title="The organizer paid another part of the payout">${icon('plus')}Record part · ${moneyShort(toCome)} due</button>` : ''}
         ${paidOut ? `<button class="btn sm on-dark" data-act="undo-payout">${icon('undo')}Undo payout</button>`
                   : `<button class="btn sm on-dark" data-act="payout">${icon('gift')}Payout</button>`}
         <button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>
@@ -358,9 +374,11 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
                     ${chitProgress(c, installments, total, upcoming)}
                 </div>
                 <div class="ab-bal">
-                    <small>${paidOut ? 'Received' : 'You receive'}</small>
-                    <b>${money(paidOut ? c.payoutAmount : c.maturityAmount)}</b>
-                    <span class="ab-change">${paidOut ? date(c.payoutDate) : `${date(c.maturityDate)}${c.daysToMaturity >= 0 ? ` · in ${c.daysToMaturity} days` : ''}`}</span>
+                    <small>${!paidOut ? 'You receive' : toCome ? 'Received so far' : 'Received'}</small>
+                    <b>${money(paidOut ? c.payoutReceived : c.maturityAmount)}</b>
+                    <span class="ab-change">${!paidOut ? `${date(c.maturityDate)}${c.daysToMaturity >= 0 ? ` · in ${c.daysToMaturity} days` : ''}`
+                        : toCome ? `of ${money(c.payoutAmount)} · <b class="ab-due">${money(toCome)} to come</b>` : date(c.payoutDate)}</span>
+                    ${toCome ? `<i class="payout-meter" title="${percent(Number(c.payoutReceived) / Number(c.payoutAmount) * 100, 0)} of the payout received"><em style="width:${Number(c.payoutReceived) / Number(c.payoutAmount) * 100}%"></em></i>` : ''}
                 </div>
                 <div class="ab-actions chit-actions">${actions}</div>
             </div>
@@ -391,6 +409,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
             actions: `${exportButton({ label: '' })}<div class="tabs sm" id="chit-tabs">
                 <button class="tab ${view.tab === 'installments' ? 'active' : ''}" data-tab="installments">${icon('list')}Installments</button>
                 <button class="tab ${view.tab === 'interest' ? 'active' : ''}" data-tab="interest">${icon('trending')}Interest by month</button>
+                ${paidOut ? `<button class="tab ${view.tab === 'payout' ? 'active' : ''}" data-tab="payout">${icon('gift')}Payout${toCome ? `<span class="count warn">${payoutReceipts.length}</span>` : ''}</button>` : ''}
                 <button class="tab ${view.tab === 'details' ? 'active' : ''}" data-tab="details">${icon('info')}Details</button></div>`,
             body: '<div class="scroll chit-tab-body" id="chit-tab-body"></div>',
         })}`;
@@ -398,7 +417,8 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
     const tabBody = target.querySelector('#chit-tab-body');
     const drawTab = () => {
         tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi))
-            : view.tab === 'interest' ? interestHtml(c, interestSchedule) : detailsHtml(c, installments, interestSchedule);
+            : view.tab === 'interest' ? interestHtml(c, interestSchedule)
+            : view.tab === 'payout' ? payoutHtml(c, payoutReceipts, manage && !closed) : detailsHtml(c, installments, interestSchedule);
     };
     drawTab();
     bindExport(target.querySelector('.p-chit-tabs'), () => ({
@@ -448,8 +468,19 @@ function drawDetail(container, { chit: c, installments, interestSchedule }, relo
                     reload();
                 }
             } else if (btn.dataset.act === 'payout') openPayoutForm(c, reload);
+            else if (btn.dataset.act === 'payout-part') openPayoutPartForm(c, payoutReceipts, () => { view.tab = 'payout'; reload(); });
+            else if (btn.dataset.undoPart) {
+                const part = payoutReceipts.find(p => p.entryId === Number(btn.dataset.undoPart));
+                if (part && await confirmDialog(`Undo the part of ${money(part.amount)} received on ${date(part.date)} (${part.entryNo})? It goes back to what the organizer still owes you.`)) {
+                    await api.post(`/chits/${c.id}/payout/receipts/${part.entryId}/undo`);
+                    toast(`${part.entryNo} undone`);
+                    reload();
+                }
+            }
             else if (btn.dataset.act === 'undo-payout') {
-                if (await confirmDialog('Undo the payout? The payout journal will be deleted and the chit becomes active again.')) {
+                if (await confirmDialog(payoutReceipts.length > 1
+                    ? `Undo the payout? All ${payoutReceipts.length} parts received (${money(c.payoutReceived)}) are deleted and the chit becomes active again.`
+                    : 'Undo the payout? The payout journal will be deleted and the chit becomes active again.')) {
                     await api.post(`/chits/${c.id}/payout/undo`);
                     toast('Payout undone');
                     reload();
@@ -527,6 +558,39 @@ function installmentsHtml(installments, manage, upi) {
             </tr>`;
         }).join('')}</tbody>
     </table>`;
+}
+
+/**
+ * The payout as it came in: agreed, received and still to come, then each part with its entry, the account it went
+ * into and an undo (the first part is the payout itself: Undo payout takes it out).
+ */
+function payoutHtml(c, parts, manage) {
+    const agreed = Number(c.payoutAmount), received = Number(c.payoutReceived), toCome = Number(c.payoutPending || 0);
+    return `
+    <div class="payout-tab">
+        <div class="payout-sum">
+            <div><small>Payout</small><b>${money(agreed)}</b><span class="muted">${date(c.payoutDate)}</span></div>
+            <div><small>Received</small><b class="pos">${money(received)}</b><span class="muted">${parts.length} part${parts.length === 1 ? '' : 's'}</span></div>
+            <div class="${toCome ? 'due' : ''}"><small>Still to come</small><b class="${toCome ? 'gold-ink' : 'muted'}">${toCome ? money(toCome) : 'Nothing'}</b>
+                <span class="muted">${toCome ? 'owed by the organizer' : 'received in full'}</span></div>
+            ${manage && toCome ? `<button class="btn sm gold-btn" data-act="payout-part">${icon('plus')}Record part</button>` : ''}
+        </div>
+        <i class="payout-meter wide"><em style="width:${agreed ? (received / agreed) * 100 : 0}%"></em></i>
+        <table class="grid compact dense payout-parts">
+            <thead><tr><th>#</th><th>Received on</th><th>Into</th><th>Note</th><th class="r">Amount</th><th></th></tr></thead>
+            <tbody>${parts.map((p, i) => `
+                <tr class="clickable" data-entry="${p.entryId}">
+                    <td><span class="inst-no good">${i + 1}</span></td>
+                    <td>${date(p.date)} <span class="muted small">${esc(p.entryNo)}</span></td>
+                    <td>${esc(p.accountName || '—')}</td>
+                    <td class="muted small">${p.first ? 'Payout recorded' : esc(p.notes || '')}</td>
+                    <td class="r"><b class="mono">${money(p.amount)}</b></td>
+                    <td class="r">${manage && !p.first ? `<button class="btn sm ghost icon" data-undo-part="${p.entryId}" title="Undo this part">${icon('undo')}</button>` : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+            <tfoot><tr class="total"><td colspan="4">Received</td><td class="r"><b class="mono">${money(received)}</b></td><td></td></tr></tfoot>
+        </table>
+    </div>`;
 }
 
 const INTEREST_STATUS = {
@@ -732,23 +796,99 @@ async function openPayoutForm(chit, reload) {
         title: `Record payout · ${chit.name}`, iconName: 'gift',
         body: `<form class="form-grid two">
             ${field({ label: 'Received on', name: 'payoutDate', type: 'date', value: isoDate(), required: true })}
-            ${field({ label: 'Amount received', name: 'amount', type: 'number', value: chit.maturityAmount, required: true })}
+            ${field({ label: 'Total payout', name: 'amount', type: 'number', value: chit.maturityAmount, required: true, hint: 'All the organizer pays you' })}
+            <label class="switch span-2 payout-parts-toggle" title="The organizer pays the payout in instalments">
+                <input type="checkbox" data-in-parts><span></span>Paid in parts: only some of it came in now</label>
+            <div class="span-2 payout-now" data-now hidden>
+                ${field({ label: 'Received now', name: 'receivedNow', type: 'number', attrs: 'min="0.01" step="any"' })}
+                <div class="payout-split" data-split></div>
+            </div>
             ${field({ label: 'Deposited into', name: 'depositAccountId', type: 'select', required: true, span: 'span-2',
                       options: accountOptions(accounts, a => a.accountClass === 'ASSET' && a.accountType !== 'CHIT_FUND', defaultBank) })}
         </form>
         <p class="hint" style="margin-top:10px">If installments are still pending (prize taken early), they are recorded as a liability
-        you keep paying. The difference between the amount received and your total contribution is booked as
-        income under <b>Chit Gains</b> (gain) or an expense under <b>Chit Commission &amp; Discount</b> (loss).</p>
+        you keep paying. The difference between the total payout and your total contribution is booked as
+        income under <b>Chit Gains</b> (gain) or an expense under <b>Chit Commission &amp; Discount</b> (loss).
+        Paid in parts, the rest stays on the chit as money the organizer owes you until you record each part.</p>
         ${evidenceFieldHtml({ hint: 'Payout voucher, cheque or bank credit' })}`,
-        onOpen: m => { payoutEvidence = bindEvidenceField(m.el); },
+        onOpen: m => {
+            payoutEvidence = bindEvidenceField(m.el);
+            const toggle = m.el.querySelector('[data-in-parts]');
+            const now = m.el.querySelector('[data-now]');
+            const nowInput = m.el.querySelector('[name=receivedNow]');
+            const total = m.el.querySelector('[name=amount]');
+            const drawSplit = () => {
+                const all = Number(total.value || 0), got = Number(nowInput.value || 0);
+                const rest = Math.max(0, all - got);
+                m.el.querySelector('[data-split]').innerHTML = got > all
+                    ? `<span class="neg">${icon('alert')}More than the total payout</span>`
+                    : `<span>${icon('check')}Now <b>${money(got)}</b></span><span>${icon('hourglass')}Still to come <b class="gold-ink">${money(rest)}</b></span>`;
+            };
+            toggle.addEventListener('change', () => {
+                now.hidden = !toggle.checked;
+                nowInput.required = toggle.checked;
+                nowInput.max = total.value;
+                if (toggle.checked && !nowInput.value) nowInput.value = Math.round(Number(total.value || 0) / 2);
+                drawSplit();
+            });
+            total.addEventListener('input', () => { nowInput.max = total.value; drawSplit(); });
+            nowInput.addEventListener('input', drawSplit);
+        },
         actions: [{ label: 'Cancel' }, {
             label: 'Record payout', kind: 'primary', iconName: 'check',
             onClick: async m => {
                 const form = m.el.querySelector('form');
                 if (!form.reportValidity()) return true;
-                const detail = await api.post(`/chits/${chit.id}/payout`, readForm(form));
-                toast('Payout recorded');
+                const data = readForm(form);
+                if (!m.el.querySelector('[data-in-parts]').checked) delete data.receivedNow;
+                const detail = await api.post(`/chits/${chit.id}/payout`, data);
+                const pending = Number(detail.chit.payoutPending || 0);
+                toast(pending ? `Payout recorded · ${money(pending)} still to come from ${chit.organizer || 'the organizer'}` : 'Payout recorded');
+                if (pending) view.tab = 'payout';
                 await payoutEvidence.uploadTo(detail.chit.payoutEntryId);
+                reload();
+            },
+        }],
+    });
+}
+
+/** Another part of a payout the organizer pays in instalments: how much, when and into which account. */
+async function openPayoutPartForm(chit, parts, reload) {
+    const accounts = await loadAccounts();
+    const toCome = Number(chit.payoutPending);
+    const lastAccount = parts.at(-1)?.accountId;
+    let partEvidence = null;
+    openModal({
+        title: `Payout part ${parts.length + 1} · ${chit.name}`, iconName: 'gift',
+        body: `<form class="form-grid two">
+            <div class="span-2 post-summary"><div class="row"><b>Payout ${money(chit.payoutAmount)}</b><span class="spacer"></span>
+                <span class="muted">received ${money(chit.payoutReceived)} in ${parts.length} part${parts.length === 1 ? '' : 's'}</span></div>
+                <i class="payout-meter wide"><em style="width:${Number(chit.payoutReceived) / Number(chit.payoutAmount) * 100}%"></em></i>
+                <div class="small"><b class="gold-ink">${money(toCome)}</b> still to come from ${esc(chit.organizer || 'the organizer')}</div></div>
+            <label class="field"><span>Amount received *</span><input name="amount" type="number" step="any" min="0.01" max="${toCome}" value="${toCome}" required data-plain>
+                <span class="chips">${[1, 0.5].map(f => `<button type="button" class="date-chip" data-fill="${Math.round(toCome * f * 100) / 100}">${f === 1 ? 'All' : 'Half'} ${moneyShort(toCome * f)}</button>`).join('')}</span></label>
+            ${field({ label: 'Received on', name: 'date', type: 'date', value: isoDate(), required: true, attrs: `min="${chit.payoutDate}"` })}
+            ${field({ label: 'Deposited into', name: 'depositAccountId', type: 'select', required: true, span: 'span-2',
+                      options: accountOptions(accounts, a => a.accountClass === 'ASSET' && a.accountType !== 'CHIT_FUND', lastAccount) })}
+            ${field({ label: 'Note', name: 'notes', placeholder: 'e.g. Cheque no. 123456', span: 'span-2' })}
+        </form>
+        ${evidenceFieldHtml({ hint: 'Cheque, voucher or bank credit' })}`,
+        onOpen: m => {
+            partEvidence = bindEvidenceField(m.el);
+            m.el.querySelector('form').addEventListener('click', ev => {
+                const b = ev.target.closest('[data-fill]');
+                if (b) m.el.querySelector('[name=amount]').value = b.dataset.fill;
+            });
+        },
+        actions: [{ label: 'Cancel' }, {
+            label: 'Record part', kind: 'primary', iconName: 'check',
+            onClick: async m => {
+                const form = m.el.querySelector('form');
+                if (!form.reportValidity()) return true;
+                const detail = await api.post(`/chits/${chit.id}/payout/receipts`, readForm(form));
+                const pending = Number(detail.chit.payoutPending || 0);
+                toast(pending ? `Part recorded · ${money(pending)} still to come` : 'Payout received in full');
+                await partEvidence.uploadTo(detail.payoutReceipts.at(-1)?.entryId);
                 reload();
             },
         }],

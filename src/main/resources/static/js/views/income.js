@@ -13,12 +13,12 @@
  */
 import { api } from '../core/api.js';
 import { can, categoriesOf } from '../core/store.js';
-import { esc, panel, table, emptyState } from '../core/ui.js';
+import { esc, panel, table, emptyState, listTotalRow, totalsToggle } from '../core/ui.js';
 import { icon, categoryIcon } from '../core/icons.js';
 import { money, moneyShort, percent, date, shortDate, isoDate, monthLabel } from '../core/format.js';
 import { barChart, donutChart, foldOthers, seriesColor, legend } from '../core/charts.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
-import { toggleEntryRow } from '../components/entry-inline.js';
+import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { exportButton, bindExport } from '../core/export.js';
 
@@ -40,9 +40,29 @@ const PASSIVE = /interest|dividend|capital|rental|rent|chit/i;
 
 const view = { period: 'month', sourceId: null, q: '', from: isoDate(), to: isoDate(), showQuiet: false };
 
-export async function render(container, _params, isCurrent) {
+export async function render(container, params, isCurrent) {
     // a fresh visit starts on every source; a reload or live refresh keeps the choice
     if (!container.querySelector('.income-page')) { view.sourceId = null; view.showQuiet = false; }
+    // opened for an income (#/income/entry/<id>): its month, every source, the entry expanded;
+    // for a source over a period (#/income/source/<id>/<from>/<to>, from a report): that source, those dates
+    let focusEntry = null;
+    const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+    if (params[0] === 'entry' && /^\d+$/.test(params[1] || '')) {
+        const entry = await api.get(`/transactions/${params[1]}`).catch(() => null);
+        if (entry) {
+            const month = entry.entryDate.slice(0, 7);
+            const end = isoDate(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0));
+            if (month === isoDate().slice(0, 7)) view.period = 'month';
+            else Object.assign(view, { period: 'custom', from: `${month}-01`, to: end });
+            Object.assign(view, { sourceId: null, q: '' });
+            focusEntry = entry.id;
+        }
+    }
+    if (params[0] === 'source' && /^\d+$/.test(params[1] || '')) {
+        Object.assign(view, { sourceId: Number(params[1]), q: '', showQuiet: true });
+        if (isDate(params[2]) && isDate(params[3])) Object.assign(view, { period: 'custom', from: params[2], to: params[3] });
+    }
+    if (params.length) history.replaceState(null, '', '#/income');
     const today = new Date(isoDate() + 'T00:00:00');
     let [fromD, toD] = PERIODS[view.period].range(today);
     const from = isoDate(fromD), to = isoDate(toD);
@@ -107,9 +127,15 @@ export async function render(container, _params, isCurrent) {
         </div>`;
     };
     const q = view.q.toLowerCase();
-    const list = period.filter(r => (!view.sourceId || r.accountId === view.sourceId)
-        && (!q || `${r.entry.narration} ${r.source} ${r.into} ${r.entry.party || ''}`.toLowerCase().includes(q)))
-        .sort((a, b) => b.date.localeCompare(a.date) || b.entry.id - a.entry.id);
+    const picked = r => (!view.sourceId || r.accountId === view.sourceId)
+        && (!q || `${r.entry.narration} ${r.source} ${r.into} ${r.entry.party || ''}`.toLowerCase().includes(q));
+    const filtered = Boolean(view.sourceId || q);
+    const list = period.filter(picked).sort((a, b) => b.date.localeCompare(a.date) || b.entry.id - a.entry.id);
+    // the trend follows the source and search chosen; the mix follows the search (a single source is no mix)
+    const trendRows = filtered ? rows.filter(picked) : rows;
+    const mixSources = q ? sources.map(s => ({ ...s, amount: sum(list.filter(r => r.accountId === s.account.id)) })) : sources;
+    const mixTotal = q ? sum(list) : total;
+    const filteredTag = on => (on ? `<span class="filtered-tag" title="Follows the source and search chosen">${icon('filter')}filtered</span>` : '');
     const passive = sum(period.filter(r => r.passive));
 
     container.innerHTML = `
@@ -152,7 +178,7 @@ export async function render(container, _params, isCurrent) {
             <div class="bn-foot"><span class="kbd">↑</span><span class="kbd">↓</span> source · <span class="kbd">←</span><span class="kbd">→</span> period · <span class="kbd">/</span> search</div>` })}
 
         ${panel({ title: view.sourceId ? categories.find(a => a.id === view.sourceId).name : 'Received', iconName: 'list', cls: 'p-in-list', bodyClass: 'flush',
-            sub: `${list.length} · ${money(sum(list))}`,
+            sub: `${list.length} · ${money(sum(list))}`, actions: totalsToggle(),
             body: `<div class="scroll" id="in-list">${table([
                 { label: 'Date', render: r => `<b>${shortDate(r.date)}</b> <span class="muted small">${new Date(r.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span>`, cls: 'nowrap' },
                 { label: 'Source', render: r => { const ci = categoryIcon(r.source); return `<span class="cell-flex"><span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><span class="ellipsis">${esc(r.source)}</span></span>`; } },
@@ -160,17 +186,18 @@ export async function render(container, _params, isCurrent) {
                 { label: 'Into', render: r => `<span class="small secondary">${esc(r.into)}</span>` },
                 { label: 'Amount', align: 'r', render: r => `<b class="${r.amount >= 0 ? 'pos' : 'neg'}">${money(r.amount)}</b>` },
                 { label: '', align: 'r', render: () => `<span class="expand-caret">${icon('chevron-down')}</span>` },
-            ], list, { dense: true, rowClass: () => 'clickable', rowAttrs: r => `data-entry="${r.entry.id}"`, empty: 'Nothing received in this period' })}</div>` })}
+            ], list, { dense: true, rowClass: () => 'clickable', rowAttrs: r => `data-entry="${r.entry.id}"`, empty: 'Nothing received in this period',
+                footer: listTotalRow({ count: list.length, span: 4, filtered, noun: 'receipt', totals: [`<span class="pos">${money(sum(list))}</span>`] }) })}</div>` })}
 
         <aside class="in-side">
             ${chitGainsCard(chits, rows, from, to)}
             <section class="side-card">
-                <div class="side-head">${icon('report')}<b>Last 12 months</b><span class="spacer"></span>${legend([{ label: 'Earned' }, { label: 'Passive' }])}</div>
+                <div class="side-head">${icon('report')}<b>Last 12 months</b>${filteredTag(filtered)}<span class="spacer"></span>${legend([{ label: 'Earned' }, { label: 'Passive' }])}</div>
                 <div class="chart in-trend" id="in-trend"></div>
             </section>
             <section class="side-card">
-                <div class="side-head">${icon('pie')}<b>Mix</b><span class="spacer"></span><span class="small muted">${PERIODS[view.period].label}</span></div>
-                ${total ? '<div class="in-mix"><div class="chart" id="in-mix"></div><div class="in-mix-legend" id="in-mix-legend"></div></div>' : emptyState('Nothing received yet', 'pie')}
+                <div class="side-head">${icon('pie')}<b>Mix</b>${filteredTag(Boolean(q))}<span class="spacer"></span><span class="small muted">${PERIODS[view.period].label}</span></div>
+                ${mixTotal ?'<div class="in-mix"><div class="chart" id="in-mix"></div><div class="in-mix-legend" id="in-mix-legend"></div></div>' : emptyState('Nothing received yet', 'pie')}
             </section>
             <section class="side-card">
                 <div class="side-head">${icon('bulb')}<b>Insights</b></div>
@@ -181,16 +208,16 @@ export async function render(container, _params, isCurrent) {
 
     // ---- charts
     const monthsList = Array.from({ length: 12 }, (_, i) => isoDate(new Date(today.getFullYear(), today.getMonth() - 11 + i, 1)).slice(0, 7));
-    const ofMonth = (m, isPassive) => sum(rows.filter(r => r.date.startsWith(m) && r.passive === isPassive));
+    const ofMonth = (m, isPassive) => sum(trendRows.filter(r => r.date.startsWith(m) && r.passive === isPassive));
     barChart(container.querySelector('#in-trend'), {
         labels: monthsList, labelFormat: monthLabel, format: moneyShort,
         series: [{ name: 'Earned', values: monthsList.map(m => ofMonth(m, false)) }, { name: 'Passive', values: monthsList.map(m => ofMonth(m, true)) }],
     });
-    if (total) {
-        const items = foldOthers(sources.filter(s => s.amount > 0).map(s => ({ label: s.account.name, value: s.amount })), 6);
-        donutChart(container.querySelector('#in-mix'), { items, format: v => money(v), centerValue: moneyShort(total), centerLabel: 'received' });
+    if (mixTotal) {
+        const items = foldOthers(mixSources.filter(s => s.amount > 0).map(s => ({ label: s.account.name, value: s.amount })), 6);
+        donutChart(container.querySelector('#in-mix'), { items, format: v => money(v), centerValue: moneyShort(mixTotal), centerLabel: 'received' });
         container.querySelector('#in-mix-legend').innerHTML = items.map((it, i) => `<div class="legend-row"><i class="legend-swatch" style="background:${seriesColor(i)}"></i>
-            <span class="ellipsis">${esc(it.label)}</span><b>${percent((it.value / total) * 100, 0)}</b></div>`).join('');
+            <span class="ellipsis">${esc(it.label)}</span><b>${percent((it.value / mixTotal) * 100, 0)}</b></div>`).join('');
     }
 
     // ---- events
@@ -250,6 +277,7 @@ export async function render(container, _params, isCurrent) {
         }
         return false;
     });
+    if (focusEntry) focusEntryRow(container.querySelector('#in-list'), focusEntry, { onChanged: reload });
 }
 
 /**
@@ -268,7 +296,7 @@ function chitGainsCard(chits, rows, from, to) {
         const paidOut = c.payoutAmount !== null;
         const gain = paidOut ? Number(c.realizedGain) : Number(c.projectedNetGain);
         const base = Number(c.totalContribution) || 1;
-        return `<a class="cg-row" href="#/chits" title="${esc(c.name)}">
+        return `<a class="cg-row" href="#/chits/${c.id}" title="${esc(c.name)}">
             <span class="ellipsis"><b>${esc(c.name)}</b><small>${paidOut ? `paid ${moneyShort(c.totalContribution)} · got ${moneyShort(c.payoutAmount)}` : `${c.installmentsPaid}/${c.numberOfInstallments} paid · dividends ${moneyShort(c.dividendsEarned)}`}</small></span>
             <span class="r"><b class="${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : '−'}${moneyShort(Math.abs(gain))}</b><small>${paidOut ? 'realised' : 'expected'} · ${percent((gain / base) * 100, 1)}</small></span></a>`;
     };

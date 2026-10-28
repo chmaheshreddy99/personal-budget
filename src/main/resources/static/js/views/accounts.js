@@ -7,14 +7,14 @@
  */
 import { api } from '../core/api.js';
 import { loadAccounts, can, state, hasFeature } from '../core/store.js';
-import { panel, esc, field, readForm, openModal, toast, confirmDialog, accountChip, emptyState, loading, table } from '../core/ui.js';
+import { panel, esc, field, readForm, openModal, toast, confirmDialog, accountChip, emptyState, loading, table, listTotalRow, totalsToggle } from '../core/ui.js';
 import { kindChip, entryKind, projectTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMonth, isoDate, number, daysFromToday } from '../core/format.js';
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, shortAccount, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
-import { toggleEntryRow } from '../components/entry-inline.js';
+import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
 import { claimContextHtml, claimBadge, reminderText } from '../components/claim-panel.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openDebtDialog } from '../components/debt-dialog.js';
@@ -64,9 +64,21 @@ const savePrefs = () => setPref('statement', prefs);
 
 const toneOf = a => BUCKET_TONE[a.bucket] || (a.accountClass === 'INCOME' ? 'green' : a.accountClass === 'EXPENSE' ? 'coral' : 'slate');
 
-export async function render(container, _params, isCurrent) {
+export async function render(container, params, isCurrent) {
+    // opened for an entry (#/accounts/<account>/entry/<entry>): that account, its statement reaching back to the entry
+    const focusAccount = /^\d+$/.test(params[0] || '') ? Number(params[0]) : null;
+    const focusEntry = focusAccount && params[1] === 'entry' && /^\d+$/.test(params[2] || '') ? Number(params[2]) : null;
+    if (params.length) history.replaceState(null, '', '#/accounts');
+    if (focusAccount) {
+        Object.assign(view, { selectedId: focusAccount, search: '', tab: 'ALL', emi: false, flow: 'all', pane: 'ledger', paneAccount: focusAccount, q: '' });
+    }
+    if (focusEntry) {
+        const entry = await api.get(`/transactions/${focusEntry}`).catch(() => null);
+        if (entry && entry.entryDate < view.from) view.from = `${entry.entryDate.slice(0, 7)}-01`;
+    }
     const everything = await loadAccounts(true, { all: true });
     if (!isCurrent()) return;
+    if (focusAccount && everything.some(a => a.id === focusAccount && !a.active)) view.closed = true;   // a closed account still opens
     // the hosted-chit book (members' money, Host a Chit) has its own page: only its net counts here, in net worth
     // the hosted-chit book and the construction book have their own pages
     const accounts = everything.filter(a => !a.chitBook && !a.projectBook);
@@ -293,6 +305,7 @@ export async function render(container, _params, isCurrent) {
     const initial = visible().find(a => a.id === view.selectedId) || visible()[0];
     if (initial) select(initial.id);
     else container.querySelector('#account-detail').innerHTML = panel({ title: 'Account', iconName: 'wallet', body: emptyState('Select an account') });
+    if (focusEntry) focusEntryRow(container, focusEntry, { onChanged: () => render(container, [], isCurrent) });
 }
 
 /**
@@ -535,7 +548,7 @@ async function drawDetail(target, account, reload, all = []) {
                       <span id="ledger-period">${periodChips(view.from, view.to)}</span>
                       <span class="search-box sm ledger-search">${icon('search')}<input id="ledger-q" placeholder="Search… entry no. or #id too" value="${esc(view.q || '')}" data-plain></span>
                       <button class="btn sm ghost icon" id="ledger-clear" title="Clear filters: all entries, last 6 months, no search" ${view.q || view.flow !== 'all' || view.from !== firstOfMonth(-5) || view.to !== isoDate() ? '' : 'hidden'}>${icon('x')}</button>
-                      ${exportButton({ label: '' })}`),
+                      ${totalsToggle()}${exportButton({ label: '' })}`),
             body: view.pane === 'people' ? `<div class="people-filter seg-chips sm" id="people-filter">${[['open', 'Open', openClaims.length], ['settled', 'Settled', claims.length - openClaims.length], ['all', 'All', claims.length]]
                     .map(([k, l, n]) => `<button class="seg-chip ${(view.peopleFilter || 'open') === k ? 'active' : ''}" data-people="${k}">${l}<span class="count">${n}</span></button>`).join('')}
                     <span class="small muted">${(view.peopleFilter || 'open') === 'open' ? 'whatever their date' : ''}</span></div>
@@ -656,8 +669,14 @@ async function drawDetail(target, account, reload, all = []) {
             ${biggest ? `<span class="muted" title="${esc(biggest.narration)}">Largest ${moneyShort(amountOf(biggest))} · ${shortDate(biggest.date)}</span>` : ''}
             <span class="muted">${ledger.rows.length} entries · ${date(ledger.from)} → ${date(ledger.to)}</span>`;
         if (!prefs.grouped) {
+            // the total of the entries listed: what went in, what went out and the net of the two
+            const dr = rows.reduce((s, r) => s + Number(r.debit || 0), 0), cr = rows.reduce((s, r) => s + Number(r.credit || 0), 0);
+            const net = debitNormal ? dr - cr : cr - dr;
             tableEl.innerHTML = table(columns(), rows, {
                 dense: true, rowClass: () => 'clickable', rowAttrs: r => `data-entry="${r.entryId}"`, empty: 'No entries in this period',
+                footer: listTotalRow({ count: rows.length, span: columns().length - 4, noun: 'entry', plural: 'entries',
+                    filtered: Boolean((view.q || '').trim()) || view.flow !== 'all',
+                    totals: [money(dr), money(cr), `<span class="${net >= 0 ? 'pos' : 'neg'}" title="In − out of the entries listed">net ${net >= 0 ? '+' : '−'}${money(Math.abs(net))}</span>`] }),
             });
             return;
         }

@@ -111,10 +111,19 @@ public class Chit implements TenantOwned {
     @Column(nullable = false)
     private Long accountId;
 
+    /** The payout agreed with the organizer (prize or maturity); set once the payout is recorded. */
     @PositiveOrZero
     private BigDecimal payoutAmount;
 
+    /** The day the payout was recorded (its first receipt). */
     private LocalDate payoutDate;
+
+    /**
+     * How much of {@link #payoutAmount} has come in so far, when the organizer pays it in parts. Empty on payouts
+     * recorded before parts were possible: those were received in full.
+     */
+    @PositiveOrZero
+    private BigDecimal payoutReceived;
 
     /** When the chit was closed (status CLOSED): it is finished and kept for the record; reopening clears it. */
     private LocalDateTime closedAt;

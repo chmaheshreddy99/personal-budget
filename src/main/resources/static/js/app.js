@@ -37,6 +37,7 @@ import * as gifts from './views/gifts.js';
 import * as documents from './views/documents.js';
 import * as construction from './views/construction.js';
 import * as integrity from './views/integrity.js';
+import * as entryLink from './views/entry-link.js';
 
 /** Top menu, in display order. */
 const ROUTES = [
@@ -63,6 +64,8 @@ const ROUTES = [
     // users, roles and tenants: opened from Settings and the user menu, not the top menu
     { path: 'admin', label: 'Users & roles', iconName: 'shield', view: admin, hidden: true },
     { path: 'settings', label: 'Settings', iconName: 'settings', view: settings, hidden: true },
+    // #/entry/<id>: any journal entry, opened on the page that manages it
+    { path: 'entry', label: 'Opening entry', iconName: 'journal', view: entryLink, hidden: true },
 ];
 
 /** Pages of the sections shared with the user (admin pages and settings are always there). */

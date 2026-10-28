@@ -2,8 +2,10 @@ package com.aditya.personalbudget.web;
 
 import com.aditya.personalbudget.domain.type.VoucherType;
 import com.aditya.personalbudget.dto.JournalDtos.EntryView;
+import com.aditya.personalbudget.dto.JournalDtos.IncomeRequest;
 import com.aditya.personalbudget.dto.JournalDtos.ManualJournalRequest;
 import com.aditya.personalbudget.dto.JournalDtos.QuickTransactionRequest;
+import com.aditya.personalbudget.dto.JournalDtos.TransferRequest;
 import com.aditya.personalbudget.security.Permission;
 import com.aditya.personalbudget.security.RequiresPermission;
 import com.aditya.personalbudget.service.TransactionService;
@@ -58,6 +60,34 @@ public class TransactionController {
     @RequiresPermission(Permission.POST_TRANSACTIONS)
     public EntryView postQuick(@Valid @RequestBody QuickTransactionRequest request) {
         return transactions.postQuick(request);
+    }
+
+    /** Edits a transfer between two of your accounts. */
+    @PutMapping("/{id}/transfer")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public EntryView updateTransfer(@PathVariable Long id, @Valid @RequestBody TransferRequest request) {
+        return transactions.updateTransfer(id, request);
+    }
+
+    @DeleteMapping("/{id}/transfer")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public ResponseEntity<Void> deleteTransfer(@PathVariable Long id) {
+        transactions.deleteTransfer(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Edits an income posted from the quick entry. */
+    @PutMapping("/{id}/income")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public EntryView updateIncome(@PathVariable Long id, @Valid @RequestBody IncomeRequest request) {
+        return transactions.updateIncome(id, request);
+    }
+
+    @DeleteMapping("/{id}/income")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public ResponseEntity<Void> deleteIncome(@PathVariable Long id) {
+        transactions.deleteIncome(id);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/journal")

@@ -6,14 +6,14 @@
  */
 import { api } from '../core/api.js';
 import { loadAccounts, can, state } from '../core/store.js';
-import { panel, table, esc, field, accountOptions, readForm, emptyState, loading, stat } from '../core/ui.js';
+import { panel, table, esc, field, accountOptions, readForm, emptyState, loading, stat, listTotalRow, totalsToggle } from '../core/ui.js';
 import { kindChip, movementHtml, entryKind, projectTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon } from '../core/icons.js';
 import { money, date, firstOfMonth, isoDate } from '../core/format.js';
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry, openJournalEditor } from '../components/transaction-forms.js';
-import { toggleEntryRow } from '../components/entry-inline.js';
+import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -24,7 +24,20 @@ const DEFAULTS = () => ({ from: firstOfMonth(-2), to: isoDate(), voucherType: ''
 const filters = DEFAULTS();
 const isFiltered = () => Object.entries(DEFAULTS()).some(([k, v]) => String(filters[k] ?? '') !== String(v));
 
-export async function render(container, _params, isCurrent) {
+export async function render(container, params, isCurrent) {
+    // opened for an entry (#/transactions/entry/<id>): its month, every type and account, the entry expanded
+    let focusEntry = null;
+    if (params[0] === 'entry' && /^\d+$/.test(params[1] || '')) {
+        const entry = await api.get(`/transactions/${params[1]}`).catch(() => null);
+        if (entry) {
+            const month = entry.entryDate.slice(0, 7);
+            const end = isoDate(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0));
+            Object.assign(filters, DEFAULTS(), { from: `${month}-01`, to: end > isoDate() ? isoDate() : end });
+            if (entry.entryDate > filters.to) filters.to = entry.entryDate;   // dated ahead
+            focusEntry = entry.id;
+        }
+    }
+    if (params.length) history.replaceState(null, '', '#/transactions');
     const accounts = await loadAccounts(false, { all: true });
     if (!isCurrent()) return;
     const voucherOptions = [{ value: '', label: 'All types' }, ...state.options.voucherTypes];
@@ -35,7 +48,7 @@ export async function render(container, _params, isCurrent) {
             title: 'Day book', iconName: 'journal', cls: 'p-register', bodyClass: 'flush',
             sub: '<span id="entry-count"></span>',
             actions: `<span id="journal-period">${periodChips(filters.from, filters.to)}</span>
-                ${exportButton({ label: '' })}`,
+                ${totalsToggle()}${exportButton({ label: '' })}`,
             body: `<form class="filters register-filters" id="filter-form">
                     ${field({ label: 'From', name: 'from', type: 'date', value: filters.from })}
                     ${field({ label: 'To', name: 'to', type: 'date', value: filters.to })}
@@ -79,7 +92,7 @@ export async function render(container, _params, isCurrent) {
     });
     form.querySelector('#clear-filters').addEventListener('click', () => {
         Object.assign(filters, DEFAULTS());
-        render(container, _params, isCurrent);
+        render(container, [], isCurrent);
     });
 
     container.querySelector('.p-post').addEventListener('click', e => {
@@ -130,6 +143,8 @@ export async function render(container, _params, isCurrent) {
             { label: '', align: 'r', cls: 'c-caret', render: () => `<span class="expand-caret">${icon('chevron-down')}</span>` },
         ], entries, {
             dense: true,
+            footer: listTotalRow({ count: entries.length, span: hasChitStatus(entries) ? 4 : 3, noun: 'entry', plural: 'entries', filtered: isFiltered(),
+                totals: [money(entries.reduce((s, e) => s + Number(e.amount), 0))] }),
             rowClass: e => `clickable ${e.reversedBy || e.voucherType === 'REVERSAL' ? 'is-reversed' : ''}`,
             rowAttrs: e => `data-entry="${e.id}"`,
             empty: 'No entries match these filters',
@@ -168,6 +183,7 @@ export async function render(container, _params, isCurrent) {
     }));
 
     await load();
+    if (focusEntry) focusEntryRow(container.querySelector('#register'), focusEntry, { onChanged: load });
 }
 
 function postButton(kind, iconName, tone, title, sub) {

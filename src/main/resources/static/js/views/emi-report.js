@@ -112,7 +112,7 @@ export async function emiReport(content, toolbar) {
                 { label: `Savings at ${percent(prefs.rate, 1)}`, align: 'r', render: r => `<span class="pos">+${money(Math.round(r.a.earned))}</span>` },
                 { label: 'Net gain', align: 'r', render: r => `<b class="${r.a.net >= 0 ? 'pos' : 'neg'}">${r.a.net >= 0 ? '+' : '−'}${money(Math.round(Math.abs(r.a.net)))}</b>` },
                 { label: 'Verdict', render: r => verdict(r.a, prefs.rate) },
-            ], rows)}</div>`,
+            ], rows, { rowAttrs: r => `data-href="#/expenses/emi/${r.p.id}" title="Open this EMI plan: pay, undo or pay it off"` })}</div>`,
         })}
         <p class="emi-how">${icon('info')} Against paying the whole price on the day of purchase: the price stays in a savings account at ${percent(prefs.rate, 1)} a year
             (compounded monthly) and pays the processing fee at once and each EMI (with its GST) when it falls due. What is left after the last EMI is the gain.

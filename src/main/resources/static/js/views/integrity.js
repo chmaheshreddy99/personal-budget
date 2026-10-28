@@ -102,6 +102,6 @@ function accountTable(list) {
     return `<table class="grid ig-table">
         <thead><tr><th>Account</th><th class="r">Stored balance</th><th>Issue</th></tr></thead>
         <tbody>${list.map(i => `
-            <tr><td><a href="#/accounts">${esc(i.accountName)}</a></td><td class="r mono">${i.amount === null ? '—' : money(i.amount)}</td>
+            <tr><td><a href="#/accounts/${i.accountId}">${esc(i.accountName)}</a></td><td class="r mono">${i.amount === null ? '—' : money(i.amount)}</td>
                 <td class="ig-reason">${esc(i.reason)}</td></tr>`).join('')}</tbody></table>`;
 }

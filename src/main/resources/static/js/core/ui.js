@@ -4,6 +4,7 @@
  */
 import { icon, hydrateIcons, accountTypeIcon } from './icons.js';
 import { busyWhile } from './busy.js';
+import { getPref, setPref } from './prefs.js';
 
 // ===================================================================== markup helpers
 
@@ -112,6 +113,42 @@ export function table(columns, rows, options = {}) {
     return `<table class="grid ${options.compact ? 'compact' : ''} ${options.dense ? 'dense' : ''}">
         <thead><tr>${head}</tr></thead><tbody>${body}</tbody>${options.footer ? `<tfoot>${options.footer}</tfoot>` : ''}
     </table>`;
+}
+
+// ---- totals line: shown or hidden everywhere at once, remembered for this browser
+const totalsShown = () => getPref('listTotals', { show: true }).show !== false;
+document.documentElement.classList.toggle('hide-list-totals', !totalsShown());
+document.addEventListener('click', e => {
+    const button = e.target.closest('[data-totals-toggle]');
+    if (!button) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const show = !totalsShown();
+    setPref('listTotals', { show });
+    document.documentElement.classList.toggle('hide-list-totals', !show);
+    document.querySelectorAll('[data-totals-toggle]').forEach(b => {
+        b.classList.toggle('active', show);
+        b.title = show ? 'Hide the totals line' : 'Show the totals line at the bottom';
+    });
+}, true);
+
+/** The small panel button that shows or hides the totals line at the bottom of lists. */
+export function totalsToggle() {
+    const show = totalsShown();
+    return `<button type="button" class="btn sm ghost icon totals-toggle ${show ? 'active' : ''}" data-totals-toggle
+        title="${show ? 'Hide the totals line' : 'Show the totals line at the bottom'}" aria-label="Totals line">${icon('calculator')}</button>`;
+}
+
+/**
+ * The closing line of a list (a <tr> for its tfoot): how many items and their totals, kept in view at the bottom;
+ * "Filtered total" when a filter or a search narrows the list, so the sum of what is shown can be checked.
+ * span: the columns before the first total; totals: html of each total cell; after: empty cells that follow.
+ */
+export function listTotalRow({ count, span, totals, filtered = false, after = 1, noun = 'item', plural = `${noun}s` }) {
+    return `<tr class="total list-total ${filtered ? 'filtered' : ''}">
+        <td colspan="${span}"><span class="lt-label">${icon(filtered ? 'filter' : 'calculator')}<b>${filtered ? 'Filtered total' : 'Total'}</b>
+            <span class="muted">${count} ${count === 1 ? noun : plural}</span></span></td>
+        ${totals.map(t => `<td class="r"><b class="mono">${t}</b></td>`).join('')}${'<td></td>'.repeat(after)}</tr>`;
 }
 
 // ===================================================================== forms

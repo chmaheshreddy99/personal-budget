@@ -50,7 +50,27 @@ public class ExpenseService {
                              // ---- refunds and reversal
                              /* REVERSED, REFUNDED (in full), PARTLY_REFUNDED, or null */
                              String status, BigDecimal refunded, BigDecimal netAmount, boolean refundable,
-                             List<RefundView> refunds) {
+                             List<RefundView> refunds,
+                             // ---- linked charges (a fee, tax or tip that came with an expense)
+                             /* the expense this one was charged with, or null */
+                             Long parentEntryId, String parentEntryNo, String parentNarration,
+                             /* charges that came with this expense, oldest first */
+                             List<LinkedView> linked,
+                             /* a charge can be linked to it; it can be turned into money paid for someone */
+                             boolean linkable, boolean convertible) {
+    }
+
+    /** A charge that came with an expense (a transaction fee, GST, a tip ...): an expense of its own, linked to it. */
+    public record LinkedView(Long entryId, String entryNo, LocalDate date, String narration, Long categoryId,
+                             String categoryName, BigDecimal amount, BigDecimal netAmount, String status) {
+    }
+
+    /** Turns an expense into money paid for someone, who will pay it back. */
+    public record ConvertToPaidForRequest(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 100) String party,
+                                          @jakarta.validation.constraints.Size(max = 255) String narration,
+                                          LocalDate dueDate,
+                                          @jakarta.validation.constraints.Size(max = 500) String notes,
+                                          Long receivableAccountId) {
     }
 
     /** Money that came back on an expense: a refund (part or all) or the reversal of a mistaken expense. */
@@ -74,11 +94,13 @@ public class ExpenseService {
     private final LedgerService ledger;
     private final CategoryService categories;
     private final com.aditya.personalbudget.repository.AttachmentRepository attachments;
+    private final ClaimService claims;
 
     public ExpenseService(JournalEntryRepository entries, JournalLineRepository lines, AccountRepository accounts,
                           LedgerService ledger, CategoryService categories,
-                          com.aditya.personalbudget.repository.AttachmentRepository attachments) {
+                          com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimService claims) {
         this.attachments = attachments;
+        this.claims = claims;
         this.entries = entries;
         this.lines = lines;
         this.accounts = accounts;
@@ -99,7 +121,31 @@ public class ExpenseService {
         Set<Long> ids = entryById.keySet();
         Map<Long, List<JournalLine>> linesByEntry = lines.findByJournalEntryIdIn(ids).stream()
                 .collect(Collectors.groupingBy(JournalLine::getJournalEntryId));
-        Map<Long, List<RefundView>> refundsByExpense = refundsOf(ids, accountById, evidence);
+        // linked charges: expenses whose source points at the expense they came with, whatever their date
+        Map<Long, JournalEntry> everyEntry = entries.findByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(JournalEntry::getId, Function.identity()));
+        Map<Long, List<JournalEntry>> childrenByParent = everyEntry.values().stream()
+                .filter(x -> LedgerService.isExpense(x) && x.getSourceId() != null)
+                .collect(Collectors.groupingBy(JournalEntry::getSourceId));
+        Set<Long> childIds = childrenByParent.values().stream().flatMap(List::stream).map(JournalEntry::getId)
+                .collect(Collectors.toSet());
+        Map<Long, List<JournalLine>> childLines = lines.findByJournalEntryIdIn(childIds).stream()
+                .collect(Collectors.groupingBy(JournalLine::getJournalEntryId));
+        Set<Long> withRefunds = new java.util.HashSet<>(ids);
+        withRefunds.addAll(childIds);
+        Map<Long, List<RefundView>> refundsByExpense = refundsOf(withRefunds, accountById, evidence);
+        Function<Long, List<LinkedView>> linkedOf = parentId -> childrenByParent.getOrDefault(parentId, List.of()).stream()
+                .sorted(Comparator.comparing(JournalEntry::getEntryDate).thenComparing(JournalEntry::getId))
+                .map(child -> {
+                    JournalLine expenseLine = childLines.getOrDefault(child.getId(), List.of()).stream()
+                            .filter(l -> l.getDebit().signum() > 0).findFirst().orElse(null);
+                    BigDecimal amount = expenseLine == null ? child.getAmount() : expenseLine.getDebit();
+                    List<RefundView> back = refundsByExpense.getOrDefault(child.getId(), List.of());
+                    Category category = expenseLine == null ? null : books.category(expenseLine.getCategoryId());
+                    return new LinkedView(child.getId(), child.getEntryNo(), child.getEntryDate(), child.getNarration(),
+                            category == null ? null : category.getId(), category == null ? "Uncategorised" : category.getName(),
+                            amount, amount.subtract(refunded(back)).max(Money.ZERO), status(amount, back));
+                }).toList();
 
         return linesByEntry.entrySet().stream()
                 .flatMap(e -> {
@@ -114,6 +160,9 @@ public class ExpenseService {
                     boolean editable = LedgerService.isExpense(entry) && simple && refunds.isEmpty();
                     boolean viaJournal = LedgerService.isManual(entry);
                     String lockReason = editable || viaJournal ? null : lockReason(entry);
+                    JournalEntry parent = LedgerService.isExpense(entry) && entry.getSourceId() != null
+                            ? everyEntry.get(entry.getSourceId()) : null;
+                    List<LinkedView> linked = LedgerService.isExpense(entry) ? linkedOf.apply(entry.getId()) : List.of();
                     return entryLines.stream()
                             .filter(l -> l.getDebit().signum() > 0)
                             .filter(l -> accountById.get(l.getAccountId()).getAccountClass() == AccountClass.EXPENSE)
@@ -132,7 +181,12 @@ public class ExpenseService {
                                         LedgerService.isExpense(entry) && simple
                                                 && l.getDebit().subtract(refunded(refunds)).signum() > 0
                                                 && refunds.stream().noneMatch(RefundView::reversal),
-                                        refunds);
+                                        refunds,
+                                        parent == null ? null : parent.getId(), parent == null ? null : parent.getEntryNo(),
+                                        parent == null ? null : parent.getNarration(), linked,
+                                        LedgerService.isExpense(entry) && entry.getSourceId() == null
+                                                && refunds.stream().noneMatch(RefundView::reversal),
+                                        editable && linked.isEmpty());
                             });
                 })
                 .sorted(Comparator.comparing(ExpenseRow::date).thenComparing(ExpenseRow::entryId).reversed())
@@ -148,15 +202,89 @@ public class ExpenseService {
 
     @Transactional
     public EntryView update(Long entryId, ExpenseRequest request) {
-        requireExpense(entryId);
-        return ledger.toViews(List.of(ledger.repost(entryId, draft(request),
+        JournalEntry entry = requireExpense(entryId);
+        // a linked charge stays linked to the expense it came with
+        return ledger.toViews(List.of(ledger.repost(entryId, draft(request).source(LedgerService.SOURCE_EXPENSE, entry.getSourceId()),
                 ConcurrentUpdateException.required(request.version(), "journal_entries", entryId)))).getFirst();
     }
 
     @Transactional
     public void delete(Long entryId) {
-        requireExpense(entryId);
+        JournalEntry entry = requireExpense(entryId);
+        List<JournalEntry> linked = linkedTo(entryId);
+        if (!linked.isEmpty()) {
+            throw new BusinessException(entry.getEntryNo() + " has " + linked.size() + " linked charge" + (linked.size() == 1 ? "" : "s")
+                    + " (" + linked.stream().map(JournalEntry::getEntryNo).collect(Collectors.joining(", ")) + "). Delete "
+                    + (linked.size() == 1 ? "it" : "them") + " first");
+        }
         ledger.delete(entryId);
+    }
+
+    // ================================================================== linked charges
+
+    /**
+     * Records a charge that came with an expense (a transaction fee, GST, a tip, delivery ...): an expense of its own, in
+     * its own category, with the expense as its source so the two are shown together. A charge has no charges of its own.
+     */
+    @Transactional
+    public EntryView addLinked(Long parentId, ExpenseRequest request) {
+        JournalEntry parent = entries.findByIdAndTenantId(parentId, UserContext.tenantId())
+                .orElseThrow(() -> new NotFoundException("Expense", parentId));
+        if (!LedgerService.isExpense(parent)) {
+            throw new BusinessException(parent.getEntryNo() + " was not posted from Expenses, so a charge cannot be linked to it");
+        }
+        if (parent.getSourceId() != null) {
+            throw new BusinessException(parent.getEntryNo() + " is itself a charge linked to "
+                    + entries.findByIdAndTenantId(parent.getSourceId(), UserContext.tenantId()).map(JournalEntry::getEntryNo).orElse("another expense")
+                    + ". Link the new charge to that expense instead");
+        }
+        if (refundsOf(Set.of(parentId), Map.of(), Map.of()).getOrDefault(parentId, List.of()).stream().anyMatch(RefundView::reversal)) {
+            throw new BusinessException(parent.getEntryNo() + " is reversed, so nothing more can be charged with it");
+        }
+        return ledger.toViews(List.of(ledger.post(draft(request).source(LedgerService.SOURCE_EXPENSE, parentId)))).getFirst();
+    }
+
+    private List<JournalEntry> linkedTo(Long parentId) {
+        return entries.findByTenantId(UserContext.tenantId()).stream()
+                .filter(x -> LedgerService.isExpense(x) && parentId.equals(x.getSourceId()))
+                .toList();
+    }
+
+    // ================================================================== paid for someone
+
+    /**
+     * Turns an expense into money paid for someone (they will pay it back): the expense entry goes and a Paid for item
+     * takes its place, with the same date, amount, account and evidence. Only a plain expense can be turned: one without
+     * refunds, a reversal or linked charges.
+     */
+    @Transactional
+    public com.aditya.personalbudget.dto.ClaimDtos.ClaimView convertToPaidFor(Long entryId, ConvertToPaidForRequest request) {
+        JournalEntry entry = requireExpense(entryId);
+        List<JournalLine> entryLines = lines.findByJournalEntryId(entryId);
+        if (entryLines.size() != 2) {
+            throw new BusinessException(entry.getEntryNo() + " is not a single expense; correct it in the journal");
+        }
+        if (!linkedTo(entryId).isEmpty()) {
+            throw new BusinessException(entry.getEntryNo() + " has linked charges. Delete them, or turn them into Paid for one by one, first");
+        }
+        JournalLine expenseLine = entryLines.stream().filter(l -> l.getDebit().signum() > 0).findFirst().orElseThrow();
+        JournalLine payer = entryLines.stream().filter(l -> l.getCredit().signum() > 0).findFirst().orElseThrow();
+        if (request.dueDate() != null && request.dueDate().isBefore(entry.getEntryDate())) {
+            throw new BusinessException("Due date cannot be before the date it was paid");
+        }
+        String narration = blankToNull(request.narration()) != null ? request.narration().trim() : entry.getNarration();
+        String notes = blankToNull(request.notes()) != null ? request.notes().trim() : expenseLine.getMemo();
+        var claim = claims.create(new com.aditya.personalbudget.dto.ClaimDtos.ClaimRequest(
+                com.aditya.personalbudget.domain.type.ClaimKind.PAID_FOR, request.party().trim(), narration,
+                expenseLine.getDebit(), entry.getEntryDate(), request.dueDate(), null, null, payer.getAccountId(),
+                request.receivableAccountId(), entry.getReference(), notes, null, null, false, null));
+        // the bill or screenshot belongs to the item now
+        for (var a : attachments.findByJournalEntryId(entryId)) {
+            a.setJournalEntryId(claim.journalEntryId());
+            attachments.save(a);
+        }
+        ledger.delete(entryId);
+        return claims.get(claim.id());
     }
 
     // ================================================================== refunds and reversal
@@ -306,7 +434,7 @@ public class ExpenseService {
                 .source(LedgerService.SOURCE_EXPENSE, null);
     }
 
-    private void requireExpense(Long entryId) {
+    private JournalEntry requireExpense(Long entryId) {
         JournalEntry entry = entries.findByIdAndTenantId(entryId, UserContext.tenantId())
                 .orElseThrow(() -> new NotFoundException("Expense", entryId));
         if (!LedgerService.isExpense(entry)) {
@@ -315,6 +443,7 @@ public class ExpenseService {
         if (!refundsOf(Set.of(entryId), Map.of(), Map.of()).isEmpty()) {
             throw new BusinessException(entry.getEntryNo() + " has a refund or reversal. Undo that first");
         }
+        return entry;
     }
 
     private String lockReason(JournalEntry entry) {

@@ -3,8 +3,8 @@
  * instead of in a popup. A compact strip: debit and credit postings as pills, then one line of
  * facts (entry, date, party, who posted it) with the actions that apply.
  *
- * Only manual journal vouchers can be edited or deleted here. Entries posted automatically by a
- * feature (an expense, a transfer, a chit payment, money lent ...) simply offer no edit buttons;
+ * Only manual journal vouchers and transfers can be edited or deleted here (a transfer with its own editor). Entries
+ * posted automatically by a feature (an expense, a chit payment, money lent ...) simply offer no edit buttons;
  * they link to the screen that manages them, and offer "Reverse" where a correcting entry is the fix.
  * An entry of money lent or borrowed (the loan, a repayment, a month of interest) shows only what it is within
  * that item and a link to the item in Expenses, where it is managed.
@@ -15,13 +15,75 @@ import { esc, toast, confirmDialog, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
 import { chitTrailChips, chitTrailHtml } from '../core/chit-trail.js';
-import { openJournalEditor } from './transaction-forms.js';
+import { openJournalEditor, openTransferEditor, isEditableTransfer, openIncomeEditor, isEditableIncome } from './transaction-forms.js';
 import { claimEntryRole, claimFiguresHtml, claimBadge, KIND_META } from './claim-panel.js';
 
 const MANAGE_LABEL = { expenses: 'Open Expenses', chits: 'Open Chits', 'host-chits': 'Open Host a Chit', 'host-chits/accounts': 'Open Chit accounts', accounts: 'Open Accounts',
     construction: 'Open Construction', 'expenses/emi': 'Open EMIs' };
-/** Where an entry is managed: a construction entry opens its own project. */
+
+/**
+ * The route that opens this very entry where it is managed, not just the page: the expense (or the expense a refund
+ * belongs to) in Expenses, the plan of an EMI entry, the chit and its installment or payout part, the hosted chit, the
+ * account an opening balance is on, the construction project. Each page reads the id it is given and shows the entry
+ * expanded and highlighted.
+ */
+export function entryRoute(e) {
+    const line = test => e.lines?.find(test);
+    switch (e.manageAt) {
+        case 'expenses':
+            if (e.claimId) return `expenses/claim/${e.claimId}`;
+            return `expenses/entry/${e.sourceType === 'EXPENSE_REFUND' && e.sourceId ? e.sourceId : e.id}`;
+        case 'expenses/emi': return `expenses/emi-entry/${e.id}`;
+        case 'chits': {
+            const chitId = line(l => l.chitId)?.chitId;
+            return chitId ? `chits/${chitId}/entry/${e.id}` : 'chits';
+        }
+        case 'host-chits': {
+            const hosted = line(l => l.hostedChitId)?.hostedChitId;
+            return hosted ? `host-chits/${hosted}` : 'host-chits';
+        }
+        case 'accounts': {
+            const account = line(l => l.accountClass === 'ASSET' || l.accountClass === 'LIABILITY');
+            return account ? `accounts/${account.accountId}/entry/${e.id}` : 'accounts';
+        }
+        case 'construction': return e.construction?.projectId ? `construction/${e.construction.projectId}` : 'construction';
+        case 'host-chits/accounts': return e.manageAt;
+        default:
+            // managed nowhere else: an income from the quick entry opens on Income, the rest in the Day book
+            return e.voucherType === 'INCOME' && e.sourceType === 'QUICK' ? `income/entry/${e.id}` : `transactions/entry/${e.id}`;
+    }
+}
+
+/** A link to an entry from anywhere (a report, a list, a search): #/entry/<id> opens it where it is managed. */
+export const entryHref = id => `#/entry/${id}`;
+/** The page an entry is managed on (the button is not shown there): a construction entry's own project. */
 const manageTarget = e => e.manageAt === 'construction' && e.construction?.projectId ? `construction/${e.construction.projectId}` : e.manageAt;
+
+/**
+ * Brings an entry's row into view on a page that was opened for it: waits for the row to be drawn (lists load in
+ * steps), scrolls it to the middle, expands it and highlights it for a moment. Resolves false when the row never shows
+ * (the entry is outside what the page lists).
+ */
+export function focusEntryRow(root, entryId, { onChanged, expand = true, timeout = 5000 } = {}) {
+    return new Promise(resolve => {
+        const find = () => root.querySelector(`tr[data-entry="${entryId}"]`);
+        const go = tr => {
+            tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            tr.classList.add('flash');
+            setTimeout(() => tr.classList.remove('flash'), 2600);
+            if (expand && !tr.classList.contains('expanded')) toggleEntryRow(tr, null, { onChanged });
+            resolve(true);
+        };
+        const now = find();
+        if (now) { go(now); return; }
+        const watch = new MutationObserver(() => {
+            const tr = find();
+            if (tr) { watch.disconnect(); clearTimeout(timer); go(tr); }
+        });
+        watch.observe(root, { childList: true, subtree: true });
+        const timer = setTimeout(() => { watch.disconnect(); resolve(false); }, timeout);
+    });
+}
 
 /**
  * Toggles the detail row under `row`.
@@ -54,6 +116,12 @@ export async function toggleEntryRow(row, entry, { onChanged } = {}) {
         const action = btn.dataset.entryAction;
         try {
             if (action === 'edit') openJournalEditor({ entry: data, onSaved: onChanged });
+            if (action === 'edit-transfer') openTransferEditor({ entry: data, onSaved: onChanged });
+            if (action === 'delete-transfer' && await confirmDialog(`Delete transfer ${data.entryNo} of ${money(data.amount)}? Both account balances are recalculated.`)) {
+                await api.del(`/transactions/${data.id}/transfer`);
+                toast(`${data.entryNo} deleted`);
+                onChanged?.();
+            }
             if (action === 'copy') openJournalEditor({ entry: data, copy: true, onSaved: onChanged });
             if (action === 'close') toggleEntryRow(row, data);
             if (action === 'more') {
@@ -62,7 +130,13 @@ export async function toggleEntryRow(row, entry, { onChanged } = {}) {
                 btn.classList.toggle('active', !more.hidden);
                 btn.querySelector('span').textContent = more.hidden ? 'More' : 'Less';
             }
-            if (action === 'manage') location.hash = `#/${manageTarget(data)}`;
+            if (action === 'manage') location.hash = `#/${entryRoute(data)}`;
+            if (action === 'edit-income') openIncomeEditor({ entry: data, onSaved: onChanged });
+            if (action === 'delete-income' && await confirmDialog(`Delete income ${data.entryNo} of ${money(data.amount)}? The account balance is recalculated.`)) {
+                await api.del(`/transactions/${data.id}/income`);
+                toast(`${data.entryNo} deleted`);
+                onChanged?.();
+            }
             if (action === 'delete' && await confirmDialog(`Delete ${data.entryNo}? Account balances will be recalculated.`)) {
                 await api.del(`/transactions/${data.id}`);
                 toast(`${data.entryNo} deleted`);
@@ -136,6 +210,8 @@ function balancesHtml(lines) {
 
 function detailHtml(e) {
     const manageJournals = can('MANAGE_JOURNALS');
+    const transfer = isEditableTransfer(e) && can('POST_TRANSACTIONS');
+    const income = isEditableIncome(e) && can('POST_TRANSACTIONS');
     const pill = (l, side) => `
         <span class="ed-pill ${side}" ${l.memo ? `title="${esc(l.memo)}"` : ''}>
             <small>${side === 'dr' ? 'Dr' : 'Cr'}</small><b class="ellipsis">${esc(l.accountName)}</b>
@@ -167,6 +243,10 @@ function detailHtml(e) {
             ${manageJournals && e.editable ? `<button class="btn sm" data-entry-action="edit">${icon('edit')}Edit</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon" data-entry-action="copy" title="Duplicate">${icon('copy')}</button>` : ''}
             ${manageJournals && e.editable ? `<button class="btn sm ghost icon danger" data-entry-action="delete" title="Delete">${icon('trash')}</button>` : ''}
+            ${transfer ? `<button class="btn sm" data-entry-action="edit-transfer" title="Change the accounts, amount, date or details">${icon('edit')}Edit</button>
+                <button class="btn sm ghost icon danger" data-entry-action="delete-transfer" title="Delete this transfer">${icon('trash')}</button>` : ''}
+            ${income ? `<button class="btn sm" data-entry-action="edit-income" title="Change the source, account, amount, date or details">${icon('edit')}Edit</button>
+                <button class="btn sm ghost icon danger" data-entry-action="delete-income" title="Delete this income">${icon('trash')}</button>` : ''}
             ${e.manageAt && !e.claimId && !location.hash.startsWith(`#/${manageTarget(e)}`) ? `<button class="btn sm" data-entry-action="manage">${icon('link')}${e.construction?.projectId && e.manageAt === 'construction' ? `Open ${esc(e.construction.project)}` : MANAGE_LABEL[e.manageAt] || 'Open'}</button>` : ''}
             ${e.reversible && can('POST_TRANSACTIONS') ? `<button class="btn sm" data-entry-action="reverse">${icon('undo')}Reverse</button>` : ''}
             <button class="btn sm ghost icon" data-entry-action="close" title="Close">${icon('x')}</button>

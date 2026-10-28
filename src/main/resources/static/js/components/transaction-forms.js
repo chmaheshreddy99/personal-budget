@@ -1,6 +1,8 @@
 /**
  * Dialogs for posting money movements, shared by every page:
  *  - openQuickEntry(): expense / income / transfer (plus lend, borrow, card bill shortcuts)
+ *  - openTransferEditor(): edit or delete a transfer between two accounts
+ *  - openIncomeEditor(): edit or delete an income
  *  - openJournalEditor(): multi-line double-entry journal (create or edit)
  *  - openEntryDetail(): read-only view of a posted entry with edit / delete
  */
@@ -149,6 +151,229 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
     bindForm();
 }
 
+// ===================================================================== transfer editor
+
+/** A transfer from the quick entry, one account to another, not reversed: it is edited (or deleted) as a transfer. */
+export const isEditableTransfer = e => e?.sourceType === 'QUICK' && e.voucherType === 'TRANSFER' && e.lines?.length === 2 && !e.reversedBy;
+
+/** What a line does to an account's balance as shown (assets go up with a debit, cards and loans with a credit). */
+const effect = (account, debit, credit) => (account?.accountClass === 'LIABILITY' ? 1 : -1) * (Number(credit) - Number(debit));
+
+/**
+ * Edits a transfer: the two accounts side by side (swap them with one click), each with its balance now and after the
+ * change, the amount and date, and the details; a strip says what changes. Keeps the entry number and its evidence.
+ */
+export async function openTransferEditor({ entry, onSaved } = {}) {
+    const saveKey = newRequestKey();
+    const accounts = await loadAccounts(false, { all: true });
+    const byId = new Map(accounts.map(a => [a.id, a]));
+    const toLine = entry.lines.find(l => Number(l.debit) > 0);
+    const fromLine = entry.lines.find(l => Number(l.credit) > 0);
+    const original = { from: fromLine.accountId, to: toLine.accountId, amount: Number(entry.amount), date: entry.entryDate,
+        narration: entry.narration || '', party: entry.party || '', reference: entry.reference || '' };
+    // each balance without this transfer, so "after" is what the edit makes it
+    const without = id => Number(byId.get(id)?.balance || 0) - (id === original.from ? effect(byId.get(id), 0, original.amount) : 0)
+        - (id === original.to ? effect(byId.get(id), original.amount, 0) : 0);
+    const pickable = a => isMoneyAccount(a) && (a.active || a.id === original.from || a.id === original.to);
+    const side = (key, label, selected) => `
+        <div class="tf-side" data-side="${key}">
+            <small>${label}</small>
+            <select name="${key}AccountId" required>${accountOptions(accounts, pickable, selected)}</select>
+            <div class="tf-bal" data-bal="${key}"></div>
+        </div>`;
+
+    const modal = openModal({
+        title: `Edit transfer ${entry.entryNo}`, iconName: 'transfer', size: 'lg',
+        body: `
+        <form class="tf-form" data-transfer-form>
+            <div class="tf-accounts">
+                ${side('from', 'From', original.from)}
+                <button type="button" class="tf-swap" data-swap title="Swap the accounts">${icon('transfer')}</button>
+                ${side('to', 'To', original.to)}
+            </div>
+            <div class="form-grid three tf-money">
+                <label class="field tf-amount"><span>Amount *</span><input name="amount" type="number" step="any" min="0.01" value="${original.amount}" required data-plain></label>
+                ${field({ label: 'Date', name: 'entryDate', type: 'date', value: original.date, required: true })}
+                ${field({ label: 'Reference', name: 'reference', value: original.reference, placeholder: 'UPI / cheque ref' })}
+                ${field({ label: 'Description', name: 'narration', value: original.narration, span: 'span-2', placeholder: 'Empty: "From to To"' })}
+                ${field({ label: 'Party', name: 'party', value: original.party })}
+            </div>
+            <div class="tf-changes" data-changes></div>
+            <div data-ev-entry="${entry.id}" data-ev-count="${entry.attachmentCount || 0}"></div>
+        </form>`,
+        actions: [
+            {
+                label: 'Delete', kind: 'danger', iconName: 'trash', left: true,
+                onClick: async () => {
+                    if (!await confirmDialog(`Delete transfer ${entry.entryNo} of ${money(entry.amount)}? Both account balances are recalculated.`)) return true;
+                    await api.del(`/transactions/${entry.id}/transfer`);
+                    invalidateAccounts();
+                    toast(`${entry.entryNo} deleted`);
+                    onSaved?.(null);
+                },
+            },
+            { label: 'Cancel' },
+            {
+                label: 'Save changes', kind: 'primary', iconName: 'check',
+                onClick: async m => {
+                    const form = m.el.querySelector('[data-transfer-form]');
+                    if (!form.reportValidity()) return true;
+                    const d = readForm(form);
+                    if (d.fromAccountId === d.toAccountId) { toast('Pick two different accounts', 'error'); return true; }
+                    const saved = await api.put(`/transactions/${entry.id}/transfer`, { ...d, version: entry.version }, { key: saveKey });
+                    invalidateAccounts();
+                    toast(`${saved.entryNo} saved · ${money(saved.amount)}`);
+                    onSaved?.(saved);
+                },
+            },
+        ],
+    });
+
+    const form = modal.el.querySelector('[data-transfer-form]');
+    const draw = () => {
+        const d = readForm(form);
+        const amount = Number(d.amount || 0);
+        ['from', 'to'].forEach(key => {
+            const id = Number(d[`${key}AccountId`]);
+            const a = byId.get(id);
+            const base = without(id);
+            const after = base + (key === 'from' ? effect(a, 0, amount) : effect(a, amount, 0));
+            const now = Number(a?.balance || 0);
+            form.querySelector(`[data-bal="${key}"]`).innerHTML = a ? `
+                <span class="muted">${a.accountClass === 'LIABILITY' ? 'Owed' : 'Balance'} now</span><b class="mono">${money(now)}</b>
+                <span class="tf-arrow">→</span><b class="mono ${after < now ? 'down' : after > now ? 'up' : ''}">${money(after)}</b>` : '';
+        });
+        const same = d.fromAccountId && d.fromAccountId === d.toAccountId;
+        const name = id => byId.get(Number(id))?.name || '—';
+        const changes = [
+            Number(d.fromAccountId) !== original.from && ['From', name(original.from), name(d.fromAccountId)],
+            Number(d.toAccountId) !== original.to && ['To', name(original.to), name(d.toAccountId)],
+            amount !== original.amount && ['Amount', money(original.amount), money(amount)],
+            d.entryDate !== original.date && ['Date', date(original.date), d.entryDate ? date(d.entryDate) : '—'],
+            (d.narration || '') !== original.narration && ['Description', original.narration || '—', d.narration || 'From to To'],
+            (d.party || '') !== original.party && ['Party', original.party || '—', d.party || '—'],
+            (d.reference || '') !== original.reference && ['Reference', original.reference || '—', d.reference || '—'],
+        ].filter(Boolean);
+        form.querySelector('[data-changes]').innerHTML = same
+            ? `<span class="neg">${icon('alert')}From and To are the same account</span>` : changesHtml(changes);
+    };
+    form.addEventListener('input', draw);
+    form.addEventListener('change', draw);
+    form.querySelector('[data-swap]').addEventListener('click', () => {
+        const from = form.querySelector('[name=fromAccountId]'), to = form.querySelector('[name=toAccountId]');
+        [from.value, to.value] = [to.value, from.value];
+        [from, to].forEach(s => s.dispatchEvent(new Event('change', { bubbles: true })));   // a combo box shows the new pick
+    });
+    draw();
+}
+
+/** The strip of an editor saying what the edit changes: each field with its old value struck through and the new one. */
+function changesHtml(changes) {
+    return changes.length
+        ? `<b>${icon('edit')}Changes</b>${changes.map(([what, was, now]) => `<span class="tf-change"><small>${what}</small><s>${esc(was)}</s>${icon('chevron-right')}<b>${esc(now)}</b></span>`).join('')}`
+        : `<span class="muted">${icon('check')}No changes yet</span>`;
+}
+
+// ===================================================================== income editor
+
+/** An income from the quick entry, into one account, not reversed: it is edited (or deleted) as an income. */
+export const isEditableIncome = e => e?.sourceType === 'QUICK' && e.voucherType === 'INCOME' && e.lines?.length === 2 && !e.reversedBy;
+
+/**
+ * Edits an income: its source (the income category), the account it came into with that account's balance now and
+ * after the change, the amount and date, and who paid it; a strip says what changes. Keeps the entry number and evidence.
+ */
+export async function openIncomeEditor({ entry, onSaved } = {}) {
+    const saveKey = newRequestKey();
+    const [accounts, sources] = await Promise.all([loadAccounts(false, { all: true }), categoriesOf('INCOME')]);
+    const byId = new Map(accounts.map(a => [a.id, a]));
+    const intoLine = entry.lines.find(l => Number(l.debit) > 0);
+    const incomeLine = entry.lines.find(l => Number(l.credit) > 0);
+    const original = { into: intoLine.accountId, source: incomeLine.categoryId, amount: Number(entry.amount), date: entry.entryDate,
+        narration: entry.narration || '', party: entry.party || '', reference: entry.reference || '' };
+    const sourceName = id => sources.find(c => c.id === Number(id))?.name || incomeLine.accountName || '—';
+    const pickable = a => isMoneyAccount(a) && (a.active || a.id === original.into);
+    const modal = openModal({
+        title: `Edit income ${entry.entryNo}`, iconName: 'arrow-in', size: 'lg',
+        body: `
+        <form class="tf-form" data-income-form>
+            <div class="tf-accounts">
+                <div class="tf-side" data-side="source">
+                    <small>Source</small>
+                    <select name="categoryId" required>${categoryOptions(sources.filter(c => c.active || c.id === original.source), original.source)}</select>
+                    <div class="tf-bal muted">Income category · counts in Income</div>
+                </div>
+                <span class="tf-swap static" aria-hidden="true">${icon('chevron-right')}</span>
+                <div class="tf-side" data-side="to">
+                    <small>Received into</small>
+                    <select name="toAccountId" required>${accountOptions(accounts, pickable, original.into)}</select>
+                    <div class="tf-bal" data-bal></div>
+                </div>
+            </div>
+            <div class="form-grid three tf-money">
+                <label class="field tf-amount"><span>Amount *</span><input name="amount" type="number" step="any" min="0.01" value="${original.amount}" required data-plain></label>
+                ${field({ label: 'Date', name: 'entryDate', type: 'date', value: original.date, required: true })}
+                ${field({ label: 'Reference', name: 'reference', value: original.reference, placeholder: 'Payslip / UPI ref' })}
+                ${field({ label: 'Description', name: 'narration', value: original.narration, span: 'span-2', placeholder: 'Empty: the source' })}
+                ${field({ label: 'Paid by', name: 'party', value: original.party, placeholder: 'Employer, tenant, bank…' })}
+            </div>
+            <div class="tf-changes" data-changes></div>
+            <div data-ev-entry="${entry.id}" data-ev-count="${entry.attachmentCount || 0}"></div>
+        </form>`,
+        actions: [
+            {
+                label: 'Delete', kind: 'danger', iconName: 'trash', left: true,
+                onClick: async () => {
+                    if (!await confirmDialog(`Delete income ${entry.entryNo} of ${money(entry.amount)}? The account balance is recalculated.`)) return true;
+                    await api.del(`/transactions/${entry.id}/income`);
+                    invalidateAccounts();
+                    toast(`${entry.entryNo} deleted`);
+                    onSaved?.(null);
+                },
+            },
+            { label: 'Cancel' },
+            {
+                label: 'Save changes', kind: 'primary', iconName: 'check',
+                onClick: async m => {
+                    const form = m.el.querySelector('[data-income-form]');
+                    if (!form.reportValidity()) return true;
+                    const saved = await api.put(`/transactions/${entry.id}/income`, { ...readForm(form), version: entry.version }, { key: saveKey });
+                    invalidateAccounts();
+                    toast(`${saved.entryNo} saved · ${money(saved.amount)}`);
+                    onSaved?.(saved);
+                },
+            },
+        ],
+    });
+
+    const form = modal.el.querySelector('[data-income-form]');
+    const draw = () => {
+        const d = readForm(form);
+        const amount = Number(d.amount || 0);
+        const id = Number(d.toAccountId);
+        const a = byId.get(id);
+        const now = Number(a?.balance || 0);
+        const base = now - (id === original.into ? effect(a, original.amount, 0) : 0);   // the balance without this income
+        const after = base + effect(a, amount, 0);
+        form.querySelector('[data-bal]').innerHTML = a ? `
+            <span class="muted">${a.accountClass === 'LIABILITY' ? 'Owed' : 'Balance'} now</span><b class="mono">${money(now)}</b>
+            <span class="tf-arrow">→</span><b class="mono ${after < now ? 'down' : after > now ? 'up' : ''}">${money(after)}</b>` : '';
+        const name = x => byId.get(Number(x))?.name || '—';
+        form.querySelector('[data-changes]').innerHTML = changesHtml([
+            Number(d.categoryId) !== original.source && ['Source', sourceName(original.source), sourceName(d.categoryId)],
+            id !== original.into && ['Into', name(original.into), name(id)],
+            amount !== original.amount && ['Amount', money(original.amount), money(amount)],
+            d.entryDate !== original.date && ['Date', date(original.date), d.entryDate ? date(d.entryDate) : '—'],
+            (d.narration || '') !== original.narration && ['Description', original.narration || '—', d.narration || sourceName(d.categoryId)],
+            (d.party || '') !== original.party && ['Paid by', original.party || '—', d.party || '—'],
+            (d.reference || '') !== original.reference && ['Reference', original.reference || '—', d.reference || '—'],
+        ].filter(Boolean));
+    };
+    form.addEventListener('input', draw);
+    form.addEventListener('change', draw);
+    draw();
+}
+
 // ===================================================================== journal editor
 
 /** Create (entry = null), edit, or duplicate (copy = true) a multi-line journal. */
@@ -290,7 +515,13 @@ export async function openEntryDetail(entryId, { onChanged } = {}) {
             },
         });
         actions.push({ label: 'Edit', iconName: 'edit', onClick: () => { openJournalEditor({ entry, onSaved: onChanged }); } });
+    } else if (isEditableTransfer(entry) && can('POST_TRANSACTIONS')) {
+        actions.push({ label: 'Edit transfer', iconName: 'edit', onClick: () => { openTransferEditor({ entry, onSaved: onChanged }); } });
+    } else if (isEditableIncome(entry) && can('POST_TRANSACTIONS')) {
+        actions.push({ label: 'Edit income', iconName: 'edit', onClick: () => { openIncomeEditor({ entry, onSaved: onChanged }); } });
     }
+    // the page that manages the entry, opened on it (the expense, the chit installment, the account ...)
+    actions.push({ label: 'Open', iconName: 'link', onClick: () => { location.hash = `#/entry/${entry.id}`; } });
     actions.push({ label: 'Close', kind: 'primary' });
 
     openModal({

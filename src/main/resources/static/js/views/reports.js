@@ -21,6 +21,7 @@ import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date, or
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, sparkline } from '../core/charts.js';
 import { categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
+import { entryHref } from '../components/entry-inline.js';
 
 const REPORTS = [
     { key: 'insights', label: 'Insights', iconName: 'sparkles', note: 'What changed and what to act on' },
@@ -144,9 +145,24 @@ export async function render(container, params, isCurrent) {
         };
     });
     toolbar.querySelector('#print')?.addEventListener('click', () => printElement(content, active.label));
+    // a row of a report opens what it is about: the category's expenses or income for the period, the account, the
+    // chit, the entry (see the data-href each report puts on its rows)
+    content.addEventListener('click', e => {
+        const row = e.target.closest('[data-href]');
+        if (row && !e.target.closest('a, button, input, select')) location.hash = row.dataset.href;
+    });
 
     if (isCurrent()) await load();
 }
+
+// ===================================================================== drill-down links
+
+/** A category of a report: its expenses (or its income) over the report's period. */
+const categoryHref = (kind, id) => (id ? `#/${kind === 'INCOME' ? 'income/source' : 'expenses/category'}/${id}/${period.from}/${period.to}` : '');
+/** An account of a report: its statement; the Income and Expenses accounts open their own pages. */
+const accountHref = (id, accountClass) => (accountClass === 'INCOME' ? '#/income' : accountClass === 'EXPENSE' ? '#/expenses' : id ? `#/accounts/${id}` : '');
+/** The attributes that make a report row open a link (nothing when there is nowhere to go). */
+const linkAttrs = (href, title = '') => (href ? `data-href="${href}" title="${esc(title)}"` : '');
 
 // ===================================================================== insight helpers
 
@@ -248,7 +264,7 @@ async function categoriesReport(el) {
         <tbody>${list.map(c => {
             const ci = categoryIcon(c.name);
             const used = c.budgetUsedPercent === null ? null : Number(c.budgetUsedPercent);
-            return `<tr><td><span class="row"><span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><b class="ellipsis">${esc(c.name)}</b></span></td>
+            return `<tr ${linkAttrs(categoryHref(kind, c.categoryId), `Open the ${kind === 'EXPENSE' ? 'expenses' : 'income'} of ${c.name} in this period`)}><td><span class="row"><span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><b class="ellipsis">${esc(c.name)}</b></span></td>
                 <td class="r strong">${money(c.amount)}</td><td class="r muted">${money(c.previous)}</td>
                 <td class="r">${Number(c.change) ? `${Number(c.change) > 0 ? '+' : '−'}${moneyShort(Math.abs(Number(c.change)))} ${delta(c.changePercent, kind !== 'EXPENSE')}` : '<span class="muted">—</span>'}</td>
                 <td class="r">${percent(c.share, 0)}</td>
@@ -267,7 +283,7 @@ async function categoriesReport(el) {
                         <span class="ellipsis">${esc(it.label)}</span><b>${moneyShort(it.value)}</b></div>`).join('')}</div></div>` : emptyState('Nothing spent', 'pie') })}
         ${panel({ title: 'Biggest moves', iconName: 'trending', cls: 'p-rc-movers', bodyClass: 'scroll', sub: 'vs the previous period',
                   body: movers.length ? `<div class="list">${movers.map(c => `
-                    <div class="list-item"><span class="chip-icon sm ${Number(c.change) > 0 ? 'coral' : 'aqua'}">${icon(Number(c.change) > 0 ? 'arrow-up' : 'arrow-down')}</span>
+                    <div class="list-item" ${linkAttrs(categoryHref('EXPENSE', c.categoryId), `Open the expenses of ${c.name} in this period`)}><span class="chip-icon sm ${Number(c.change) > 0 ? 'coral' : 'aqua'}">${icon(Number(c.change) > 0 ? 'arrow-up' : 'arrow-down')}</span>
                         <div class="grow min-0"><div class="title ellipsis">${esc(c.name)}</div><div class="meta">${money(c.previous)} → ${money(c.amount)}</div></div>
                         <b class="${Number(c.change) > 0 ? 'neg' : 'pos'}">${Number(c.change) > 0 ? '+' : '−'}${moneyShort(Math.abs(Number(c.change)))}</b></div>`).join('')}</div>`
                       : emptyState('No change from the previous period', 'trending') })}
@@ -337,7 +353,7 @@ async function accountsReport(el) {
                   }).join('')}</div>` : emptyState('No balances moved', 'trending') })}`;
     el.querySelector('.p-ra-table').addEventListener('click', e => {
         const row = e.target.closest('[data-ledger]');
-        if (row) location.hash = '#/accounts';
+        if (row) location.hash = `#/accounts/${row.dataset.ledger}`;
     });
     return () => [['Account', 'Type', 'Group', 'Opening', 'In', 'Out', 'Closing', 'Change', 'Entries', 'Last activity', 'Card used %'],
         ...list.map(a => [a.name, a.typeLabel, a.bucket, a.opening, a.inflow, a.outflow, a.closing, a.change, a.entries, a.lastActivity, a.utilization])];
@@ -385,7 +401,10 @@ async function chitsReport(el) {
         series: [{ name: 'Paid in', values: r.chits.map(c => Number(c.paidIn)) },
                  { name: 'Value today', values: r.chits.map(c => Number(c.currentValue)) }],
     });
-    el.querySelector('.p-rch-table').addEventListener('click', e => { if (e.target.closest('[data-chit]')) location.hash = '#/chits'; });
+    el.querySelector('.p-rch-table').addEventListener('click', e => {
+        const row = e.target.closest('[data-chit]');
+        if (row) location.hash = `#/chits/${row.dataset.chit}`;
+    });
     return () => [['Chit', 'Status', 'Paid (period)', 'Dividends (period)', 'Paid in', 'Still to pay', 'Value today', 'Interest earned', 'Return % / yr', 'Expected gain', 'Progress %', 'Next due', 'Next amount'],
         ...r.chits.map(c => [c.name, c.status, c.paidInPeriod, c.dividendsInPeriod, c.paidIn, c.stillToPay, c.currentValue, c.interestEarned, c.annualRate, c.projectedNetGain, c.progressPercent, c.nextDueDate, c.nextDueAmount])];
 }
@@ -399,10 +418,10 @@ function statusBadgeHtml(status) {
 
 async function incomeStatement(el) {
     const r = await api.get('/reports/income-statement', { from: period.from, to: period.to });
-    const side = (title, rows, total, cls) => `
+    const side = (title, rows, total, cls, kind) => `
         <table class="grid compact">
             <thead><tr><th>${title}</th><th class="r">Amount</th><th class="r">Share</th></tr></thead>
-            <tbody>${rows.map(a => `<tr><td>${esc(a.name)} <span class="muted small">${esc(a.code || '')}</span></td>
+            <tbody>${rows.map(a => `<tr ${linkAttrs(categoryHref(kind, a.accountId), `Open ${a.name} for this period`)}><td>${esc(a.name)} <span class="muted small">${esc(a.code || '')}</span></td>
                 <td class="r">${money(a.amount)}</td><td class="r muted">${percent(Number(a.amount) / (Number(total) || 1) * 100)}</td></tr>`).join('')
                 || `<tr><td colspan="3" class="muted">No ${title.toLowerCase()} in this period</td></tr>`}</tbody>
             <tfoot><tr class="total"><td>Total ${title.toLowerCase()}</td><td class="r ${cls}">${money(total)}</td><td></td></tr></tfoot>
@@ -417,9 +436,9 @@ async function incomeStatement(el) {
             ${stat('Savings rate', percent(r.savingsRate))}
         </div>
         ${panel({ title: 'Income', iconName: 'arrow-in', cls: 'p-is-income', bodyClass: 'flush',
-                  body: `<div class="scroll" style="height:100%">${side('Income', r.income, r.totalIncome, 'pos')}</div>` })}
+                  body: `<div class="scroll" style="height:100%">${side('Income', r.income, r.totalIncome, 'pos', 'INCOME')}</div>` })}
         ${panel({ title: 'Expenses', iconName: 'arrow-out', cls: 'p-is-expense', bodyClass: 'flush',
-                  body: `<div class="scroll" style="height:100%">${side('Expenses', r.expenses, r.totalExpenses, 'neg')}</div>` })}`;
+                  body: `<div class="scroll" style="height:100%">${side('Expenses', r.expenses, r.totalExpenses, 'neg', 'EXPENSE')}</div>` })}`;
 
     return () => [['Section', 'Code', 'Category', 'Amount'],
         ...r.income.map(a => ['Income', a.code, a.name, a.amount]),
@@ -446,6 +465,7 @@ async function trialBalance(el) {
             { label: 'Credit', align: 'r', render: a => Number(a.credit) ? money(a.credit, { decimals: 2 }) : '' },
         ], r.rows, {
             compact: true,
+            rowAttrs: a => linkAttrs(accountHref(a.accountId, a.accountClass), `Open ${a.name}`),
             footer: `<tr class="total"><td colspan="3">Totals</td><td class="r">${money(r.totalDebit, { decimals: 2 })}</td>
                      <td class="r">${money(r.totalCredit, { decimals: 2 })}</td></tr>`,
         })}</div>`,
@@ -506,13 +526,13 @@ async function expenseAnalysis(el) {
                         <div class="legend-row"><i class="legend-swatch" style="background:${seriesColor(i)}"></i>
                         <span class="ellipsis">${esc(it.label)}</span><b>${moneyShort(it.value)}</b></div>`).join('')}</div></div>` })}
         ${panel({ title: 'Biggest expenses', iconName: 'flag', cls: 'p-ea-top', body: `<div class="list">${r.topTransactions.map(t => `
-                    <div class="list-item"><div class="grow ellipsis small">${esc(t.label)}</div><b class="mono">${money(t.value)}</b></div>`).join('')}</div>` })}
+                    <div class="list-item" ${linkAttrs(t.entryId ? entryHref(t.entryId) : '', 'Open this expense')}><div class="grow ellipsis small">${esc(t.label)}</div><b class="mono">${money(t.value)}</b></div>`).join('')}</div>` })}
         ${panel({ title: 'Category by month', iconName: 'list', cls: 'p-cf-table', bodyClass: 'flush',
                   sub: `Total ${money(r.total)} · ${money(r.monthlyAverage)}/month`,
                   body: `<div class="scroll" style="height:100%"><table class="grid compact">
                     <thead><tr><th>Category</th>${r.months.map(m => `<th class="r">${monthLabel(m)}</th>`).join('')}
                         <th class="r">Total</th><th class="r">Avg</th><th class="r">Share</th></tr></thead>
-                    <tbody>${r.categories.map(c => `<tr><td>${esc(c.name)}</td>${c.byMonth.map(v =>
+                    <tbody>${r.categories.map(c => `<tr ${linkAttrs(categoryHref('EXPENSE', c.accountId), `Open the expenses of ${c.name} in this period`)}><td>${esc(c.name)}</td>${c.byMonth.map(v =>
                         `<td class="r ${Number(v) ? '' : 'muted'}">${Number(v) ? money(v) : '—'}</td>`).join('')}
                         <td class="r strong">${money(c.amount)}</td><td class="r">${money(c.monthlyAverage)}</td>
                         <td class="r">${percent(c.percent)}</td></tr>`).join('')}</tbody>

@@ -124,6 +124,21 @@ public class ExpenseController {
         return expenses.reverse(entryId, request);
     }
 
+    /** A charge that came with an expense (a transaction fee, GST, a tip ...), recorded as its own expense, linked to it. */
+    @PostMapping("/expenses/{entryId}/linked")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public EntryView addLinked(@PathVariable Long entryId, @Valid @RequestBody ExpenseRequest request) {
+        return expenses.addLinked(entryId, request);
+    }
+
+    /** Turns an expense into money paid for someone, tracked until they pay it back. */
+    @PostMapping("/expenses/{entryId}/paid-for")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public com.aditya.personalbudget.dto.ClaimDtos.ClaimView convertToPaidFor(@PathVariable Long entryId,
+                                                                        @Valid @RequestBody ExpenseService.ConvertToPaidForRequest request) {
+        return expenses.convertToPaidFor(entryId, request);
+    }
+
     /** Undoes a refund or a reversal. */
     @DeleteMapping("/expenses/{entryId}/refunds/{refundEntryId}")
     @RequiresPermission(Permission.POST_TRANSACTIONS)

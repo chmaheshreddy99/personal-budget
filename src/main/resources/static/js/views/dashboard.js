@@ -91,7 +91,7 @@ export async function render(container, _params, isCurrent) {
                 <button class="qa" data-qa="transfer" title="Transfer between accounts (T)">${icon('transfer')}Transfer<span class="kbd">T</span></button>
                 <button class="qa" data-qa="lend" title="Lent or paid for someone (L)">${icon('hand')}Lend<span class="kbd">L</span></button>
                 <button class="qa" data-qa="borrow" title="Borrowed or a bill to pay (B)">${icon('card')}Owe<span class="kbd">B</span></button>
-                ${nextChit ? `<a class="qa gold" href="#/chits" title="${esc(nextChit.name)} #${nextChit.installmentsPaid + 1} due ${shortDate(nextChit.nextDueDate)}">${icon('chit')}Chit ${moneyShort(nextChit.nextDueAmount)}</a>` : ''}
+                ${nextChit ? `<a class="qa gold" href="#/chits/${nextChit.id}" title="${esc(nextChit.name)} #${nextChit.installmentsPaid + 1} due ${shortDate(nextChit.nextDueDate)}">${icon('chit')}Chit ${moneyShort(nextChit.nextDueAmount)}</a>` : ''}
                 ${can('MANAGE_JOURNALS') ? `<button class="qa" data-qa="journal" title="Journal voucher (V)">${icon('journal')}Voucher<span class="kbd">V</span></button>` : ''}
             </div>` : ''}
             <button class="btn sm" id="dash-customize" title="Choose, order and size the panels">${icon('settings')}Customize</button>
@@ -325,7 +325,7 @@ function chitsHtml(chits) {
     if (!running.length) return emptyState('No running chits', 'chit');
     return `<div class="dchit-list">${running.map(c => {
         const paid = (Number(c.paidIn) / (Number(c.totalContribution) || 1)) * 100;
-        return `<a class="dchit" href="#/chits">
+        return `<a class="dchit" href="#/chits/${c.id}">
             <div class="row"><b class="ellipsis grow">${esc(c.name)}</b><span class="small muted">${c.installmentsPaid}/${c.numberOfInstallments}</span></div>
             <i class="cr-bar"><em style="width:${paid}%"></em></i>
             <div class="row tiny"><span>paid <b>${moneyShort(c.paidIn)}</b></span><span>value <b>${moneyShort(c.currentValue)}</b></span>
@@ -339,7 +339,7 @@ function accountsHtml(tiles) {
     return `<div class="list">${tiles.map(a => {
         const t = accountTypeIcon(a.accountType);
         const util = a.utilizationPercent === null ? null : Number(a.utilizationPercent);
-        return `<a class="list-item clickable" href="#/accounts"><span class="chip-icon sm ${t.tone}">${icon(t.name)}</span>
+        return `<a class="list-item clickable" href="#/accounts/${a.accountId}"><span class="chip-icon sm ${t.tone}">${icon(t.name)}</span>
             <div class="grow min-0"><div class="title">${esc(a.name)}</div><div class="meta">${esc(a.typeLabel)}${util !== null ? ` · ${percent(util, 0)} of limit used` : ''}</div></div>
             <b class="mono ${Number(a.balance) < 0 ? 'neg' : ''}">${moneyShort(a.balance)}</b></a>`;
     }).join('')}</div>`;

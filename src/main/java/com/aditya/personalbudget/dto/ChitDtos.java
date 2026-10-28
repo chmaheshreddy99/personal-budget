@@ -57,10 +57,32 @@ public final class ChitDtos {
             @PositiveOrZero BigDecimal dividend) {
     }
 
+    /**
+     * The payout: {@code amount} is what the organizer pays in all, {@code receivedNow} what came in on
+     * {@code payoutDate} (the whole amount when empty). The rest is recorded later with {@link PayoutReceiptRequest}s.
+     */
     public record PayoutRequest(
             @NotNull LocalDate payoutDate,
             @NotNull @Positive BigDecimal amount,
-            @NotNull Long depositAccountId) {
+            @NotNull Long depositAccountId,
+            @Positive BigDecimal receivedNow) {
+
+        public PayoutRequest(LocalDate payoutDate, BigDecimal amount, Long depositAccountId) {
+            this(payoutDate, amount, depositAccountId, null);
+        }
+    }
+
+    /** A later part of a payout the organizer pays in instalments. */
+    public record PayoutReceiptRequest(
+            @NotNull LocalDate date,
+            @NotNull @Positive BigDecimal amount,
+            @NotNull Long depositAccountId,
+            @Size(max = 255) String notes) {
+    }
+
+    /** One part of the payout as it came in; {@code first} is the entry that settled the chit (undoing it undoes the payout). */
+    public record PayoutReceiptView(Long entryId, String entryNo, LocalDate date, BigDecimal amount, Long accountId,
+                                    String accountName, String notes, boolean first, int attachmentCount) {
     }
 
     /** Chit with all computed figures. */
@@ -83,6 +105,9 @@ public final class ChitDtos {
             String accountName,
             BigDecimal payoutAmount,
             LocalDate payoutDate,
+            /* of the payout: received so far and still to come from the organizer (0 once in full) */
+            BigDecimal payoutReceived,
+            BigDecimal payoutPending,
             String notes,
             String organizerUpi,
             String upiNote,
@@ -163,6 +188,8 @@ public final class ChitDtos {
             InterestStatus status) {
     }
 
-    public record ChitDetail(ChitView chit, List<InstallmentView> installments, List<InterestRow> interestSchedule) {
+    /** {@code payoutReceipts}: the payout as it came in, oldest first (one when it was paid in one go). */
+    public record ChitDetail(ChitView chit, List<InstallmentView> installments, List<InterestRow> interestSchedule,
+                             List<PayoutReceiptView> payoutReceipts) {
     }
 }

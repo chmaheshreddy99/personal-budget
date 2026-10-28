@@ -7,10 +7,12 @@ import com.aditya.personalbudget.domain.entity.JournalEntry;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.VoucherType;
 import com.aditya.personalbudget.dto.JournalDtos.EntryView;
+import com.aditya.personalbudget.dto.JournalDtos.IncomeRequest;
 import com.aditya.personalbudget.dto.JournalDtos.LineRequest;
 import com.aditya.personalbudget.dto.JournalDtos.ManualJournalRequest;
 import com.aditya.personalbudget.dto.JournalDtos.QuickKind;
 import com.aditya.personalbudget.dto.JournalDtos.QuickTransactionRequest;
+import com.aditya.personalbudget.dto.JournalDtos.TransferRequest;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
@@ -134,6 +136,88 @@ public class TransactionService {
                 .party(request.party())
                 .source(request.kind() == QuickKind.EXPENSE ? LedgerService.SOURCE_EXPENSE : LedgerService.SOURCE_QUICK, null);
         return get(ledger.post(draft).getId());
+    }
+
+    // ================================================================== transfers
+
+    /**
+     * Edits a transfer posted from the quick entry: date, amount, either account and the details, keeping its number,
+     * evidence and history. A reversed transfer cannot be edited: it and its reversal are kept together as the record.
+     */
+    @Transactional
+    public EntryView updateTransfer(Long id, TransferRequest request) {
+        JournalEntry existing = requireTransfer(id);
+        Account from = account(request.fromAccountId());
+        Account to = account(request.toAccountId());
+        require(isBalanceSheet(from) && isBalanceSheet(to), "Transfers move money between asset and liability accounts");
+        require(!from.getId().equals(to.getId()), "Pick two different accounts");
+        String narration = request.narration() == null || request.narration().isBlank()
+                ? from.getName() + " to " + to.getName() : request.narration().trim();
+        JournalDraft draft = JournalDraft.of(request.entryDate(), VoucherType.TRANSFER, narration)
+                .debit(to.getId(), request.amount())
+                .credit(from.getId(), request.amount())
+                .reference(blankToNull(request.reference()))
+                .party(blankToNull(request.party()))
+                .source(existing.getSourceType(), existing.getSourceId());
+        return get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
+    }
+
+    @Transactional
+    public void deleteTransfer(Long id) {
+        requireTransfer(id);
+        ledger.delete(id);
+    }
+
+    /** A plain two-account transfer from the quick entry, not reversed. */
+    private JournalEntry requireTransfer(Long id) {
+        return requireQuick(id, VoucherType.TRANSFER, "a transfer between your accounts");
+    }
+
+    /** A two-line entry of the given kind from the quick entry, not reversed. */
+    private JournalEntry requireQuick(Long id, VoucherType type, String what) {
+        JournalEntry entry = entries.findByIdAndTenantId(id, UserContext.tenantId())
+                .orElseThrow(() -> new NotFoundException("Journal entry", id));
+        EntryView view = ledger.toViews(List.of(entry)).getFirst();
+        boolean ok = LedgerService.SOURCE_QUICK.equals(view.sourceType()) && view.voucherType() == type && view.lines().size() == 2;
+        require(ok, entry.getEntryNo() + " is not " + what + ". "
+                + (view.lockReason() != null ? view.lockReason() : "Edit it in the journal."));
+        require(view.reversedBy() == null, entry.getEntryNo() + " is reversed by " + view.reversedBy()
+                + "; the two entries are kept together as the record");
+        return entry;
+    }
+
+    private static String blankToNull(String text) {
+        return text == null || text.isBlank() ? null : text.trim();
+    }
+
+    // ================================================================== income
+
+    /**
+     * Edits an income posted from the quick entry: date, amount, source (income category), the account it came into and
+     * the details, keeping its number, evidence and history. A reversed income cannot be edited.
+     */
+    @Transactional
+    public EntryView updateIncome(Long id, IncomeRequest request) {
+        JournalEntry existing = requireQuick(id, VoucherType.INCOME, "an income");
+        Account into = account(request.toAccountId());
+        require(isBalanceSheet(into), "Receive income into a bank, cash, wallet or receivable account");
+        Category category = categories.findByIdAndTenantId(request.categoryId(), UserContext.tenantId())
+                .orElseThrow(() -> new NotFoundException("Category", request.categoryId()));
+        require(category.getKind() == com.aditya.personalbudget.domain.type.CategoryKind.INCOME, "'" + category.getName() + "' is not an income source");
+        String narration = request.narration() == null || request.narration().isBlank() ? category.getName() : request.narration().trim();
+        JournalDraft draft = JournalDraft.of(request.entryDate(), VoucherType.INCOME, narration)
+                .debit(into.getId(), request.amount())
+                .credit(ledger.systemAccount(DefaultChartOfAccounts.INCOME).getId(), request.amount()).category(category.getId())
+                .reference(blankToNull(request.reference()))
+                .party(blankToNull(request.party()))
+                .source(existing.getSourceType(), existing.getSourceId());
+        return get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
+    }
+
+    @Transactional
+    public void deleteIncome(Long id) {
+        requireQuick(id, VoucherType.INCOME, "an income");
+        ledger.delete(id);
     }
 
     // ================================================================== manual journals

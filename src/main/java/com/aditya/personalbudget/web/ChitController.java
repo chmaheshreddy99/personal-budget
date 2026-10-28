@@ -4,6 +4,7 @@ import com.aditya.personalbudget.dto.ChitDtos.ChitDetail;
 import com.aditya.personalbudget.dto.ChitDtos.ChitRequest;
 import com.aditya.personalbudget.dto.ChitDtos.ChitView;
 import com.aditya.personalbudget.dto.ChitDtos.PayInstallmentRequest;
+import com.aditya.personalbudget.dto.ChitDtos.PayoutReceiptRequest;
 import com.aditya.personalbudget.dto.ChitDtos.PayoutRequest;
 import com.aditya.personalbudget.security.Permission;
 import com.aditya.personalbudget.security.RequiresPermission;
@@ -79,6 +80,19 @@ public class ChitController {
     @RequiresPermission(Permission.MANAGE_CHITS)
     public ChitDetail payout(@PathVariable Long id, @Valid @RequestBody PayoutRequest request) {
         return chits.payout(id, request);
+    }
+
+    /** A later part of a payout the organizer pays in instalments. */
+    @PostMapping("/{id}/payout/receipts")
+    @RequiresPermission(Permission.MANAGE_CHITS)
+    public ChitDetail receivePayoutPart(@PathVariable Long id, @Valid @RequestBody PayoutReceiptRequest request) {
+        return chits.receivePayoutPart(id, request);
+    }
+
+    @PostMapping("/{id}/payout/receipts/{entryId}/undo")
+    @RequiresPermission(Permission.MANAGE_CHITS)
+    public ChitDetail undoPayoutPart(@PathVariable Long id, @PathVariable Long entryId) {
+        return chits.undoPayoutPart(id, entryId);
     }
 
     @PostMapping("/{id}/close")

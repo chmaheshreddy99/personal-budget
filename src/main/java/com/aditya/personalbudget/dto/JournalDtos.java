@@ -63,6 +63,30 @@ public final class JournalDtos {
             Long version) {
     }
 
+    /** An edit of a transfer between two of your accounts: Dr {@code toAccountId}, Cr {@code fromAccountId}. */
+    public record TransferRequest(
+            @NotNull LocalDate entryDate,
+            @NotNull @Positive BigDecimal amount,
+            @NotNull Long fromAccountId,
+            @NotNull Long toAccountId,
+            @Size(max = 255) String narration,
+            @Size(max = 60) String reference,
+            @Size(max = 100) String party,
+            Long version) {
+    }
+
+    /** An edit of an income from the quick entry: Dr {@code toAccountId}, Cr Income with the {@code categoryId} source. */
+    public record IncomeRequest(
+            @NotNull LocalDate entryDate,
+            @NotNull @Positive BigDecimal amount,
+            @NotNull Long categoryId,
+            @NotNull Long toAccountId,
+            @Size(max = 255) String narration,
+            @Size(max = 60) String reference,
+            @Size(max = 100) String party,
+            Long version) {
+    }
+
     /** A manual (multi-line) journal voucher. */
     public record ManualJournalRequest(
             @NotNull LocalDate entryDate,

@@ -312,6 +312,12 @@ public class LedgerService {
                             "expenses", false, null, null);
             case SOURCE_REVERSAL ->
                     new Lock("Reversal entry. It cannot be changed.", null, false, null, numbers.get(e.getSourceId()));
+            case SOURCE_QUICK -> e.getVoucherType() == VoucherType.TRANSFER || e.getVoucherType() == VoucherType.INCOME
+                    ? new Lock(reversedBy == null ? (e.getVoucherType() == VoucherType.TRANSFER ? "A transfer" : "An income")
+                            + ". Edit it from its row, or reverse it." : "Reversed by " + reversedBy + ".",
+                            null, reversedBy == null, reversedBy, null)
+                    : new Lock(reversedBy == null ? "Posted automatically. Reverse it to correct the books." : "Reversed by " + reversedBy + ".",
+                            null, reversedBy == null, reversedBy, null);
             default -> new Lock(reversedBy == null
                     ? "Posted automatically. Reverse it to correct the books."
                     : "Reversed by " + reversedBy + ".", null, reversedBy == null, reversedBy, null);

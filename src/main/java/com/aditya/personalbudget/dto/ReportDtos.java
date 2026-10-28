@@ -93,7 +93,11 @@ public final class ReportDtos {
 
     public record ExpenseAnalysis(LocalDate from, LocalDate to, List<String> months, BigDecimal total,
                                   BigDecimal monthlyAverage, List<CategoryShare> categories,
-                                  List<ValuePoint> topTransactions) {
+                                  List<TopExpense> topTransactions) {
+    }
+
+    /** One of the largest expenses of a period, with the entry it is on (to open it). */
+    public record TopExpense(Long entryId, String label, BigDecimal value) {
     }
 
     // ------------------------------------------------------------------ cash flow
