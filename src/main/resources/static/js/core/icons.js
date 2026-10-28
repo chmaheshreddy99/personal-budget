@@ -137,7 +137,7 @@ const PATHS = {
 export function categoryIcon(name = '') {
     const rules = [
         // the specific ones first: "Food Delivery" is not groceries, "Commission & Brokerage" is not a chit
-        [/chit/i, 'chit', 'gold'], [/milk|dairy/i, 'milk', 'aqua'], [/maid|household help|cook|driver/i, 'users', 'violet'],
+        [/chit/i, 'chit', 'gold'], [/\btips?\b|gratuity/i, 'heart', 'coral'], [/milk|dairy/i, 'milk', 'aqua'], [/maid|household help|cook|driver/i, 'users', 'violet'],
         [/gym|fitness|yoga|sport/i, 'dumbbell', 'coral'], [/gadget|electronic|laptop|computer/i, 'monitor', 'violet'],
         [/vegetable|fruit/i, 'leaf', 'aqua'], [/agricult|farm|crop/i, 'leaf', 'gold'], [/food deliver|swiggy|zomato|takeaway/i, 'utensils', 'coral'],
         [/snack|beverage|tea|coffee|bakery/i, 'utensils', 'gold'], [/subscription|ott/i, 'repeat', 'violet'],

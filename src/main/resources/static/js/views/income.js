@@ -19,6 +19,7 @@ import { money, moneyShort, percent, date, shortDate, isoDate, monthLabel } from
 import { barChart, donutChart, foldOthers, seriesColor, legend } from '../core/charts.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
+import { showPageRoute, routeHash, fromAddress } from '../core/route.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { exportButton, bindExport } from '../core/export.js';
 
@@ -62,7 +63,16 @@ export async function render(container, params, isCurrent) {
         Object.assign(view, { sourceId: Number(params[1]), q: '', showQuiet: true });
         if (isDate(params[2]) && isDate(params[3])) Object.assign(view, { period: 'custom', from: params[2], to: params[3] });
     }
-    if (params.length) history.replaceState(null, '', '#/income');
+    // the address: #/income?period=…(&from=…&to=…)&source=…&q=…
+    const routed = fromAddress(params);
+    const query = params.query;
+    if (!focusEntry && params[0] !== 'source' && query?.toString()) {
+        const p = query.get('period');
+        view.period = PERIODS[p] ? p : 'month';
+        if (view.period === 'custom' && isDate(query.get('from')) && isDate(query.get('to'))) { view.from = query.get('from'); view.to = query.get('to'); }
+        view.sourceId = /^\d+$/.test(query.get('source') || '') ? Number(query.get('source')) : null;
+        view.q = query.get('q') || '';
+    }
     const today = new Date(isoDate() + 'T00:00:00');
     let [fromD, toD] = PERIODS[view.period].range(today);
     const from = isoDate(fromD), to = isoDate(toD);
@@ -277,6 +287,8 @@ export async function render(container, params, isCurrent) {
         }
         return false;
     });
+    showPageRoute('income', routeHash('income', { period: view.period === 'month' ? '' : view.period, from: view.period === 'custom' ? view.from : '',
+        to: view.period === 'custom' ? view.to : '', source: view.sourceId, q: view.q }), `${view.period}|${view.from}|${view.to}|${view.sourceId}`, { routed });
     if (focusEntry) focusEntryRow(container.querySelector('#in-list'), focusEntry, { onChanged: reload });
 }
 
@@ -292,24 +304,30 @@ function chitGainsCard(chits, rows, from, to) {
     const running = chits.filter(c => c.payoutAmount === null && (c.status === 'ACTIVE' || c.status === 'PRIZED'));
     const realised = done.reduce((s, c) => s + Number(c.realizedGain || 0), 0);
     const expected = running.reduce((s, c) => s + Number(c.projectedNetGain || 0), 0);
+    // a running chit: how far through its installments; a paid-out one is done
     const line = c => {
         const paidOut = c.payoutAmount !== null;
         const gain = paidOut ? Number(c.realizedGain) : Number(c.projectedNetGain);
         const base = Number(c.totalContribution) || 1;
-        return `<a class="cg-row" href="#/chits/${c.id}" title="${esc(c.name)}">
-            <span class="ellipsis"><b>${esc(c.name)}</b><small>${paidOut ? `paid ${moneyShort(c.totalContribution)} · got ${moneyShort(c.payoutAmount)}` : `${c.installmentsPaid}/${c.numberOfInstallments} paid · dividends ${moneyShort(c.dividendsEarned)}`}</small></span>
-            <span class="r"><b class="${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : '−'}${moneyShort(Math.abs(gain))}</b><small>${paidOut ? 'realised' : 'expected'} · ${percent((gain / base) * 100, 1)}</small></span></a>`;
+        const progress = paidOut ? 100 : Math.min(100, (c.installmentsPaid / (c.numberOfInstallments || 1)) * 100);
+        return `<a class="cg-row ${paidOut ? 'done' : ''}" href="#/chits/${c.id}" title="${esc(c.name)} · open the chit">
+            <span class="chip-icon xs ${paidOut ? 'aqua' : 'gold'}">${icon(paidOut ? 'check-circle' : 'chit')}</span>
+            <span class="cg-main"><b class="ellipsis">${esc(c.name)}</b>
+                <small class="ellipsis">${paidOut ? `paid ${moneyShort(c.totalContribution)} · got ${moneyShort(c.payoutAmount)}` : `${c.installmentsPaid}/${c.numberOfInstallments} paid · dividends ${moneyShort(c.dividendsEarned)}`}</small>
+                <i class="cg-bar"><em style="width:${progress}%"></em></i></span>
+            <span class="r"><b class="${gain >= 0 ? 'pos' : 'neg'}">${gain >= 0 ? '+' : '−'}${moneyShort(Math.abs(gain))}</b>
+                <small><span class="cg-tag ${paidOut ? 'realised' : 'expected'}">${paidOut ? 'realised' : 'expected'}</span>${percent((gain / base) * 100, 1)}</small></span></a>`;
     };
     return `
-    <section class="chit-gains">
-        <div class="cg-head">${icon('chit')}<b>Chit gains</b><span class="spacer"></span><span class="cg-pill">income</span></div>
+    <section class="side-card chit-gains">
+        <div class="side-head">${icon('chit')}<b>Chit gains</b><span class="spacer"></span><span class="cg-pill" title="Booked to Income as passive income">passive income</span></div>
         <div class="cg-figs">
-            <div><span>Booked, 12 months</span><b>${money(Math.round(booked))}</b><small>${moneyShort(bookedPeriod)} in this period</small></div>
-            <div><span>Realised on payouts</span><b>${money(Math.round(realised))}</b><small>${done.length} chit${done.length === 1 ? '' : 's'} paid out</small></div>
-            <div><span>Still to come</span><b>${money(Math.round(expected))}</b><small>${running.length} running</small></div>
+            <div class="cg-fig booked"><span>Booked · 12 mo</span><b>${moneyShort(Math.round(booked))}</b><small>${moneyShort(bookedPeriod)} this period</small></div>
+            <div class="cg-fig realised"><span>Realised</span><b>${moneyShort(Math.round(realised))}</b><small>${done.length} paid out</small></div>
+            <div class="cg-fig expected"><span>Still to come</span><b>${moneyShort(Math.round(expected))}</b><small>${running.length} running</small></div>
         </div>
-        <div class="cg-rows">${[...running, ...done].map(line).join('')}</div>
-        <p class="cg-note">${icon('info')} Paid in 5,00,000 and received 5,70,000? The 70,000 is chit gain income, booked with the payout; dividends are booked with each installment.</p>
+        ${running.length + done.length ? `<div class="cg-rows">${[...running, ...done].map(line).join('')}</div>` : ''}
+        <p class="cg-note">${icon('info')}<span>Paid in 5,00,000 and received 5,70,000? The 70,000 is chit gain income, booked with the payout; dividends are booked with each installment.</span></p>
     </section>`;
 }
 

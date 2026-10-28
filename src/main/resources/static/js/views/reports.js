@@ -22,6 +22,7 @@ import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, spark
 import { categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { entryHref } from '../components/entry-inline.js';
+import { showRoute, routeHash } from '../core/route.js';
 
 const REPORTS = [
     { key: 'insights', label: 'Insights', iconName: 'sparkles', note: 'What changed and what to act on' },
@@ -59,6 +60,11 @@ async function insights() {
 
 export async function render(container, params, isCurrent) {
     const active = REPORTS.find(r => r.key === params[0]) || REPORTS[0];
+    // the address: #/reports/<report>?from=…&to=… (?asOf=… for the trial balance); the period is shared by the reports
+    const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+    const q = params.query;
+    if (q && isDate(q.get('from')) && isDate(q.get('to'))) { period.from = q.get('from'); period.to = q.get('to'); }
+    if (q && isDate(q.get('asOf'))) period.asOf = q.get('asOf');
     container.innerHTML = `
     <div class="page reports-page">
         ${panel({
@@ -114,6 +120,7 @@ export async function render(container, params, isCurrent) {
         const drawer = { insights: insightsReport, categories: categoriesReport, accounts: accountsReport, chits: chitsReport,
                          'chit-summary': chitSummaryReport, 'hosted-chits': hostedChitReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
                          'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport }[active.key];
+        if (isCurrent()) showRoute(routeHash(`reports/${active.key}`, ownToolbar || periodless ? {} : usesAsOf ? { asOf: period.asOf } : { from: period.from, to: period.to }));
         exportRows = await drawer(content, toolbar, period);
     };
 

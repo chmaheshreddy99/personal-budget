@@ -14,6 +14,7 @@ import { money, date, firstOfMonth, isoDate } from '../core/format.js';
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, partyAdds, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry, openJournalEditor } from '../components/transaction-forms.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
+import { showRoute, routeHash } from '../core/route.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -37,7 +38,17 @@ export async function render(container, params, isCurrent) {
             focusEntry = entry.id;
         }
     }
-    if (params.length) history.replaceState(null, '', '#/transactions');
+    // the address: #/transactions?from=…&to=…&type=…&account=…&q=… (the filters in force)
+    const q = params.query;
+    if (!focusEntry && q?.toString()) {
+        Object.assign(filters, DEFAULTS());
+        const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+        if (isDate(q.get('from'))) filters.from = q.get('from');
+        if (isDate(q.get('to'))) filters.to = q.get('to');
+        filters.voucherType = q.get('type') || '';
+        filters.accountId = q.get('account') || '';
+        filters.q = q.get('q') || '';
+    }
     const accounts = await loadAccounts(false, { all: true });
     if (!isCurrent()) return;
     const voucherOptions = [{ value: '', label: 'All types' }, ...state.options.voucherTypes];
@@ -131,6 +142,7 @@ export async function render(container, params, isCurrent) {
         const target = container.querySelector('#register');
         target.innerHTML = loading();
         entries = await api.get('/transactions', { ...filters, limit: 1000 });
+        if (isCurrent()) showRoute(routeHash('transactions', { from: filters.from, to: filters.to, type: filters.voucherType, account: filters.accountId, q: filters.q }));
         form.querySelector('#clear-filters').hidden = !isFiltered();
         container.querySelector('#entry-count').textContent = `${entries.length} entries`;
         target.innerHTML = table([

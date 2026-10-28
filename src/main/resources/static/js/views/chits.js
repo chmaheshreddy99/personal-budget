@@ -17,8 +17,10 @@ import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
+import { showRoute } from '../core/route.js';
 
 const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
+const CHIT_TABS = ['installments', 'interest', 'payout', 'details'];
 
 const prefs = getPref('chits', { includeMatured: false });
 const savePrefs = () => setPref('chits', prefs);
@@ -26,14 +28,15 @@ const savePrefs = () => setPref('chits', prefs);
 const isRunning = c => c.status === 'ACTIVE' || c.status === 'PRIZED';
 
 export async function render(container, params, isCurrent) {
-    // opened for an entry (#/chits/<chit>/entry/<entry>): that chit, on the tab holding the entry, the entry expanded
+    // the address: #/chits/<chit>/<tab>; #/chits/<chit>/entry/<entry> opens that chit on the tab holding the entry,
+    // the entry expanded (the address then becomes the chit and tab)
     let focusEntry = null;
     if (/^\d+$/.test(params[0] || '')) {
         view.selectedId = Number(params[0]);
         view.search = '';
         if (params[1] === 'entry' && /^\d+$/.test(params[2] || '')) focusEntry = Number(params[2]);
+        else if (CHIT_TABS.includes(params[1])) view.tab = params[1];
     }
-    if (params.length) history.replaceState(null, '', '#/chits');
     const chits = await api.get('/chits');
     if (!isCurrent()) return;
     Object.assign(prefs, getPref('chits', { includeMatured: false }));
@@ -77,7 +80,7 @@ export async function render(container, params, isCurrent) {
     container.querySelector('#new-chit')?.addEventListener('click', () => openChitForm(null, saved => { view.selectedId = saved.chit.id; reload(); }));
     container.querySelector('#chit-list').addEventListener('click', e => {
         const card = e.target.closest('[data-id]');
-        if (card) show(Number(card.dataset.id));
+        if (card) show(Number(card.dataset.id), { push: true });
     });
 
     // the search narrows the list on name, organizer, ticket, status and the account it is paid from
@@ -103,7 +106,8 @@ export async function render(container, params, isCurrent) {
         if (e.key === 'Escape' && search.value) { search.value = ''; view.search = ''; drawRows(); }
     });
 
-    async function show(id) {
+    async function show(id, { push = false } = {}) {
+        if (push && id !== view.selectedId) view.tab = 'installments';   // another chit starts on its installments
         view.selectedId = id;
         container.querySelectorAll('#chit-list [data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const detail = await api.get(`/chits/${id}`);
@@ -111,6 +115,7 @@ export async function render(container, params, isCurrent) {
         focusEntry = null;
         if (entry) view.tab = detail.payoutReceipts.some(p => p.entryId === entry) ? 'payout' : 'installments';
         drawDetail(container.querySelector('#chit-detail'), detail, reload);
+        showRoute(`#/chits/${id}/${view.tab}`, { push });
         if (entry) focusEntryRow(container.querySelector('#chit-detail'), entry, { onChanged: reload });
     }
 
@@ -445,6 +450,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
         const tab = e.target.closest('[data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
+            showRoute(`#/chits/${c.id}/${view.tab}`);
             target.querySelectorAll('#chit-tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
             drawTab();
             return;

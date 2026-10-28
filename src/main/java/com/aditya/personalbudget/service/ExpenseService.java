@@ -60,9 +60,13 @@ public class ExpenseService {
                              boolean linkable, boolean convertible) {
     }
 
-    /** A charge that came with an expense (a transaction fee, GST, a tip ...): an expense of its own, linked to it. */
+    /**
+     * A charge that came with an expense (a transaction fee, GST, a tip ...): an expense of its own, linked to it,
+     * with the money that came back on it.
+     */
     public record LinkedView(Long entryId, String entryNo, LocalDate date, String narration, Long categoryId,
-                             String categoryName, BigDecimal amount, BigDecimal netAmount, String status) {
+                             String categoryName, BigDecimal amount, BigDecimal netAmount, String status,
+                             BigDecimal refunded, List<RefundView> refunds) {
     }
 
     /** Turns an expense into money paid for someone, who will pay it back. */
@@ -144,7 +148,7 @@ public class ExpenseService {
                     Category category = expenseLine == null ? null : books.category(expenseLine.getCategoryId());
                     return new LinkedView(child.getId(), child.getEntryNo(), child.getEntryDate(), child.getNarration(),
                             category == null ? null : category.getId(), category == null ? "Uncategorised" : category.getName(),
-                            amount, amount.subtract(refunded(back)).max(Money.ZERO), status(amount, back));
+                            amount, amount.subtract(refunded(back)).max(Money.ZERO), status(amount, back), refunded(back), back);
                 }).toList();
 
         return linesByEntry.entrySet().stream()
@@ -228,6 +232,42 @@ public class ExpenseService {
      */
     @Transactional
     public EntryView addLinked(Long parentId, ExpenseRequest request) {
+        requireParent(parentId);
+        return ledger.toViews(List.of(ledger.post(draft(request).source(LedgerService.SOURCE_EXPENSE, parentId)))).getFirst();
+    }
+
+    /**
+     * Links an expense recorded on its own to the expense it came with ({@code parentId}), moves a charge to another
+     * expense, or (with no parent) makes a charge an expense on its own again. Only the link changes: amount, category,
+     * account and date stay as they are.
+     */
+    @Transactional
+    public void relink(Long entryId, Long parentId) {
+        JournalEntry entry = entries.findByIdAndTenantId(entryId, UserContext.tenantId())
+                .orElseThrow(() -> new NotFoundException("Expense", entryId));
+        if (!LedgerService.isExpense(entry)) {
+            throw new BusinessException(entry.getEntryNo() + " was not posted from Expenses, so it cannot be linked");
+        }
+        if (parentId != null) {
+            if (parentId.equals(entryId)) {
+                throw new BusinessException("An expense cannot be a charge of itself");
+            }
+            List<JournalEntry> own = linkedTo(entryId);
+            if (!own.isEmpty()) {
+                throw new BusinessException(entry.getEntryNo() + " has charges of its own ("
+                        + own.stream().map(JournalEntry::getEntryNo).collect(Collectors.joining(", ")) + "), so it cannot become a charge");
+            }
+            requireParent(parentId);
+        }
+        if (java.util.Objects.equals(entry.getSourceId(), parentId)) {
+            return;
+        }
+        entry.setSourceId(parentId);
+        entries.save(entry);
+    }
+
+    /** An expense a charge can be linked to: posted from Expenses, not itself a charge, not reversed. */
+    private JournalEntry requireParent(Long parentId) {
         JournalEntry parent = entries.findByIdAndTenantId(parentId, UserContext.tenantId())
                 .orElseThrow(() -> new NotFoundException("Expense", parentId));
         if (!LedgerService.isExpense(parent)) {
@@ -241,7 +281,7 @@ public class ExpenseService {
         if (refundsOf(Set.of(parentId), Map.of(), Map.of()).getOrDefault(parentId, List.of()).stream().anyMatch(RefundView::reversal)) {
             throw new BusinessException(parent.getEntryNo() + " is reversed, so nothing more can be charged with it");
         }
-        return ledger.toViews(List.of(ledger.post(draft(request).source(LedgerService.SOURCE_EXPENSE, parentId)))).getFirst();
+        return parent;
     }
 
     private List<JournalEntry> linkedTo(Long parentId) {

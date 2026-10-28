@@ -423,7 +423,10 @@ let shownPath = null;
 
 async function route({ silent = false } = {}) {
     if (!state.user) return;
-    const [path, ...params] = location.hash.replace(/^#\/?/, '').split('/');
+    // #/<page>/<segments...>?<query>: the segments are the page's params, the query rides along as params.query
+    const [pathPart, queryPart = ''] = location.hash.replace(/^#\/?/, '').split('?');
+    const [path, ...params] = pathPart.split('/').filter((s, i) => i === 0 || s !== '');
+    params.query = new URLSearchParams(queryPart);
     const match = allowedRoutes().find(r => r.path === path) || allowedRoutes()[0];
     if (path !== match.path) history.replaceState(null, '', `#/${match.path}`);   // a section not shared (or unknown): show the first one
 

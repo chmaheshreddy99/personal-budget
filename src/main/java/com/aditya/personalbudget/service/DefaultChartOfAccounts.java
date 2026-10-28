@@ -128,6 +128,8 @@ public final class DefaultChartOfAccounts {
             new CategoryTemplate("5400", "Books & Stationery", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5410", "Water Cans", CategoryKind.EXPENSE, null, "Drinking water cans, RO service"),
             new CategoryTemplate("5420", "Newspaper & Magazines", CategoryKind.EXPENSE, null, null),
+            new CategoryTemplate("5430", "Tips & Gratuity", CategoryKind.EXPENSE, null,
+                    "Tips to delivery partners, waiters, drivers, salon and hotel staff"),
             new CategoryTemplate("5990", "Miscellaneous", CategoryKind.EXPENSE, MISC_EXPENSE, null)
     );
 

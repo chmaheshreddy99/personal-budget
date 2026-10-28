@@ -29,6 +29,7 @@ import { money, moneyShort, percent, date, dateTime, shortDate, isoDate } from '
 import { barChart, donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openEntryDetail } from '../components/transaction-forms.js';
+import { showRoute, showPageRoute, routeHash, queryList, fromAddress } from '../core/route.js';
 import { claimPanelHtml, bindClaimPanel, claimBadge } from '../components/claim-panel.js';
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -71,10 +72,45 @@ const FILTERS = { cats: [], payers: [], xstatus: [], kinds: [], people: [], csta
 const view = {
     period: 'month', from: isoDate(), to: isoDate(), type: 'all', q: '',
     side: 'mix', open: null, morePeriods: false, moreFilters: false, ...structuredClone(FILTERS),
+    collapsed: new Set(),   // expenses whose linked charges are folded away under them
 };
 
 function clearFilters() {
     Object.assign(view, structuredClone(FILTERS));
+}
+
+// ---- the address of the page: the tab as a segment, the period, filters and opened row in the query
+const SLUG_OF_TYPE = { all: 'all', EXPENSE: 'spent', PAID_FOR: 'paid-for', LENT: 'lent', collect: 'collect', owe: 'owe', emi: 'emi' };
+const TYPE_OF_SLUG = Object.fromEntries(Object.entries(SLUG_OF_TYPE).map(([type, slug]) => [slug, type]));
+const LIST_FILTERS = ['cats', 'payers', 'xstatus', 'kinds', 'people', 'cstatus'];
+const ONE_FILTERS = ['due', 'interest', 'min', 'max'];
+
+/** Takes the tab, and (when the address has a query) the period, filters, search and opened row from the address. */
+function readRoute(type, query) {
+    view.type = type;
+    if (!query?.toString()) return;
+    const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+    clearFilters();
+    const period = query.get('period');
+    view.period = PERIODS[period] ? period : 'month';
+    if (view.period === 'custom') {
+        if (isDate(query.get('from')) && isDate(query.get('to'))) { view.from = query.get('from'); view.to = query.get('to'); } else view.period = 'month';
+    }
+    LIST_FILTERS.forEach(k => { view[k] = queryList(query, k); });
+    ONE_FILTERS.forEach(k => { view[k] = query.get(k) || ''; });
+    view.q = query.get('q') || '';
+    view.open = query.get('open') || null;
+    view.moreFilters = query.get('filters') === '1';
+}
+
+/** The address of what the page shows now. */
+function routeOfView() {
+    const custom = view.period === 'custom';
+    return routeHash(`expenses/${SLUG_OF_TYPE[view.type] || 'all'}`, {
+        period: view.period === 'month' ? '' : view.period, from: custom ? view.from : '', to: custom ? view.to : '',
+        q: view.q, ...Object.fromEntries(LIST_FILTERS.map(k => [k, view[k]])), ...Object.fromEntries(ONE_FILTERS.map(k => [k, view[k]])),
+        open: view.open, filters: view.moreFilters,
+    });
 }
 
 /** Adds a value to a filter set, or takes it out when it is in already. */
@@ -205,7 +241,9 @@ export async function render(container, params, isCurrent) {
         const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
         if (isDate(params[2]) && isDate(params[3])) Object.assign(view, { period: 'custom', from: params[2], to: params[3] });
     }
-    if (params.length) history.replaceState(null, '', '#/expenses');
+    // the address: #/expenses/<tab>?period=…&cats=…&people=…&open=… (see readRoute / writeRoute)
+    const routed = fromAddress(params);
+    if (TYPE_OF_SLUG[params[0]] && !(params[0] === 'emi' && params[1])) readRoute(TYPE_OF_SLUG[params[0]], params.query);
     // opened for an expense (#/expenses/entry/<id>): the month it is in, every type, no filters, that expense open
     if (params[0] === 'entry' && /^\d+$/.test(params[1] || '')) {
         const entry = await api.get(`/transactions/${params[1]}`).catch(() => null);
@@ -497,6 +535,7 @@ export async function render(container, params, isCurrent) {
     on('.p-xp-summary', 'click', e => {
         const cat = e.target.closest('[data-filter-category]');
         if (cat) { toggleIn(view.cats, cat.dataset.filterCategory); reload(); }
+        if (e.target.closest('[data-summary-charges]')) { toggleIn(view.xstatus, 'charge'); reload(); }
     });
     on('.p-xp-cat', 'click', e => {
         const row = e.target.closest('[data-filter-category], [data-filter-payer]');
@@ -539,6 +578,20 @@ export async function render(container, params, isCurrent) {
             reload();
             return;
         }
+        // folds an expense's charges away under it, or shows them again (no reload: the rows are there)
+        const fold = e.target.closest('[data-xl-fold]');
+        if (fold) {
+            e.stopPropagation();
+            const id = Number(fold.dataset.xlFold);
+            const folded = !view.collapsed.has(id);
+            if (folded) view.collapsed.add(id); else view.collapsed.delete(id);
+            fold.classList.toggle('open', !folded);
+            listEl.querySelectorAll(`tr[data-parent="${id}"]`).forEach(tr => {
+                tr.classList.toggle('xl-folded', folded);
+                if (folded && tr.nextElementSibling?.classList.contains('detail-row')) { tr.nextElementSibling.remove(); tr.classList.remove('expanded'); }
+            });
+            return;
+        }
         const fc = e.target.closest('[data-row-filter-category]'), fp = e.target.closest('[data-row-filter-payer]');
         if (fc || fp) {
             e.stopPropagation();
@@ -558,15 +611,55 @@ export async function render(container, params, isCurrent) {
                 if (action.dataset.xpAction === 'emi-plan') { view.type = 'emi'; view.open = `m${action.dataset.plan}`; reload(); }
                 if (action.dataset.xpAction === 'refund') openRefundDialog(r, reload);
                 if (action.dataset.xpAction === 'reverse') openReverseDialog(r, reload);
-                if (action.dataset.xpAction === 'add-charge') openChargeDialog(r, { accounts, expenseCategories, onSaved: saved => { view.open = r.key; toast(`${saved.entryNo} linked to ${r.raw.entryNo}`); reload(); } });
+                if (action.dataset.xpAction === 'add-charge') openChargeDialog(r, { accounts, expenseCategories, onSaved: (saved, { keepOpen = false } = {}) => {
+                    view.open = r.key;
+                    view.collapsed.delete(r.raw.entryId);
+                    if (!keepOpen) toast(`${saved.entryNo} linked to ${r.raw.entryNo}`);
+                    reload();
+                } });
+                // ---- a charge, from a cost breakdown: edit, refund, unlink, delete; link existing expenses, move a charge
+                const charge = action.dataset.entry ? all.EXPENSE.find(x => x.raw.entryId === Number(action.dataset.entry)) : null;
+                const chargeId = Number(action.dataset.entry);
+                if (action.dataset.xpAction === 'charge-edit') {
+                    if (charge) openExpenseDialog({ expense: charge.raw, onSaved: reload }); else openEntryDetail(chargeId, { onChanged: reload });
+                }
+                if (action.dataset.xpAction === 'charge-refund') {
+                    if (charge) openRefundDialog(charge, reload); else openEntryDetail(chargeId, { onChanged: reload });
+                }
+                if (action.dataset.xpAction === 'charge-unlink') {
+                    const what = charge?.raw || (r.raw.entryId === chargeId ? r.raw : r.raw.linked?.find(l => l.entryId === chargeId));
+                    if (await confirmDialog(`Unlink ${what?.entryNo || 'this charge'}? It stays as an expense on its own; nothing in the books changes.`,
+                        { title: 'Unlink charge', confirmLabel: 'Unlink', danger: false })) {
+                        await api.put(`/expenses/${chargeId}/link`, { parentId: null });
+                        toast(`${what?.entryNo || 'Charge'} unlinked`);
+                        reload();
+                    }
+                }
+                if (action.dataset.xpAction === 'charge-delete') {
+                    const what = charge?.raw || r.raw.linked?.find(l => l.entryId === chargeId);
+                    if (await confirmDialog(`Delete the charge ${what?.entryNo || ''} (${money(what?.netAmount ?? what?.amount ?? 0)})? The expense it came with stays.`)) {
+                        await api.del(`/expenses/${chargeId}`);
+                        toast(`${what?.entryNo || 'Charge'} deleted`);
+                        reload();
+                    }
+                }
+                if (action.dataset.xpAction === 'link-existing') openLinkPicker(r, 'attach', reload);
+                if (action.dataset.xpAction === 'move-charge') openLinkPicker(r, 'move', reload);
                 if (action.dataset.xpAction === 'paid-for') openPaidForDialog(r, claimRows, claim => { view.focusClaim = claim.id; reload(); });
                 if (action.dataset.xpAction === 'open-linked') {
                     const entryId = Number(action.dataset.entry);
                     const target = all.EXPENSE.find(x => x.raw.entryId === entryId);
                     const tr = target && listEl.querySelector(`tr[data-key="${target.key}"]`);
-                    if (tr) { await toggleRow(tr, list.find(x => x.key === target.key)); tr.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+                    if (tr?.classList.contains('xl-folded')) listEl.querySelector(`[data-xl-fold="${tr.dataset.parent}"]`)?.click();   // unfold its group first
+                    if (tr) {
+                        await toggleRow(tr, list.find(x => x.key === target.key));
+                        tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                        tr.classList.add('flash');
+                        setTimeout(() => tr.classList.remove('flash'), 2600);
+                    }
                     else openEntryDetail(entryId, { onChanged: reload });   // outside this period or filtered out
                 }
+                if (action.dataset.xpAction === 'open-refund') openEntryDetail(Number(action.dataset.entry), { onChanged: reload });
                 if (action.dataset.xpAction === 'undo-refund') {
                     const f = r.raw.refunds.find(x => String(x.entryId) === action.dataset.refund);
                     if (f && await confirmDialog(`Undo the ${f.reversal ? 'reversal' : 'refund'} of ${money(f.amount)} (${f.entryNo})? The expense counts again.`)) {
@@ -592,8 +685,9 @@ export async function render(container, params, isCurrent) {
         const next = tr.nextElementSibling;
         listEl.querySelectorAll('tr.detail-row').forEach(d => d.remove());
         listEl.querySelectorAll('tr.expanded').forEach(d => d.classList.remove('expanded'));
-        if (next?.classList.contains('detail-row')) { view.open = null; return; }
+        if (next?.classList.contains('detail-row')) { view.open = null; showRoute(routeOfView()); return; }
         view.open = r.key;
+        showRoute(routeOfView());
         tr.classList.add('expanded');
         const detail = document.createElement('tr');
         detail.className = 'detail-row';
@@ -643,6 +737,8 @@ export async function render(container, params, isCurrent) {
         search.setSelectionRange(search.value.length, search.value.length);
         view.focusSearch = false;
     }
+    // another tab or period is a step in the history; a filter, the search or an opened row only updates the address
+    showPageRoute('expenses', routeOfView(), `${view.type}|${view.period}|${view.from}|${view.to}`, { routed });
 }
 
 /**
@@ -827,7 +923,20 @@ function summaryHtml({ total, change, days, expenses, dailyAverage, today, budge
             <div class="clickable ${view.type === 'collect' ? 'active' : ''}" data-summary-collect title="Show what others owe you"><span>To collect</span><b class="aqua-ink">${moneyShort(s.outstanding)}</b>
                 <small>${s.openCount} open${s.overdueCount ? ` · <span class="neg">${s.overdueCount} overdue</span>` : ''}</small></div>
         </div>
+        ${chargesLine(expenses, total)}
     </div>`;
+}
+
+/** Fees, taxes and tips paid on top of expenses in the period, and what share of the spending they are. */
+function chargesLine(expenses, total) {
+    const charges = expenses.filter(r => r.raw?.parentEntryId);
+    if (!charges.length) return '';
+    const sumCharges = charges.reduce((s, r) => s + r.amount, 0);
+    const on = new Set(charges.map(r => r.raw.parentEntryId)).size;
+    const active = view.xstatus.includes('charge');
+    return `<button type="button" class="xs-charges ${active ? 'active' : ''}" data-summary-charges title="${active ? 'Show everything again' : 'Show only the linked charges'}">
+        ${icon('link')}<span>Charges &amp; fees</span><b class="mono">${money(sumCharges)}</b>
+        <small class="muted">${charges.length} on ${on} expense${on === 1 ? '' : 's'} · ${percent(total ? (sumCharges / total) * 100 : 0, 1)} of spend</small></button>`;
 }
 
 // ===================================================================== rows
@@ -859,6 +968,16 @@ const STATUS_META = {
     REFUNDED: { label: 'Refunded', tone: 'aqua', iconName: 'arrow-in' },
     PARTLY_REFUNDED: { label: 'Part refunded', tone: 'aqua', iconName: 'arrow-in' },
 };
+
+/** What came back on an expense or a charge, as a pill: how much (or that it was reversed), each refund in its title. */
+function refundPill(status, back, refunds = []) {
+    const meta = status ? STATUS_META[status] : null;
+    if (!meta) return '';
+    const label = status === 'REVERSED' ? 'Reversed' : status === 'REFUNDED' ? 'Refunded' : `${moneyShort(back)} back`;
+    const lines = (refunds || []).map(f => `${f.reversal ? 'Reversal' : 'Refund'} ${money(f.amount)} · ${date(f.date)} · ${f.entryNo}${f.accountName ? ` · ${f.reversal ? 'back to' : 'into'} ${f.accountName}` : ''}`);
+    const head = status === 'REVERSED' ? 'Reversed: counts for nothing' : `${meta.label}: ${money(back)} came back`;
+    return `<span class="xr-pill ${meta.tone}" title="${esc([head, ...lines].join('\n'))}">${icon(meta.iconName)}${esc(label)}</span>`;
+}
 
 function claimRow(c) {
     return {
@@ -946,7 +1065,7 @@ function tableHtml(rows, filtered = false) {
  * branch so the rows draw as a small tree. A charge whose expense is not in the list stays where it is.
  */
 function nestLinked(rows) {
-    const shown = new Set(rows.filter(r => r.raw).map(r => r.raw.entryId));
+    const shown = new Map(rows.filter(r => r.raw).map(r => [r.raw.entryId, r]));
     const children = new Map();
     rows.forEach(r => {
         const parent = r.raw?.parentEntryId;
@@ -956,23 +1075,47 @@ function nestLinked(rows) {
     const out = [];
     rows.forEach(r => {
         if (r.raw?.parentEntryId && shown.has(r.raw.parentEntryId)) return;   // drawn with its expense
-        out.push(r);
-        const kids = children.get(r.raw?.entryId) || [];
-        kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid' }));
+        const kids = (children.get(r.raw?.entryId) || []).sort((a, b) => a.date.localeCompare(b.date) || a.sortId - b.sortId);
+        out.push(kids.length ? { ...r, kidsShown: kids.length } : r);
+        kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid', parentRow: r }));
     });
     return out;
 }
 
-/** The link marks of an expense row: the charges that came with it, or the expense it came with. */
+/** What kind of charge a linked expense is, from the start of its description (as the Add charge dialog writes it). */
+function chargeKind(narration) {
+    const text = (narration || '').toLowerCase();
+    return CHARGE_KINDS.find(k => text.startsWith(k.label.toLowerCase()) || k.words.some(w => text.includes(w)))
+        || { label: 'Charge', short: 'Charge', iconName: 'link', tone: 'violet' };
+}
+
+/** A charge's description without " · <the expense it came with>": under its expense that part goes without saying. */
+function chargeTitle(narration, parentNarration) {
+    const suffix = ` · ${parentNarration || ''}`;
+    return parentNarration && narration?.endsWith(suffix) ? narration.slice(0, -suffix.length) : narration;
+}
+
+/**
+ * The link marks of an expense row. An expense with charges: a chip with how many and how much, which folds them away
+ * under it (or shows them again). A charge drawn away from its expense: a chip naming the expense, which opens it.
+ */
 function linkFlags(r) {
     const e = r.raw;
     if (!e) return '';
     if (e.linked?.length) {
         const extra = e.linked.reduce((s, l) => s + Number(l.netAmount), 0);
-        return `<span class="mini-flag link" title="${esc(`${e.linked.length} linked charge${e.linked.length === 1 ? '' : 's'}: ${e.linked.map(l => `${l.narration} ${money(l.netAmount)}`).join(', ')} · all-in ${money(r.amount + extra)}`)}">${icon('link')}${e.linked.length}</span>`;
+        const back = e.linked.reduce((s, l) => s + Number(l.refunded || 0), 0);
+        const folded = view.collapsed.has(e.entryId);
+        const tip = `${e.linked.length} linked charge${e.linked.length === 1 ? '' : 's'}: ${e.linked.map(l => `${chargeTitle(l.narration, e.narration)} ${money(l.netAmount)}${Number(l.refunded) ? ` (${money(l.refunded)} refunded)` : ''}`).join(', ')} · all-in ${money(r.amount + extra)}`;
+        const backMark = back ? `<i class="xl-chip-back" title="${esc(`${money(back)} came back on the charges`)}">${icon('arrow-in')}</i>` : '';
+        return r.kidsShown
+            ? `<button type="button" class="xl-chip ${folded ? '' : 'open'}" data-xl-fold="${e.entryId}" title="${esc(`${tip} · click to ${folded ? 'show' : 'fold'} them`)}">
+                ${icon('link')}<b>${e.linked.length}</b><span>+${moneyShort(extra)}</span>${backMark}${icon('chevron-down')}</button>`
+            : `<span class="xl-chip" title="${esc(`${tip} (not in this list)`)}">${icon('link')}<b>${e.linked.length}</b><span>+${moneyShort(extra)}</span>${backMark}</span>`;
     }
     if (e.parentEntryId && !r.nested) {
-        return `<span class="mini-flag link child" title="${esc(`Charged with ${e.parentNarration} (${e.parentEntryNo})`)}">${icon('split')}${esc(e.parentEntryNo)}</span>`;
+        return `<button type="button" class="xl-chip child" data-xp-action="open-linked" data-entry="${e.parentEntryId}" data-key="${r.key}"
+            title="${esc(`A charge of ${e.parentNarration} (${e.parentEntryNo}) · open it`)}">${icon('split')}<span class="ellipsis">${esc(e.parentEntryNo)}</span></button>`;
     }
     return '';
 }
@@ -1022,25 +1165,35 @@ function rowHtml(r, withDate) {
     }
     const party = r.party ? (r.claim ? `${{ LENT: 'to', PAID_FOR: 'for', BORROWED: 'from', BILL_DUE: 'owed to' }[r.type] || ''} ${esc(r.party)}` : esc(r.party)) : '';
     const owed = r.claim && Number(r.claim.outstanding) > 0;
-    const status = r.status ? STATUS_META[r.status] : null;
     const old = r.claim && view.periodFrom && r.date < view.periodFrom;
     const extra = r.raw?.linked?.length ? r.raw.linked.reduce((s, l) => s + Number(l.netAmount), 0) : 0;
+    const chargesBack = r.raw?.linked?.length ? r.raw.linked.reduce((s, l) => s + Number(l.refunded || 0), 0) : 0;
+    // a charge under its expense: its kind, a shorter title and its share of the expense instead of the shop
+    const kind = r.nested ? chargeKind(r.description) : null;
+    const parentAmount = r.parentRow?.amount || 0;
+    const title = r.nested ? chargeTitle(r.description, r.raw.parentNarration) : r.description;
+    const partyHtml = r.nested
+        ? `<span class="xd-party xl-share" title="Of ${esc(r.raw.parentNarration)} (${esc(r.raw.parentEntryNo)})">${parentAmount ? `${percent(r.amount / parentAmount * 100, 1)} of ` : 'on '}${esc(r.raw.parentEntryNo)}</span>`
+        : party ? `<span class="xd-party" title="${r.claim ? 'Person' : 'Paid to'}: ${esc(r.party)}">${party}</span>` : '';
+    const folded = r.nested && view.collapsed.has(r.raw.parentEntryId);
     return `
-    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${extra ? 'xp-parent' : ''}" data-key="${r.key}">
+    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${r.kidsShown ? 'xp-parent' : ''} ${folded ? 'xl-folded' : ''}"
+        data-key="${r.key}" ${r.nested ? `data-parent="${r.raw.parentEntryId}"` : ''}>
         ${withDate ? `<td class="c-date ${old ? 'old' : ''}" title="${old ? `Before the selected period, still open · ${ageOf(r.date)}` : dayName(r.date)}"><b>${date(r.date)}</b>${old ? icon('clock') : ''}</td>` : ''}
         <td class="c-cat"><div class="xd-cat">${r.nested ? '<i class="xp-branch" aria-hidden="true"></i>' : ''}${category}</div></td>
         <td class="c-desc"><div class="xd-cell">
-            <span class="xd-text"><b class="ellipsis" title="${esc(r.description)}">${esc(r.description)}</b>${evidenceBadge(r.raw?.attachmentCount)}
-                ${status ? `<span class="mini-flag ${status.tone}" title="${r.status === 'REVERSED' ? 'Reversed: counts for nothing' : `${status.label}: ${money(r.gross - r.amount)} came back`}">${icon(status.iconName)}</span>` : ''}
+            <span class="xd-text">${kind ? `<span class="xl-kind ${kind.tone}" title="${esc(kind.label)}">${icon(kind.iconName)}${esc(kind.short)}</span>` : ''}<b class="ellipsis" title="${esc(r.description)}">${esc(title)}</b>${evidenceBadge(r.raw?.attachmentCount)}
+                ${refundPill(r.status, r.gross - r.amount, r.raw?.refunds)}
                 ${r.claim ? claimBadge(r.claim) : ''}
                 ${linkFlags(r)}
                 ${r.emiOf ?`<span class="mini-flag aqua emi" title="${esc(`${r.emiOf.what === 'purchase' ? 'Bought on EMI' : `Interest of ${r.emiOf.what}`} · ${r.emiOf.plan.narration}`)}">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'EMI' : esc(r.emiOf.what.replace('EMI ', ''))}</span>` : ''}
                 ${r.reference ? `<span class="xp-ico" title="Reference: ${esc(r.reference)}">${icon('tag')}</span>` : ''}
                 ${r.notes ? `<span class="xp-ico" title="${esc(r.notes)}">${icon('info')}</span>` : ''}</span>
-            ${party ? `<span class="xd-party" title="${r.claim ? 'Person' : 'Paid to'}: ${esc(r.party)}">${party}</span>` : ''}</div></td>
+            ${partyHtml}</div></td>
         <td class="c-pay">${r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
             title="${r.type === 'BORROWED' ? 'Into' : 'Paid from'} ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button>` : '<span class="muted">—</span>'}</td>
-        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : 'neg'}">${money(r.amount)}</b>${extra ? `<span class="xd-int" title="With its linked charges: ${money(r.amount + extra)} all-in">+${moneyShort(extra)}</span>` : ''}</td>
+        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : r.nested ? 'xl-amt' : 'neg'}">${r.nested ? '+' : ''}${money(r.amount)}</b>${extra
+            ? `<span class="xl-allin" title="${money(r.amount)} + charges ${money(extra)}${chargesBack ? ` (after ${money(chargesBack)} refunded on them)` : ''}">all-in ${money(r.amount + extra)}</span>` : ''}</td>
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
     </tr>`;
 }
@@ -1086,7 +1239,10 @@ const w = r => (r.type === 'BORROWED' ? 'Into' : 'Paid from');
 async function expenseDetail(r, ctx = {}) {
     const e = r.raw;
     const manage = can('POST_TRANSACTIONS');
-    const entry = await api.get(`/transactions/${e.entryId}`);
+    // the entry and, for its refunds shown in full, each refund's own entry
+    const [entry, ...refundEntries] = await Promise.all([api.get(`/transactions/${e.entryId}`),
+        ...(e.refunds || []).map(f => api.get(`/transactions/${f.entryId}`).catch(() => null))]);
+    const refundEntry = new Map((e.refunds || []).map((f, i) => [f.entryId, refundEntries[i]]));
     const rows = ctx.rows || [];
     // the category in the month of the budget shown, and this shop / person within the period
     const line = ctx.budgets?.lines?.find(l => l.categoryId === e.categoryId);
@@ -1115,7 +1271,6 @@ async function expenseDetail(r, ctx = {}) {
                 ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
                 ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
                     <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
-                ${manage && e.linkable && !r.emiOf ? `<button class="btn xs" data-xp-action="add-charge" data-key="${r.key}" title="A fee, tax, tip or delivery that came with this: its own expense, linked here">${icon('link')}Add charge</button>` : ''}
                 ${manage && e.convertible && !r.emiOf ? `<button class="btn xs" data-xp-action="paid-for" data-key="${r.key}" title="You paid this for someone who will pay you back: track it under Paid for">${icon('users')}Paid for…</button>` : ''}
                 ${manage && e.editable && !e.linked?.length ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
             </span>
@@ -1144,61 +1299,167 @@ async function expenseDetail(r, ctx = {}) {
             </div>
         </div>
         ${e.memo ? `<div class="xd-note">${icon('info')}<span>${esc(e.memo)}</span></div>` : ''}
-        ${linkedHtml(r)}
-        ${refundsHtml(e, manage)}
+        ${refundsHtml(e, manage, refundEntry)}
+        ${await linkedHtml(r, ctx, manage)}
         <div class="xp-evidence" data-ev-entry="${e.entryId}" data-ev-count="${e.attachmentCount || 0}"></div>
     </div>`;
 }
 
+/** Colours of the parts of a cost breakdown: the expense first, then each charge. */
+const PART_COLORS = ['var(--ocean-600)', '#e0795f', '#e8b64a', '#2fae7a', '#7b5cd6', '#13a89a', '#d65c8f', '#5b8def'];
+
 /**
- * How an expense and its charges hang together: the expense at the root and each charge on a branch under it, with
- * the all-in total; or, for a charge, the expense it came with. Every node opens that entry.
+ * How an expense and its charges hang together, as a cost breakdown: one bar split into the expense and each charge
+ * (what came back on a part hatched at its end), then a line per part (kind, what, entry, refund, share of the all-in
+ * cost, amount) with its actions and, under it, the refunds of that part, each opening its own entry. The foot gives
+ * the all-in total: what was paid, what came back and what it costs now. An expense shows its own breakdown; a charge
+ * shows the breakdown of the expense it is part of, itself highlighted, with the way to move it or to unlink it. The
+ * refunds of the entry opened are listed in full above the breakdown, so here they are left out.
  */
-function linkedHtml(r) {
+async function linkedHtml(r, ctx, manage) {
     const e = r.raw;
     if (e.parentEntryId) {
-        return `<div class="xp-linked is-child">${icon('split')}<span class="muted">Charged with</span>
-            <button type="button" class="xl-parent" data-xp-action="open-linked" data-entry="${e.parentEntryId}" data-key="${r.key}" title="Open ${esc(e.parentEntryNo)}">
-                <b>${esc(e.parentNarration || '')}</b><span class="muted small">${esc(e.parentEntryNo)}</span>${icon('chevron-right')}</button></div>`;
+        const parent = await parentGroup(e, ctx.rows);
+        return breakdownHtml({ root: parent?.root || { entryId: e.parentEntryId, entryNo: e.parentEntryNo, narration: e.parentNarration, amount: null },
+            charges: parent?.charges || [linkedOf(e)], focusId: e.entryId, manage, key: r.key });
     }
-    if (!e.linked?.length) return '';
-    const charges = e.linked.reduce((s, l) => s + Number(l.netAmount), 0);
-    const node = (cls, catName, title, sub, amount, attrs = '', flag = '') => {
-        const ci = categoryIcon(catName);
-        return `<${attrs ? 'button type="button"' : 'div'} class="xl-node ${cls}" ${attrs}>
-            <span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>
-            <span class="xl-what"><b class="ellipsis">${esc(title)}</b><small class="muted">${sub}</small></span>${flag}
-            <b class="mono">${money(amount)}</b></${attrs ? 'button' : 'div'}>`;
+    if (!e.linked?.length) {
+        return manage && e.linkable && !r.emiOf ? `<div class="xl-hint">${icon('link')}<span>Paid a fee, tax, tip or delivery with this?</span>
+            <button type="button" class="link-btn" data-xp-action="add-charge" data-key="${r.key}">Add a charge</button><span class="muted">or</span>
+            <button type="button" class="link-btn" data-xp-action="link-existing" data-key="${r.key}">link one already recorded</button></div>` : '';
+    }
+    return breakdownHtml({ root: { entryId: e.entryId, entryNo: e.entryNo, narration: e.narration, categoryName: e.categoryName, amount: r.amount, gross: r.gross,
+        date: e.date, status: e.status, refunds: e.refunds }, charges: e.linked.map(chargeOf), manage, key: r.key, linkable: e.linkable && !r.emiOf });
+}
+
+/** A linked charge as a part of a breakdown: what it costs now, what was paid and what came back. */
+const chargeOf = l => ({ ...l, amount: Number(l.netAmount), gross: Number(l.amount), refunds: l.refunds || [] });
+
+/** A charge's own figures in the shape of a linked charge. */
+const linkedOf = e => ({ entryId: e.entryId, entryNo: e.entryNo, date: e.date, narration: e.narration, categoryName: e.categoryName,
+    amount: Number(e.netAmount ?? e.amount), gross: Number(e.amount), status: e.status, refunds: e.refunds || [] });
+
+/** The expense a charge belongs to and all its charges: from the list when it is there, else looked up by its date. */
+async function parentGroup(e, rows = []) {
+    let parent = rows.find(x => x.raw?.entryId === e.parentEntryId)?.raw;
+    if (!parent) {
+        const entry = await api.get(`/transactions/${e.parentEntryId}`).catch(() => null);
+        if (entry) parent = (await api.get('/expenses', { from: entry.entryDate, to: entry.entryDate }).catch(() => [])).find(x => x.entryId === e.parentEntryId);
+    }
+    if (!parent) return null;
+    return { root: { entryId: parent.entryId, entryNo: parent.entryNo, narration: parent.narration, categoryName: parent.categoryName,
+        amount: Number(parent.netAmount ?? parent.amount), gross: Number(parent.amount), date: parent.date, status: parent.status, refunds: parent.refunds || [] },
+        charges: parent.linked.map(chargeOf) };
+}
+
+function breakdownHtml({ root, charges, focusId = null, manage, key, linkable = false }) {
+    const parts = [root, ...charges];
+    const openId = focusId ?? root.entryId;   // the entry opened: its refunds are shown in full above
+    const known = root.amount !== null;
+    const grossOf = p => p.gross ?? p.amount ?? 0;
+    const extra = charges.reduce((s, c) => s + c.amount, 0);
+    const total = known ? root.amount + extra : null;   // what it all costs now
+    const paid = known ? parts.reduce((s, p) => s + grossOf(p), 0) : null;
+    const back = known ? paid - total : 0;
+    const share = v => (total ? (v / total) * 100 : 0);
+    const color = i => PART_COLORS[i === 0 ? 0 : ((i - 1) % (PART_COLORS.length - 1)) + 1];
+    const isChild = focusId !== null;
+    const titleOf = (p, i) => (i === 0 ? p.narration : chargeTitle(p.narration, root.narration));
+    const bar = paid ? `<div class="xl-bar" role="img" aria-label="Cost breakdown">${parts.map((p, i) => {
+        const g = grossOf(p), partBack = g - (p.amount ?? g);
+        return `<i class="${i === 0 ? 'root' : ''} ${p.entryId === focusId ? 'focus' : ''}" style="width:${(g / paid) * 100}%"
+            title="${esc(`${titleOf(p, i)} · ${money(p.amount)}${partBack > 0.004 ? ` (${money(g)} paid, ${money(partBack)} back)` : ''} · ${percent(share(p.amount), i === 0 ? 0 : 1)}`)}"><em style="width:${g ? ((p.amount ?? g) / g) * 100 : 0}%;background:${color(i)}"></em></i>`;
+    }).join('')}</div>` : '';
+    const act = (action, iconName, title, entryId, cls = '') => `<button type="button" class="btn xs ghost icon ${cls}" data-xp-action="${action}" data-entry="${entryId}" data-key="${key}" title="${esc(title)}">${icon(iconName)}</button>`;
+    const refundLines = part => (part.entryId === openId || !part.refunds?.length ? '' : `<div class="xl-refunds">${part.refunds.map(f => `
+        <button type="button" class="xl-refund ${f.reversal ? 'is-reversal' : ''}" data-xp-action="open-refund" data-entry="${f.entryId}" data-key="${key}" title="Open ${esc(f.entryNo)}: its posting, evidence and history">
+            ${icon(f.reversal ? 'undo' : 'arrow-in')}<b>${f.reversal ? 'Reversed' : 'Refund'}</b>
+            <small class="ellipsis">${[date(f.date), f.entryNo, f.accountName ? `${f.reversal ? 'back to' : 'into'} ${f.accountName}` : '', f.note].filter(Boolean).map(esc).join(' · ')}</small>
+            <b class="mono">−${money(f.amount)}</b>${icon('chevron-right')}</button>`).join('')}</div>`);
+    const line = (part, i) => {
+        const isRoot = i === 0;
+        const kind = isRoot ? null : chargeKind(part.narration);
+        const ci = categoryIcon(part.categoryName || '');
+        const g = grossOf(part), partBack = part.amount === null ? 0 : g - part.amount;
+        const sign = isRoot ? '' : '+';
+        return `<div class="xl-part ${isRoot ? 'root' : ''} ${part.entryId === focusId ? 'focus' : ''}">
+            <i class="xl-swatch" style="background:${color(i)}"></i>
+            ${isRoot ? `<span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>` : `<span class="xl-kind ${kind.tone}">${icon(kind.iconName)}${esc(kind.short)}</span>`}
+            <button type="button" class="xl-what" data-xp-action="open-linked" data-entry="${part.entryId}" data-key="${key}" title="Open ${esc(part.entryNo || '')}">
+                <b class="ellipsis">${esc(titleOf(part, i))}</b>
+                <small class="muted ellipsis">${[part.entryNo, part.categoryName, part.date ? shortDate(part.date) : ''].filter(Boolean).map(esc).join(' · ')}${part.entryId === focusId ? ' · <b class="xl-this">this charge</b>' : ''}</small></button>
+            ${refundPill(part.status, partBack, part.refunds) || '<span></span>'}
+            <span class="xl-pct">${total ? percent(share(part.amount), isRoot ? 0 : 1) : ''}</span>
+            <span class="xl-money">${part.amount === null ? '<b class="mono">—</b>' : `${partBack > 0.004 ? `<s class="mono" title="Paid">${sign}${money(g)}</s>` : ''}<b class="mono">${sign}${money(part.amount)}</b>`}</span>
+            <span class="xl-acts">${!manage || isRoot ? '' : `${act('charge-edit', 'edit', 'Edit this charge', part.entryId)}${part.status !== 'REVERSED' && part.status !== 'REFUNDED' ? act('charge-refund', 'arrow-in', 'Refund this charge', part.entryId) : ''}
+                ${act('charge-unlink', 'unlock', 'Unlink: keep it as an expense on its own', part.entryId)}${act('charge-delete', 'trash', 'Delete this charge', part.entryId, 'danger')}`}</span>
+        </div>${refundLines(part)}`;
     };
     return `
-    <div class="xp-linked">
-        <div class="section-title">${icon('link')} Linked charges
-            <span class="muted">· ${money(r.amount)} + ${e.linked.length} charge${e.linked.length === 1 ? '' : 's'} ${money(charges)} = <b>${money(r.amount + charges)}</b> all-in</span></div>
-        <div class="xl-tree">
-            ${node('root', e.categoryName, e.narration, `${esc(e.entryNo)} · ${esc(e.categoryName)}`, r.amount)}
-            ${e.linked.map((l, i) => node(`branch ${i === e.linked.length - 1 ? 'last' : ''}`, l.categoryName, l.narration,
-                `${esc(l.entryNo)} · ${esc(l.categoryName)} · ${shortDate(l.date)}`, Number(l.netAmount),
-                `data-xp-action="open-linked" data-entry="${l.entryId}" data-key="${r.key}" title="Open ${esc(l.entryNo)}"`,
-                l.status ? `<span class="mini-flag ${STATUS_META[l.status].tone}" title="${STATUS_META[l.status].label}">${icon(STATUS_META[l.status].iconName)}</span>` : '')).join('')}
+    <div class="xl-card ${isChild ? 'is-child' : ''}">
+        <div class="xl-head">
+            <span class="chip-icon xs violet">${icon(isChild ? 'split' : 'link')}</span>
+            <div class="grow min-0"><b>${isChild ? `Part of ${esc(root.narration || root.entryNo)}` : 'Cost breakdown'}</b>
+                <small class="muted">${isChild ? `${esc(root.entryNo)}${root.date ? ` · ${date(root.date)}` : ''} · ${charges.length} charge${charges.length === 1 ? '' : 's'} with it`
+                    : `${esc(root.entryNo)} with ${charges.length} linked charge${charges.length === 1 ? '' : 's'}`}</small></div>
+            ${isChild ? `<button type="button" class="btn xs" data-xp-action="open-linked" data-entry="${root.entryId}" data-key="${key}">${icon('chevron-right')}Open expense</button>
+                ${manage ? `<button type="button" class="btn xs" data-xp-action="move-charge" data-key="${key}" title="It belongs to another expense">${icon('transfer')}Move…</button>
+                <button type="button" class="btn xs ghost" data-xp-action="charge-unlink" data-entry="${focusId}" data-key="${key}" title="Keep it as an expense on its own">${icon('unlock')}Unlink</button>` : ''}`
+            : manage && linkable ? `<button type="button" class="btn xs" data-xp-action="add-charge" data-key="${key}">${icon('plus')}Add charge</button>
+                <button type="button" class="btn xs ghost" data-xp-action="link-existing" data-key="${key}" title="A fee or tax you already recorded on its own">${icon('link')}Link existing…</button>` : ''}
         </div>
+        ${bar}
+        <div class="xl-parts">${parts.map(line).join('')}</div>
+        ${total !== null ? `<div class="xl-foot">
+            ${back > 0.004 ? `<span class="xl-flow"><span>Paid <b class="mono">${money(paid)}</b></span><span class="xr-back">${icon('arrow-in')}back <b class="mono">−${money(back)}</b></span></span>` : ''}
+            <span class="xl-label">All-in${back > 0.004 ? ' now' : ''}</span><b class="mono">${money(total)}</b>
+            <span class="muted">charges add <b class="${extra / (root.amount || 1) > 0.05 ? 'neg' : ''}">${percent(root.amount ? (extra / root.amount) * 100 : 0, 1)}</b> on top of ${money(root.amount)}</span></div>` : ''}
     </div>`;
 }
 
-/** Refunds and the reversal of an expense, each with its entry, evidence and an undo. */
-function refundsHtml(e, manage) {
+/**
+ * What came back on the expense opened, in full: paid, back and what still counts (with a bar), then each refund or
+ * the reversal with its entry, date, account, note, who recorded it and when, its posting and evidence, to open or undo.
+ */
+function refundsHtml(e, manage, entries = new Map()) {
     if (!e.refunds?.length) return '';
+    const gross = Number(e.amount), back = Number(e.refunded), net = Number(e.netAmount);
+    const reversed = e.status === 'REVERSED';
+    const key = `x${e.entryId}-${e.categoryId}`;
     return `
     <div class="xp-refunds">
-        <div class="section-title">${icon('arrow-in')} ${e.status === 'REVERSED' ? 'Reversed' : 'Refunds'}
-            <span class="muted">· ${money(e.refunded)} of ${money(e.amount)} back${e.status === 'PARTLY_REFUNDED' ? ` · ${money(e.netAmount)} still counts` : ''}</span></div>
-        ${e.refunds.map(f => `
+        <div class="xr-head">
+            <span class="chip-icon xs ${reversed ? 'gray' : 'aqua'}">${icon(reversed ? 'undo' : 'arrow-in')}</span>
+            <b>${reversed ? 'Reversed' : e.status === 'REFUNDED' ? 'Refunded in full' : 'Part refunded'}</b>
+            <span class="muted small">${e.refunds.length} entr${e.refunds.length === 1 ? 'y' : 'ies'}</span>
+            <span class="spacer"></span>
+            <span class="xr-sum"><span>Paid <b class="mono">${money(gross)}</b></span><span class="xr-back">Back <b class="mono">−${money(back)}</b></span>
+                <span>Still counts <b class="mono">${money(net)}</b></span></span>
+        </div>
+        <i class="xr-bar" title="${percent(gross ? (back / gross) * 100 : 0, 0)} came back"><em style="width:${gross ? Math.min(100, (back / gross) * 100) : 0}%"></em></i>
+        ${e.refunds.map(f => {
+            const entry = entries.get(f.entryId);
+            return `
         <div class="xp-refund ${f.reversal ? 'is-reversal' : ''}">
             <span class="chip-icon xs ${f.reversal ? 'gray' : 'aqua'}">${icon(f.reversal ? 'undo' : 'arrow-in')}</span>
-            <div class="grow min-0"><b>${f.reversal ? 'Reversal' : 'Refund'} ${money(f.amount)}</b>
-                <span class="small muted">${date(f.date)} · ${esc(f.entryNo)}${f.accountName ? ` · ${f.reversal ? 'back to' : 'into'} ${esc(f.accountName)}` : ''}${f.note ? ` · ${esc(f.note)}` : ''}</span>
+            <div class="grow min-0">
+                <div class="xr-title"><b>${f.reversal ? 'Reversal' : 'Refund'}</b><b class="mono xr-amt">−${money(f.amount)}</b>
+                    <span class="muted small">${date(f.date)} · ${dayName(f.date)}</span></div>
+                <div class="xr-facts">
+                    <span class="xd-fact" title="Entry number">${icon('journal')}<b>${esc(f.entryNo)}</b>${entry ? ` ${esc(entry.voucherLabel)}` : ''}</span>
+                    ${f.accountName ? `<span class="xd-fact" title="${f.reversal ? 'Back to' : 'Received into'}">${icon('wallet')}${f.reversal ? 'back to' : 'into'} ${esc(f.accountName)}</span>` : ''}
+                    ${f.note ? `<span class="xd-fact" title="Note">${icon('info')}${esc(f.note)}</span>` : ''}
+                    ${entry ? `<span class="xd-fact" title="Recorded">${icon('history')}${dateTime(entry.createdAt)} · ${esc(entry.createdBy || '')}</span>` : ''}
+                </div>
+                ${entry ? `<div class="xr-posting">${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span>
+                    <span class="ellipsis">${esc(l.accountName)}${l.categoryId && l.categoryId === e.categoryId ? ` <span class="muted">· ${esc(e.categoryName)}</span>` : ''}</span>
+                    <b class="mono ${Number(l.debit) ? '' : 'muted'}">${money(Number(l.debit) || Number(l.credit))}</b></div>`).join('')}</div>` : ''}
                 <div data-ev-entry="${f.entryId}" data-ev-count="${f.attachmentCount || 0}"></div></div>
-            ${manage ? `<button class="btn sm ghost" data-xp-action="undo-refund" data-refund="${f.entryId}" data-key="x${e.entryId}-${e.categoryId}" title="Undo: delete ${esc(f.entryNo)}">${icon('undo')}Undo</button>` : ''}
-        </div>`).join('')}
+            <span class="xr-acts">
+                <button class="btn xs" data-xp-action="open-refund" data-entry="${f.entryId}" data-key="${key}" title="Open ${esc(f.entryNo)}">${icon('chevron-right')}Open</button>
+                ${manage ? `<button class="btn xs ghost" data-xp-action="undo-refund" data-refund="${f.entryId}" data-key="${key}" title="Undo: delete ${esc(f.entryNo)}">${icon('undo')}Undo</button>` : ''}</span>
+        </div>`;
+        }).join('')}
     </div>`;
 }
 
@@ -1272,12 +1533,12 @@ async function openReverseDialog(r, reload) {
 
 /** Charges that commonly come with an expense, and the category each one most likely belongs to. */
 const CHARGE_KINDS = [
-    { label: 'Transaction fee', iconName: 'bank', match: /bank|fee|charge/i },
-    { label: 'Convenience fee', iconName: 'card', match: /fee|charge|bank/i },
-    { label: 'GST / tax', iconName: 'percent', match: /gst|tax/i },
-    { label: 'Tip', iconName: 'heart', match: null },
-    { label: 'Delivery', iconName: 'send', match: /deliver|shipping|courier/i },
-    { label: 'Late fee', iconName: 'alert', match: /penal|late|fine|fee|charge/i },
+    { label: 'Transaction fee', short: 'Fee', iconName: 'bank', tone: 'ocean', match: /bank|fee|charge/i, words: ['transaction fee', 'processing fee', 'surcharge'] },
+    { label: 'Convenience fee', short: 'Conv. fee', iconName: 'card', tone: 'ocean', match: /fee|charge|bank/i, words: ['convenience', 'booking fee', 'platform fee'] },
+    { label: 'GST / tax', short: 'Tax', iconName: 'percent', tone: 'gold', match: /gst|tax/i, words: ['gst', 'tax', 'cess', 'vat'] },
+    { label: 'Tip', short: 'Tip', iconName: 'heart', tone: 'coral', match: /tips?|gratuity/i, words: ['tip', 'gratuity'] },
+    { label: 'Delivery', short: 'Delivery', iconName: 'send', tone: 'aqua', match: /deliver|shipping|courier/i, words: ['deliver', 'shipping', 'courier', 'packing'] },
+    { label: 'Late fee', short: 'Late fee', iconName: 'alert', tone: 'red', match: /penal|late|fine|fee|charge/i, words: ['late fee', 'penalty', 'fine'] },
 ];
 
 /**
@@ -1286,21 +1547,26 @@ const CHARGE_KINDS = [
  */
 function openChargeDialog(r, { accounts, expenseCategories, onSaved }) {
     const e = r.raw;
-    const saveKey = newRequestKey();
+    let saveKey = newRequestKey();
+    const added = [];   // charges added with "Add & another" while the dialog stays open
+    const earlier = () => (e.linked || []).reduce((s, l) => s + Number(l.netAmount), 0) + added.reduce((s, a) => s + Number(a.amount), 0);
     const guess = kind => (kind.match && expenseCategories.find(c => c.active !== false && kind.match.test(c.name))?.id) || e.categoryId;
+    const percentOf = p => Math.round(r.amount * p) / 100;
     const modal = openModal({
         title: `Add a charge · ${e.narration}`, iconName: 'link',
         body: `<form class="form-grid two">
             <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.narration)}</b><span class="spacer"></span><b>${money(r.amount)}</b></div>
                 <div class="small muted">${date(e.date)} · ${esc(e.categoryName)} · paid from ${esc(e.paidFrom)}${e.linked?.length ? ` · ${e.linked.length} charge${e.linked.length === 1 ? '' : 's'} already` : ''}</div></div>
             <div class="span-2 xc-kinds">${CHARGE_KINDS.map((k, i) => `<button type="button" class="xf-chip ${i === 0 ? 'on' : ''}" data-kind="${i}">${icon(k.iconName)}${k.label}</button>`).join('')}</div>
-            <label class="field"><span>Charge *</span><input name="amount" type="number" step="any" min="0.01" required data-plain placeholder="₹"></label>
+            <label class="field"><span>Charge *</span><input name="amount" type="number" step="any" min="0.01" required data-plain placeholder="₹">
+                <span class="chips" title="A share of ${money(r.amount)}">${[1, 1.5, 2, 2.5, 5, 18].map(p => `<button type="button" class="date-chip" data-pct="${p}">${p}%</button>`).join('')}</span></label>
             ${field({ label: 'Date', name: 'entryDate', type: 'date', value: e.date, required: true })}
             ${field({ label: 'Category', name: 'categoryId', type: 'select', required: true, options: categoryOptions(expenseCategories, guess(CHARGE_KINDS[0])) })}
             ${field({ label: 'Paid from', name: 'paidFromId', type: 'select', required: true,
                       options: accountOptions(accounts, a => (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY') && !['CHIT_FUND', 'RECEIVABLE'].includes(a.accountType), e.paidFromId) })}
             ${field({ label: 'Description', name: 'narration', value: `${CHARGE_KINDS[0].label} · ${e.narration}`, span: 'span-2' })}
             ${field({ label: 'Note', name: 'notes', placeholder: 'e.g. 1.8% card surcharge', span: 'span-2' })}
+            <div class="span-2 xc-added" data-added hidden></div>
             <div class="span-2 xc-total" data-total></div>
             <div class="span-2">${evidenceFieldHtml({ label: 'Proof', hint: 'Bill line, SMS or screenshot showing the charge' })}</div>
         </form>`,
@@ -1308,10 +1574,14 @@ function openChargeDialog(r, { accounts, expenseCategories, onSaved }) {
             const form = m.el.querySelector('form');
             const drawTotal = () => {
                 const charge = Number(form.amount.value || 0);
-                form.querySelector('[data-total]').innerHTML = `${icon('link')}<span>${money(r.amount)} + this ${money(charge)}${e.linked?.length ? ` + earlier ${money(e.linked.reduce((s, l) => s + Number(l.netAmount), 0))}` : ''}</span>
-                    <b>= ${money(r.amount + charge + (e.linked || []).reduce((s, l) => s + Number(l.netAmount), 0))} all-in</b>`;
+                const before = earlier();
+                form.querySelector('[data-total]').innerHTML = `${icon('link')}<span>${money(r.amount)}${before ? ` + earlier ${money(before)}` : ''} + this ${money(charge)}
+                    <small class="muted">(${percent(r.amount ? (charge / r.amount) * 100 : 0, 1)} of the expense)</small></span>
+                    <b>= ${money(r.amount + before + charge)} all-in</b>`;
             };
             form.addEventListener('click', ev => {
+                const pct = ev.target.closest('[data-pct]');
+                if (pct) { form.amount.value = percentOf(Number(pct.dataset.pct)); drawTotal(); return; }
                 const b = ev.target.closest('[data-kind]');
                 if (!b) return;
                 const kind = CHARGE_KINDS[Number(b.dataset.kind)];
@@ -1325,20 +1595,127 @@ function openChargeDialog(r, { accounts, expenseCategories, onSaved }) {
             drawTotal();
             setTimeout(() => form.amount.focus(), 50);
         },
+        actions: [
+            { label: 'Close' },
+            {
+                label: 'Add & another', iconName: 'plus', title: 'Save this charge and add the next one',
+                onClick: async m => {
+                    const saved = await save(m);
+                    if (!saved) return true;
+                    // keep the dialog: what was added is listed, the amount and note start again, the kind stays
+                    added.push(saved);
+                    const list = m.el.querySelector('[data-added]');
+                    list.hidden = false;
+                    list.innerHTML = `${icon('check-circle')}<span>Added: ${added.map(a => `<b>${esc(chargeTitle(a.narration, e.narration))}</b> ${money(a.amount)}`).join(' · ')}</span>`;
+                    const form = m.el.querySelector('form');
+                    form.amount.value = '';
+                    form.notes.value = '';
+                    form.amount.dispatchEvent(new Event('input'));
+                    form.amount.focus();
+                    toast(`${saved.entryNo} linked to ${e.entryNo}`);
+                    onSaved(saved, { keepOpen: true });
+                    return true;
+                },
+            },
+            {
+                label: 'Add charge', kind: 'primary', iconName: 'check',
+                onClick: async m => {
+                    const saved = await save(m);
+                    if (!saved) return true;
+                    onSaved(saved);
+                },
+            },
+        ],
+    });
+    const proof = bindEvidenceField(modal.el);   // emptied after each upload, ready for the next charge
+
+    async function save(m) {
+        const form = m.el.querySelector('form');
+        if (!form.reportValidity()) return null;
+        const d = readForm(form);
+        const saved = await api.post(`/expenses/${e.entryId}/linked`, { entryDate: d.entryDate, amount: d.amount, categoryId: Number(d.categoryId),
+            paidFromId: Number(d.paidFromId), narration: d.narration, party: e.party, reference: e.reference, notes: d.notes }, { key: saveKey });
+        saveKey = newRequestKey();   // the next one is a new charge
+        await proof.uploadTo(saved.id);
+        return saved;
+    }
+}
+
+/**
+ * Links expenses together after the fact, from the expenses a week either side:
+ *   attach  pick the expenses recorded on their own that came with this one (a fee, the GST line, a tip): several at once
+ *   move    pick the expense a charge really belongs to
+ * The likeliest come first: the same account, the nearest dates, and (to attach) small amounts or words like fee or tax.
+ */
+async function openLinkPicker(r, mode, reload) {
+    const e = r.raw;
+    const around = new Date(e.date + 'T00:00:00');
+    const from = isoDate(addDays(around, -7)), to = isoDate(addDays(around, 7));
+    const rows = await api.get('/expenses', { from, to });
+    const attach = mode === 'attach';
+    const feeWords = /fee|charge|gst|tax|tip|surcharge|deliver|convenience|cess|penalty/i;
+    const candidates = rows.filter(x => x.entryId !== e.entryId && x.linkable && (attach
+        ? !x.linked?.length && x.status !== 'REVERSED'
+        : x.entryId !== e.parentEntryId))
+        .map(x => {
+            const days = Math.abs((new Date(x.date + 'T00:00:00') - around) / 86400000);
+            const likely = attach ? (feeWords.test(x.narration) || Number(x.netAmount) < Number(e.netAmount) * 0.2) : Number(x.netAmount) > Number(e.netAmount);
+            return { x, days, likely, score: (x.paidFromId === e.paidFromId ? 0 : 3) + days + (likely ? 0 : 4) };
+        })
+        .filter((c, i, arr) => arr.findIndex(o => o.x.entryId === c.x.entryId) === i)   // one line per entry
+        .sort((a, b) => a.score - b.score);
+    const item = c => `
+        <label class="xl-pick ${c.likely ? 'likely' : ''}" data-text="${esc(`${c.x.narration} ${c.x.categoryName} ${c.x.entryNo} ${c.x.paidFrom} ${c.x.party || ''}`.toLowerCase())}">
+            <input type="${attach ? 'checkbox' : 'radio'}" name="pick" value="${c.x.entryId}">
+            <span class="chip-icon xs ${categoryIcon(c.x.categoryName).tone}">${icon(categoryIcon(c.x.categoryName).name)}</span>
+            <span class="grow min-0"><b class="ellipsis">${esc(c.x.narration)}</b>
+                <small class="muted ellipsis">${esc(c.x.entryNo)} · ${shortDate(c.x.date)}${c.days ? ` (${c.days}d ${c.x.date < e.date ? 'before' : 'after'})` : ' (same day)'} · ${esc(c.x.categoryName)} · ${esc(c.x.paidFrom)}</small></span>
+            ${c.likely ? `<span class="xl-likely">${icon('sparkles')}${attach ? 'likely a charge' : 'likely'}</span>` : ''}
+            ${c.x.linked?.length ? `<span class="xl-chip" title="Has ${c.x.linked.length} charge(s) already">${icon('link')}<b>${c.x.linked.length}</b></span>` : ''}
+            <b class="mono">${money(c.x.netAmount)}</b></label>`;
+    const modal = openModal({
+        title: attach ? `Link charges to ${e.narration}` : `Move ${e.entryNo} to another expense`, iconName: attach ? 'link' : 'transfer', size: 'lg',
+        body: `
+        <div class="xl-picker">
+            <div class="post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.narration)}</b><span class="spacer"></span><b>${money(e.netAmount)}</b></div>
+                <div class="small muted">${attach ? 'Pick the expenses you recorded on their own that came with this one: a fee, the tax line, a tip. They stay as they are; they are only shown together.'
+                    : `Now a charge of ${esc(e.parentEntryNo)} · ${esc(e.parentNarration || '')}. Pick the expense it really came with.`}</div></div>
+            <div class="search-box sm">${icon('search')}<input data-pick-search placeholder="Find by description, category, account or entry no." data-plain></div>
+            <div class="xl-pick-list">${candidates.length ? candidates.map(item).join('') : emptyState(`No ${attach ? 'expenses on their own' : 'other expenses'} a week either side of ${date(e.date)}`, 'link')}</div>
+            <div class="xl-pick-foot muted small" data-pick-sum></div>
+        </div>`,
         actions: [{ label: 'Cancel' }, {
-            label: 'Add charge', kind: 'primary', iconName: 'check',
+            label: attach ? 'Link' : 'Move', kind: 'primary', iconName: attach ? 'link' : 'transfer',
             onClick: async m => {
-                const form = m.el.querySelector('form');
-                if (!form.reportValidity()) return true;
-                const d = readForm(form);
-                const saved = await api.post(`/expenses/${e.entryId}/linked`, { entryDate: d.entryDate, amount: d.amount, categoryId: Number(d.categoryId),
-                    paidFromId: Number(d.paidFromId), narration: d.narration, party: e.party, reference: e.reference, notes: d.notes }, { key: saveKey });
-                await proof.uploadTo(saved.id);
-                onSaved(saved);
+                const picked = [...m.el.querySelectorAll('[name=pick]:checked')].map(i => Number(i.value));
+                if (!picked.length) { toast(attach ? 'Pick at least one expense' : 'Pick the expense it belongs to', 'error'); return true; }
+                if (attach) {
+                    for (const id of picked) await api.put(`/expenses/${id}/link`, { parentId: e.entryId });
+                    view.collapsed.delete(e.entryId);
+                    toast(`${picked.length} charge${picked.length === 1 ? '' : 's'} linked to ${e.entryNo}`);
+                } else {
+                    await api.put(`/expenses/${e.entryId}/link`, { parentId: picked[0] });
+                    toast(`${e.entryNo} moved to ${rows.find(x => x.entryId === picked[0])?.entryNo || 'the expense'}`);
+                }
+                reload();
             },
         }],
     });
-    const proof = bindEvidenceField(modal.el);
+    const el = modal.el;
+    const drawSum = () => {
+        const picked = [...el.querySelectorAll('[name=pick]:checked')].map(i => rows.find(x => x.entryId === Number(i.value)));
+        const sumPicked = picked.reduce((s, x) => s + Number(x.netAmount), 0);
+        el.querySelector('[data-pick-sum]').innerHTML = !picked.length ? `${candidates.length} expense${candidates.length === 1 ? '' : 's'} from ${date(from)} to ${date(to)}`
+            : attach ? `${picked.length} picked · +${money(sumPicked)} · all-in ${money(Number(e.netAmount) + sumPicked + (e.linked || []).reduce((s, l) => s + Number(l.netAmount), 0))}`
+            : `Moves to ${esc(picked[0].entryNo)} · ${esc(picked[0].narration)}`;
+        el.querySelectorAll('.xl-pick').forEach(p => p.classList.toggle('on', p.querySelector('input').checked));
+    };
+    el.addEventListener('change', drawSum);
+    el.querySelector('[data-pick-search]').addEventListener('input', ev => {
+        const text = ev.target.value.trim().toLowerCase();
+        el.querySelectorAll('.xl-pick').forEach(p => { p.hidden = text && !p.dataset.text.includes(text); });
+    });
+    drawSum();
 }
 
 /**

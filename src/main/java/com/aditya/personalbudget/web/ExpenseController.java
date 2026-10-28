@@ -131,6 +131,14 @@ public class ExpenseController {
         return expenses.addLinked(entryId, request);
     }
 
+    /** Links an expense to the one it came with, moves a charge to another expense, or ({"parentId": null}) unlinks it. */
+    @PutMapping("/expenses/{entryId}/link")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public ResponseEntity<Void> relink(@PathVariable Long entryId, @RequestBody Map<String, Long> body) {
+        expenses.relink(entryId, body == null ? null : body.get("parentId"));
+        return ResponseEntity.noContent().build();
+    }
+
     /** Turns an expense into money paid for someone, tracked until they pay it back. */
     @PostMapping("/expenses/{entryId}/paid-for")
     @RequiresPermission(Permission.POST_TRANSACTIONS)

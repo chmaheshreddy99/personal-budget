@@ -31,6 +31,7 @@ import { chitStatus, chitTrailHtml, hasChitStatus } from '../core/chit-trail.js'
 import { bondHtml, printBond, padHtml, bindPad, evidenceRows, chitRecitals } from '../core/bond.js';
 import { kycTilesHtml, bindKycTiles, fileUrls, kycAnnexures, DOC_LABELS } from '../components/agreement-ui.js';
 import * as chitAccounts from './chit-accounts.js';
+import { showRoute } from '../core/route.js';
 import { paymentsNarrative, sectionSwitch, moneyAccountOptions, openTransfer, whereHtml, monthTrailHtml, transfersTable, statsToggleHtml, bindStatsToggle } from './chit-accounts.js';
 
 const view = { selectedId: null, tab: 'month', historyKind: 'ALL', memberQuery: '', duesFilter: 'ALL' };
@@ -385,12 +386,12 @@ export async function render(container, params, isCurrent) {
         if (row && view.wizard && wizardDirty(view.wizard)
             && !await confirmDialog('Leave without creating the new chit? What you entered is lost.', { confirmLabel: 'Leave', danger: false })) return;
         if (row) { view.wizard = null; container.querySelector('#hc-detail')?.classList.remove('hc-creating'); }
-        if (row) show(Number(row.dataset.id));
+        if (row) show(Number(row.dataset.id), { push: Number(row.dataset.id) !== view.selectedId });
     });
 
-    async function show(id) {
+    async function show(id, { push = false } = {}) {
         view.selectedId = id;
-        history.replaceState(null, '', `#/host-chits/${id}/${view.tab}`);
+        showRoute(`#/host-chits/${id}/${view.tab}`, { push });
         listEl.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const d = await api.get(`/hosted-chits/${id}`);
         if (view.selectedId !== id) return;
@@ -590,7 +591,7 @@ function drawDetail(container, d) {
         const tab = e.target.closest('[data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
-            history.replaceState(null, '', `#/host-chits/${c.id}/${view.tab}`);
+            showRoute(`#/host-chits/${c.id}/${view.tab}`);
             target.querySelectorAll('#hc-tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
             drawTab();
             body.scrollTop = 0;

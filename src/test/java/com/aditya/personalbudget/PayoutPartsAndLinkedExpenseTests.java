@@ -182,6 +182,49 @@ class PayoutPartsAndLinkedExpenseTests {
         expenses.delete(ticket.id());
     }
 
+    @Test
+    void aRefundOnAChargeShowsUnderItsExpense() {
+        Long category = expenseCategory();
+        EntryView dinner = expenses.create(expense(category, bank, "2000", "Dinner"));
+        EntryView tip = expenses.addLinked(dinner.id(), expense(category, bank, "200", "Tip"));
+        EntryView back = expenses.refund(tip.id(), new ExpenseService.RefundRequest(LocalDate.now(), bd(50), null, "Tip reduced"));
+
+        ExpenseService.LinkedView charge = row(dinner.id()).linked().getFirst();
+        assertThat(charge.status()).isEqualTo("PARTLY_REFUNDED");
+        assertThat(charge.refunded()).isEqualByComparingTo("50");
+        assertThat(charge.netAmount()).isEqualByComparingTo("150");
+        assertThat(charge.refunds()).singleElement().satisfies(f -> {
+            assertThat(f.entryId()).isEqualTo(back.id());
+            assertThat(f.note()).isEqualTo("Tip reduced");
+        });
+    }
+
+    @Test
+    void anExpenseRecordedOnItsOwnIsLinkedMovedAndUnlinked() {
+        Long category = expenseCategory();
+        EntryView flight = expenses.create(expense(category, bank, "6000", "Flight"));
+        EntryView hotel = expenses.create(expense(category, bank, "4000", "Hotel"));
+        EntryView fee = expenses.create(expense(category, bank, "150", "Booking fee"));
+
+        expenses.relink(fee.id(), flight.id());
+        assertThat(row(fee.id()).parentEntryId()).isEqualTo(flight.id());
+        assertThat(row(flight.id()).linked()).extracting(ExpenseService.LinkedView::entryId).containsExactly(fee.id());
+
+        expenses.relink(fee.id(), hotel.id());   // moved
+        assertThat(row(flight.id()).linked()).isEmpty();
+        assertThat(row(hotel.id()).linked()).extracting(ExpenseService.LinkedView::entryId).containsExactly(fee.id());
+
+        // an expense with charges cannot become a charge, a charge cannot take charges, nothing links to itself
+        assertThatThrownBy(() -> expenses.relink(hotel.id(), flight.id())).isInstanceOf(BusinessException.class).hasMessageContaining("charges of its own");
+        assertThatThrownBy(() -> expenses.relink(flight.id(), fee.id())).isInstanceOf(BusinessException.class).hasMessageContaining("itself a charge");
+        assertThatThrownBy(() -> expenses.relink(flight.id(), flight.id())).isInstanceOf(BusinessException.class);
+
+        expenses.relink(fee.id(), null);   // on its own again
+        assertThat(row(fee.id()).parentEntryId()).isNull();
+        assertThat(row(hotel.id()).linked()).isEmpty();
+        assertThat(balance(bank)).isEqualByComparingTo("39850");   // the money never moved
+    }
+
     // ------------------------------------------------------------------ expense to paid for
 
     @Test

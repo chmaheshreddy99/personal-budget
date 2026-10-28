@@ -15,6 +15,7 @@ import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMont
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, shortAccount, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
+import { showRoute } from '../core/route.js';
 import { claimContextHtml, claimBadge, reminderText } from '../components/claim-panel.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openDebtDialog } from '../components/debt-dialog.js';
@@ -65,11 +66,11 @@ const savePrefs = () => setPref('statement', prefs);
 const toneOf = a => BUCKET_TONE[a.bucket] || (a.accountClass === 'INCOME' ? 'green' : a.accountClass === 'EXPENSE' ? 'coral' : 'slate');
 
 export async function render(container, params, isCurrent) {
-    // opened for an entry (#/accounts/<account>/entry/<entry>): that account, its statement reaching back to the entry
+    // the address: #/accounts/<account>; #/accounts/<account>/entry/<entry> opens that account with its statement
+    // reaching back to the entry, the entry expanded
     const focusAccount = /^\d+$/.test(params[0] || '') ? Number(params[0]) : null;
     const focusEntry = focusAccount && params[1] === 'entry' && /^\d+$/.test(params[2] || '') ? Number(params[2]) : null;
-    if (params.length) history.replaceState(null, '', '#/accounts');
-    if (focusAccount) {
+    if (focusAccount && focusAccount !== view.selectedId || focusEntry) {
         Object.assign(view, { selectedId: focusAccount, search: '', tab: 'ALL', emi: false, flow: 'all', pane: 'ledger', paneAccount: focusAccount, q: '' });
     }
     if (focusEntry) {
@@ -237,8 +238,9 @@ export async function render(container, params, isCurrent) {
     };
 
     let detailTimer;
-    const select = (id, { soon = false } = {}) => {
+    const select = (id, { soon = false, push = false } = {}) => {
         view.selectedId = id;
+        showRoute(`#/accounts/${id}`, { push });
         listEl.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         listEl.querySelector(`[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
         clearTimeout(detailTimer);
@@ -277,7 +279,7 @@ export async function render(container, params, isCurrent) {
     });
     listEl.addEventListener('click', e => {
         const item = e.target.closest('[data-id]');
-        if (item) { select(Number(item.dataset.id)); listEl.focus({ preventScroll: true }); }
+        if (item) { select(Number(item.dataset.id), { push: Number(item.dataset.id) !== view.selectedId }); listEl.focus({ preventScroll: true }); }
     });
 
     // ↑ / ↓ (also from the search box), Home / End, PgUp / PgDn; ← / → switch the class filter

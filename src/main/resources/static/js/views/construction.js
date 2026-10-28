@@ -8,6 +8,7 @@
  *   #/construction/new        start a project
  */
 import { api } from '../core/api.js';
+import { showRoute } from '../core/route.js';
 import { can, invalidateAccounts } from '../core/store.js';
 import { esc, toast, panel, emptyState, confirmDialog, loading, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
@@ -67,7 +68,7 @@ export async function render(container, params, isCurrent) {
     const listEl = container.querySelector('#cn-list');
     listEl.addEventListener('click', e => {
         const row = e.target.closest('[data-id]');
-        if (row) show(Number(row.dataset.id));
+        if (row) show(Number(row.dataset.id), { push: Number(row.dataset.id) !== view.selectedId });
     });
     let keyTimer;
     setPageKeys(listNavigator({
@@ -81,13 +82,13 @@ export async function render(container, params, isCurrent) {
         },
     }));
 
-    async function show(id) {
+    async function show(id, { push = false } = {}) {
         view.selectedId = id;
         listEl.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const d = await api.get(`/construction/${id}`);
         if (view.selectedId !== id) return;
         if (!tabsOf(d.project).some(([k]) => k === view.tab)) view.tab = 'overview';
-        history.replaceState(null, '', `#/construction/${id}/${view.tab}`);
+        showRoute(`#/construction/${id}/${view.tab}`, { push });
         current = d;
         drawDetail(container, d);
         container.querySelector('#cn-brand').innerHTML = brandHtml('projects');
@@ -107,7 +108,7 @@ async function afterChange(d, message, select = false) {
     if (!container) return;
     if (d) {
         current = d;
-        if (select) { view.selectedId = d.project.id; view.tab = 'overview'; history.replaceState(null, '', `#/construction/${d.project.id}/overview`); }
+        if (select) { view.selectedId = d.project.id; view.tab = 'overview'; showRoute(`#/construction/${d.project.id}/overview`, { push: true }); }
         if (container.querySelector('#cn-detail')) drawDetail(container, d);
     }
     if (message) toast(message);
@@ -278,7 +279,7 @@ function drawAccounts(container, book) {
     const keys = items.filter(i => i.a).map(i => i.a.id);
     if (!keys.includes(view.acct)) view.acct = (p ? book.accounts.find(a => a.id === p.bankAccountId) : null)?.id ?? keys[0] ?? null;
     if (!keys.includes(view.acct)) view.acct = keys[0] ?? null;
-    history.replaceState(null, '', `#/construction/accounts${p ? `/${p.id}` : ''}`);
+    showRoute(`#/construction/accounts${p ? `/${p.id}` : ''}`);
 
     container.innerHTML = `
     <div class="page chits-page cn-page cn-acct-page">
@@ -521,7 +522,7 @@ async function onClick(e, d, target, body, drawTab) {
     const tab = e.target.closest('[data-tab]');
     if (tab && tab.closest('#cn-tabs')) {
         view.tab = tab.dataset.tab;
-        history.replaceState(null, '', `#/construction/${d.project.id}/${view.tab}`);
+        showRoute(`#/construction/${d.project.id}/${view.tab}`);
         target.querySelectorAll('#cn-tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
         drawTab();
         body.scrollTop = 0;
