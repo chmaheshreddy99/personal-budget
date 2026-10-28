@@ -1180,7 +1180,7 @@ function rowHtml(r, withDate) {
     <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${r.kidsShown ? 'xp-parent' : ''} ${folded ? 'xl-folded' : ''}"
         data-key="${r.key}" ${r.nested ? `data-parent="${r.raw.parentEntryId}"` : ''}>
         ${withDate ? `<td class="c-date ${old ? 'old' : ''}" title="${old ? `Before the selected period, still open · ${ageOf(r.date)}` : dayName(r.date)}"><b>${date(r.date)}</b>${old ? icon('clock') : ''}</td>` : ''}
-        <td class="c-cat"><div class="xd-cat">${r.nested ? '<i class="xp-branch" aria-hidden="true"></i>' : ''}${category}</div></td>
+        <td class="c-cat"><div class="xd-cat">${category}</div></td>
         <td class="c-desc"><div class="xd-cell">
             <span class="xd-text">${kind ? `<span class="xl-kind ${kind.tone}" title="${esc(kind.label)}">${icon(kind.iconName)}${esc(kind.short)}</span>` : ''}<b class="ellipsis" title="${esc(r.description)}">${esc(title)}</b>${evidenceBadge(r.raw?.attachmentCount)}
                 ${refundPill(r.status, r.gross - r.amount, r.raw?.refunds)}

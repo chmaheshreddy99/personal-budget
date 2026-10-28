@@ -1952,11 +1952,21 @@ tr.detail-row td { white-space: normal; }
 /* ===================================================================== linked charges */
 .mini-flag.link { display: inline-flex; align-items: center; gap: 2px; width: auto; padding: 0 5px; font-size: 9.5px; font-weight: 700; background: #e6ecfb; color: #3a55b0; }
 .mini-flag.link.child { background: #f1ecfb; color: #6a45b0; }
-.xp-table tr.xp-child td { background: rgba(58, 85, 176, 0.03); }
-.xp-table tr.xp-child td.c-cat { overflow: visible; }
-.xp-table tr.xp-child .xd-cat { position: relative; padding-left: 18px; }
-.xp-branch { position: absolute; left: 4px; top: -14px; bottom: 50%; width: 10px; border-left: 1.5px solid #9aaee0; border-bottom: 1.5px solid #9aaee0; border-bottom-left-radius: 6px; pointer-events: none; }
-.xp-table tr.xp-child.nest-mid .xp-branch::after { content: ''; position: absolute; left: -1.5px; top: 100%; height: 22px; border-left: 1.5px solid #9aaee0; }
+/* an expense and its charges: the link is drawn in the cell padding on the left edge of the description column, so
+   nothing shifts. A dot on the expense, a line down from it, and a short elbow into each charge's kind pill; the
+   line runs on past all but the last charge. Date, category and description stay exactly where they are. */
+.xp-table tr.xp-child > td { background: linear-gradient(90deg, rgba(106, 69, 176, 0.07), rgba(106, 69, 176, 0.025) 40%, rgba(106, 69, 176, 0.01)); }
+.xp-table tr.xp-parent > td.c-desc, .xp-table tr.xp-child > td.c-desc { position: relative; overflow: visible; }
+.xp-table tr.xp-parent:has(+ tr.xp-child:not(.xl-folded)) > td.c-desc::before {   /* the dot on the expense, and the line down from it */
+    content: ''; position: absolute; left: 1px; top: 50%; bottom: -1px; width: 5px; pointer-events: none;
+    background: radial-gradient(circle at 50% 0, #6a45b0 0 3px, transparent 3.5px), linear-gradient(#9b7fe8, #9b7fe8) 2px 3px / 2px calc(100% - 3px) no-repeat; }
+.xp-table tr.xp-child > td.c-desc::before {   /* the elbow into the charge */
+    content: ''; position: absolute; left: 3px; top: -1px; height: calc(50% + 1px); width: 6px; pointer-events: none;
+    border-left: 2px solid #9b7fe8; border-bottom: 2px solid #9b7fe8; border-bottom-left-radius: 6px; }
+.xp-table tr.xp-child.nest-mid > td.c-desc::after {   /* on to the next charge */
+    content: ''; position: absolute; left: 3px; top: 50%; bottom: -1px; pointer-events: none; border-left: 2px solid #9b7fe8; }
+.xp-table tr.xp-child:hover > td.c-desc::before, .xp-table tr.xp-child:hover > td.c-desc::after { border-color: #6a45b0; }
+.xp-table tr.xp-child .xl-kind { box-shadow: 0 0 0 1.5px rgba(155, 127, 232, 0.45); }
 .xp-table tr.xp-child .xd-text b { font-weight: 550; }
 .xp-table tr.xp-parent + tr.xp-child td, .xp-table tr.xp-child + tr.xp-child td { border-top-color: transparent; }
 .xp-linked { grid-column: 1 / -1; display: grid; gap: 5px; padding: 6px 8px; border-radius: var(--radius-sm); background: rgba(58, 85, 176, 0.05); border: 1px solid rgba(58, 85, 176, 0.16); }
@@ -2081,7 +2091,7 @@ button.xl-chip:hover { background: #e2e8fb; border-color: #3a55b0; }
 .xp-table tr.xp-child .xl-amt { color: #b0442b; font-weight: 600; }
 .xp-table td.c-amt .xl-allin { display: block; font-size: 10px; color: #3a55b0; font-weight: 600; white-space: nowrap; }
 .xp-table tr.xl-folded { display: none; }
-.xp-table tr.xp-parent > td { background: rgba(58, 85, 176, 0.025); }
+.xp-table tr.xp-parent > td { background: rgba(106, 69, 176, 0.03); }
 
 .xl-card { grid-column: 1 / -1; display: grid; gap: 7px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(58, 85, 176, 0.2);
     background: linear-gradient(180deg, rgba(58, 85, 176, 0.05), rgba(255, 255, 255, 0.9) 70%); }
