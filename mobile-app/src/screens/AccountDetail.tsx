@@ -111,7 +111,7 @@ export function AccountDetail({ account, onBack, onAdd }: { account: Account; on
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={[st.amount, { color: inflow ? colors.green : colors.red }]}>{inflow ? '+' : '−'}{money(amount)}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                    <Text style={st.lineMeta}>{money(r.balance)}</Text>
+                    <Text style={st.lineMeta}>{app.bal(r.balance, account.id)}</Text>
                     {isOpen ? <ChevronUp color={colors.muted} size={14} /> : <ChevronDown color={colors.muted} size={14} />}
                   </View>
                 </View>
@@ -120,7 +120,7 @@ export function AccountDetail({ account, onBack, onAdd }: { account: Account; on
                 <View style={st.more}>
                   <View style={st.grid}>
                     {[['Date', date(r.date)], ['Entry', r.entryNo], ['Voucher', r.voucher], ['Other account', r.other],
-                      [inflow ? 'In' : 'Out', money(amount, 2)], ['Balance after', money(r.balance, 2)]].map(([kk, v]) => v ? (
+                      [inflow ? 'In' : 'Out', money(amount, 2)], ['Balance after', app.bal(r.balance, account.id, 2)]].map(([kk, v]) => v ? (
                       <View key={kk} style={st.kv}><Text style={st.k}>{kk}</Text><Text style={st.v} selectable>{v}</Text></View>) : null)}
                   </View>
                   <Text style={st.k}>Evidence</Text>

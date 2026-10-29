@@ -12,6 +12,7 @@ import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.service.AccountService;
+import com.aditya.personalbudget.service.AppSettingsService;
 import com.aditya.personalbudget.service.AppSyncService;
 import com.aditya.personalbudget.service.AppSyncService.SyncExpense;
 import com.aditya.personalbudget.service.AppSyncService.SyncRequest;
@@ -50,6 +51,7 @@ class AppSyncTests {
     @Autowired CategoryService categories;
     @Autowired AppSyncService app;
     @Autowired LedgerService ledger;
+    @Autowired com.aditya.personalbudget.service.AppSettingsService appSettings;
     @Autowired com.aditya.personalbudget.service.ChitService chits;
 
     @BeforeEach
@@ -100,6 +102,43 @@ class AppSyncTests {
                 new SyncExpense("phone-ok-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, category, bank, null, null, null, null)), null));
         assertThat(mixed).extracting(AppSyncService.SyncResult::status).containsExactly("FAILED", "CREATED");
         assertThat(app.statement(bank, 30).rows()).hasSize(3);   // the opening balance and two expenses
+    }
+
+    @Test
+    void transfersSyncOnceAndASectionSwitchedOffOnTheWebIsRefused() {
+        Long bank = accounts.create(new AccountRequest(null, "Transfer bank " + System.nanoTime(), AccountType.BANK, "HDFC", null, BigDecimal.valueOf(10000),
+                LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
+        Long cash = accounts.create(new AccountRequest(null, "Transfer cash " + System.nanoTime(), AccountType.CASH, null, null, BigDecimal.valueOf(500),
+                LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
+        assertThat(app.snapshot(30).mobile().features()).contains("TRANSFERS", "EXPENSES");
+        assertThat(app.snapshot(30).mobile().hideBalances()).isTrue();   // balances stay hidden until the person asks
+
+        var t = new AppSyncService.SyncTransfer("move-" + System.nanoTime(), LocalDate.now(), BigDecimal.valueOf(2000), bank, cash, "ATM", null);
+        var first = app.sync(new SyncRequest(null, null, null, null, null, null, null, List.of(t)));
+        assertThat(first).singleElement().satisfies(r -> assertThat(r.status()).isEqualTo("CREATED"));
+        assertThat(app.sync(new SyncRequest(null, null, null, null, null, null, null, List.of(t)))).singleElement().satisfies(r -> assertThat(r.status()).isEqualTo("DUPLICATE"));
+        assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("8000");
+        assertThat(ledger.snapshot().balanceAsOf(cash, LocalDate.now())).isEqualByComparingTo("2500");
+        // the same account on both sides is refused
+        var same = new AppSyncService.SyncTransfer("same-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, bank, bank, null, null);
+        assertThat(app.sync(new SyncRequest(null, null, null, null, null, null, null, List.of(same)))).singleElement()
+                .satisfies(r -> assertThat(r.status()).isEqualTo("FAILED"));
+
+        // switched off in Settings > Mobile app: refused, nothing booked, the snapshot says so
+        appSettings.saveMobileConfig(UserContext.tenantId(), new AppSettingsService.MobileConfig(java.util.Set.of("EXPENSES"), true, true, BigDecimal.valueOf(100000)));
+        try {
+            assertThat(app.snapshot(30).mobile().features()).containsExactly("EXPENSES");
+            assertThat(app.snapshot(30).mobile().maskNetWorth()).isTrue();
+            assertThat(app.snapshot(30).mobile().hideAbove()).isEqualByComparingTo("100000");
+            var off = new AppSyncService.SyncTransfer("off-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, bank, cash, null, null);
+            assertThat(app.sync(new SyncRequest(null, null, null, null, null, null, null, List.of(off)))).singleElement().satisfies(r -> {
+                assertThat(r.status()).isEqualTo("FAILED");
+                assertThat(r.message()).contains("switched off");
+            });
+            assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("8000");
+        } finally {
+            appSettings.saveMobileConfig(UserContext.tenantId(), new AppSettingsService.MobileConfig(new java.util.LinkedHashSet<>(AppSettingsService.MOBILE_FEATURES), true, false, null));
+        }
     }
 
     @Test

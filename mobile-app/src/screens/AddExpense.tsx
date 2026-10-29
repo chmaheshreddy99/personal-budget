@@ -274,13 +274,13 @@ export function AddExpense({ visible, onClose, prefill, editing }: { visible: bo
               <AccountBubble type={a.type} size={28} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={st.payerName} numberOfLines={1}>{a.name}</Text>
-                <Text style={st.payerSub} numberOfLines={1}>{a.last4 ? `•• ${a.last4} · ` : ''}{money(app.balanceOf(a))}</Text>
+                <Text style={st.payerSub} numberOfLines={1}>{a.last4 ? `•• ${a.last4} · ` : ''}{app.bal(app.balanceOf(a), a.id)}</Text>
               </View>
             </Pressable>
           );
         })}
       </View>
-      {acc && value > 0 ? <Text style={st.after}>{acc.accountClass === 'LIABILITY' ? 'Owed on' : income ? 'In' : 'Left in'} {acc.name} after this: <Text style={{ fontWeight: '800' }}>{money(after)}</Text></Text> : null}
+      {acc && value > 0 ? <Text style={st.after}>{acc.accountClass === 'LIABILITY' ? 'Owed on' : income ? 'In' : 'Left in'} {acc.name} after this: <Text style={{ fontWeight: '800' }}>{app.bal(after, acc?.id)}</Text></Text> : null}
 
       {owed ? (
         <View style={{ gap: 6 }}>

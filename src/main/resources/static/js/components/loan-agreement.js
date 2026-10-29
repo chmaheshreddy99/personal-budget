@@ -98,7 +98,7 @@ function deedOf(claim, a, urls, real, verified) {
     const ev = a.status === 'ACCEPTED' ? [{ title: 'Evidence of the online acceptance', rows: evidenceRows({
         name: a.acceptedName, at: a.acceptedAt, phone: a.acceptedPhone, phoneMatches: a.phoneMatches, aadhaarLast4: a.aadhaarLast4, ip: a.acceptedIp,
         device: a.acceptedDevice, userAgent: a.acceptedUserAgent, location: a.acceptedLocation, deviceHash: a.deviceHash, seal: a.acceptanceSeal,
-        digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, verified }) }] : [];
+        digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified }) }] : [];
     return {
         kind: claim.kind === 'PAID_FOR' ? 'DEBT' : 'LOAN',
         title: claim.kind === 'PAID_FOR' ? 'Acknowledgement of debt' : 'Loan agreement', number: a.agreementNo, date: a.loanDate, place: a.place,
@@ -183,7 +183,7 @@ async function openDeed(claim, first, onChanged) {
                     <small>ECDSA P-256 · key ${esc(a.keyFingerprint)}</small></div>
                 <table class="bond-facts ev"><tbody>${evidenceRows({ name: a.acceptedName, at: a.acceptedAt, phone: a.acceptedPhone, phoneMatches: a.phoneMatches,
                     aadhaarLast4: a.aadhaarLast4, ip: a.acceptedIp, device: a.acceptedDevice, userAgent: a.acceptedUserAgent, location: a.acceptedLocation,
-                    deviceHash: a.deviceHash, seal: a.acceptanceSeal, digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, verified: st.verified })
+                    deviceHash: a.deviceHash, seal: a.acceptanceSeal, digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified: st.verified })
                     .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</tbody></table>
                 ${a.acceptedLocation ? `<a class="btn sm ghost" target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(a.acceptedLocation.split(',').slice(0, 2).join(','))}">${icon('flag')}Open the location on a map</a>` : ''}
             </div>`;

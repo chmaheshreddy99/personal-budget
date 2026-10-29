@@ -20,6 +20,7 @@ final class AgreementFiles {
                 .contentType(MediaType.parseMediaType(f.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().filename(f.fileName(), StandardCharsets.UTF_8).build().toString())
                 .header("X-Content-Type-Options", "nosniff")
+                .header("X-Evidence-Intact", String.valueOf(f.intact()))
                 .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
                 .cacheControl(CacheControl.noStore())
                 .body(f.bytes());

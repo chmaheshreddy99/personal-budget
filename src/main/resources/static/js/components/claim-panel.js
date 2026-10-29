@@ -93,6 +93,7 @@ export function claimPanelHtml(c, { evidence = true, readOnly = false, highlight
             ${fig(meta.given, money(c.amount), `${shortDateYear(c.startDate)} · ${esc(c.paidFromAccount)}`)}
             ${fig(meta.repaid, money(c.repaid), c.lastPaymentDate ? `last ${shortDate(c.lastPaymentDate)}` : 'nothing yet', 'pos')}
             ${fig('Principal owed', money(c.outstanding), open ? `${c.daysOutstanding} days` : 'cleared', open ? 'neg' : '')}
+            ${c.forgoneInterest != null ? fig('Interest forgone', `<span class="loss">${money(c.forgoneInterest)}</span>`, `what the bank would have paid at ${Number(c.benchmarkRate)}% a year (${esc(c.benchmarkSource || '')})`, 'loss') : ''}
             ${c.interestRate ? fig('Interest', `${Number(c.interestRate)}% p.a.`, `${esc(c.interestTypeLabel)} · ${money(c.monthlyInterest)}/mo · ${esc((c.interestCollectionLabel || '').toLowerCase())}`) : ''}
             ${c.interestRate ? fig('Interest so far', money(c.accruedInterest), `${meta.payable ? 'paid' : 'received'} ${money(c.interestReceived)}${Number(c.interestPosted) ? ` · posted ${money(c.interestPosted)}` : ''}`, Number(c.interestDue) > 0 ? 'warn' : '') : ''}
             ${c.interestRate && open && plan !== 'ON_PAYMENT' ? fig(c.nextInterestDate ? `Next interest · ${shortDate(c.nextInterestDate)}` : 'Interest due now',
@@ -170,6 +171,7 @@ export function claimFiguresHtml(c) {
         ${mini(meta.given, money(c.amount))}
         ${mini(meta.repaid, money(c.repaid))}
         ${mini('Principal owed', money(c.outstanding), open && Number(c.outstanding) ? 'neg' : '')}
+        ${c.forgoneInterest != null ? mini('Forgone', money(c.forgoneInterest), 'loss') : ''}
         ${c.interestRate ? mini('Interest due', money(c.interestDue), Number(c.interestDue) ? 'warn-text' : '') : ''}
         ${c.interestRate && c.postings.length ? mini('Interest posted', money(c.interestPosted)) : ''}
         ${open ? mini('Net payable', money(c.settlementAmount), 'strong') : mini('Closed', c.lastPaymentDate ? date(c.lastPaymentDate) : '—')}
@@ -242,6 +244,7 @@ export function claimContextHtml(c, entryId = null) {
             ${mini(meta.given, money(c.amount))}
             ${mini(meta.repaid, money(c.repaid))}
             ${mini('Principal owed', money(c.outstanding), open && Number(c.outstanding) ? 'neg' : '')}
+            ${c.forgoneInterest != null ? mini('Forgone', money(c.forgoneInterest), 'loss') : ''}
             ${c.interestRate ? mini('Interest due', money(c.interestDue), Number(c.interestDue) ? 'warn-text' : '') : ''}
             ${c.interestRate && c.postings.length ? mini('Interest posted', money(c.interestPosted)) : ''}
             ${open ? mini('Net payable', money(c.settlementAmount), 'strong') : mini('Closed', c.lastPaymentDate ? date(c.lastPaymentDate) : '—')}

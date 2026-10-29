@@ -154,6 +154,7 @@ function ClaimCard({ c, left, pendingBack, open, onToggle, onReceive }:
         </View>
         <View style={{ alignItems: 'flex-end', gap: 3 }}>
           <Text style={[st.amount, { color: done ? colors.green : mine ? colors.text : colors.red }]}>{money(done ? c.amount : left)}</Text>
+          {c.forgoneInterest != null && c.forgoneInterest > 0 ? <Text style={st.loss}>−{money(c.forgoneInterest)} forgone</Text> : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Text style={[st.due, c.overdue && !done && { color: colors.red }]}>
               {done ? 'Settled' : c.overdue ? `Overdue ${-(days || 0)}d` : days !== null ? (days === 0 ? 'Due today' : `Due in ${days}d`) : `of ${moneyShort(c.amount)}`}
@@ -175,6 +176,7 @@ function ClaimCard({ c, left, pendingBack, open, onToggle, onReceive }:
             {detail(mine ? 'Paid from' : 'Came into', c.accountName)}
             {detail('Interest', c.interestRate ? `${c.interestRate}% a year` : null)}
             {detail('Interest due', c.interestDue ? money(c.interestDue) : null)}
+            {detail('Interest forgone', c.forgoneInterest != null && c.forgoneInterest > 0 ? `${money(c.forgoneInterest)} (the bank pays ${c.benchmarkRate}% a year)` : null)}
             {detail('Reference', c.reference)}
             {detail('Entry', c.entryNo)}
             {detail('Notes', c.notes)}
@@ -252,7 +254,7 @@ function ReceiveSheet({ claim, left, onClose }: { claim: Claim; left: number; on
             <AccountBubble type={a.type} size={26} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={st.accName} numberOfLines={1}>{a.name}</Text>
-              <Text style={st.sub} numberOfLines={1}>{money(app.balanceOf(a))}</Text>
+              <Text style={st.sub} numberOfLines={1}>{app.bal(app.balanceOf(a), a.id)}</Text>
             </View>
           </Pressable>
         ))}
@@ -264,6 +266,7 @@ function ReceiveSheet({ claim, left, onClose }: { claim: Claim; left: number; on
 }
 
 const st = StyleSheet.create({
+  loss: { fontSize: 11, color: '#9aa7b4', fontWeight: '600' },
   label: { color: 'rgba(255,255,255,0.6)', fontSize: 10.5, fontWeight: '800', letterSpacing: 1 },
   big: { color: colors.white, fontSize: 30, fontWeight: '800', marginTop: 2 },
   pills: { flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' },

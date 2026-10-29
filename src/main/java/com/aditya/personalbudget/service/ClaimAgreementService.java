@@ -595,8 +595,8 @@ public class ClaimAgreementService {
                 t.getCurrency(), a.getStampDuty(), a.getStampSerial(), a.getLenderSignature(), a.getWitnessName(), a.getWitnessSignature(),
                 Boolean.TRUE.equals(a.getRequireAadhaar()), Boolean.TRUE.equals(a.getRequireSelfie()), Boolean.TRUE.equals(a.getRequireLocation()),
                 docs, a.getStatus(), a.getAcceptedName(), a.getAcceptedAt(), a.getSignature(), a.getAadhaarLast4(), a.getAcceptanceSeal(),
-                a.getAcceptedLocation() != null, a.getEvidencePayload(), a.getDigitalSignature(), settings.payLinkPublicKey(),
-                settings.payLinkFingerprint(), a.getCreatedAt());
+                a.getAcceptedLocation() != null, a.getEvidencePayload(), a.getDigitalSignature(), settings.publicKeyFor(a.getEvidencePayload(), a.getDigitalSignature()),
+                settings.fingerprintFor(a.getEvidencePayload(), a.getDigitalSignature()), a.getCreatedAt());
     }
 
     private AgreementView view(ClaimAgreement a) {
@@ -612,7 +612,7 @@ public class ClaimAgreementService {
                 a.getLastViewedAt(), a.getFailedAttempts() == null ? 0 : a.getFailedAttempts(), a.getLockedAt(),
                 a.getAcceptedName(), a.getAcceptedAt(), a.getAcceptedPhone(), a.getPhoneMatches(), a.getAcceptedIp(), a.getAcceptedUserAgent(),
                 a.getAcceptedDevice(), a.getDeviceHash(), a.getAcceptedLocation(), a.getSignature(), a.getAadhaarLast4(), a.getAcceptanceSeal(),
-                a.getEvidencePayload(), a.getDigitalSignature(), settings.payLinkPublicKey(), settings.payLinkFingerprint(),
+                a.getEvidencePayload(), a.getDigitalSignature(), settings.publicKeyFor(a.getEvidencePayload(), a.getDigitalSignature()), settings.fingerprintFor(a.getEvidencePayload(), a.getDigitalSignature()),
                 files.listForAgreement(FILES, a.getId()), a.getCreatedBy(), a.getCreatedAt());
     }
 
@@ -651,11 +651,11 @@ public class ClaimAgreementService {
                 .orElseThrow(() -> new BusinessException("This agreement is no longer shared"));
     }
 
-    private static CurrentUser linkUser(Organization t, String name) {
+    static CurrentUser linkUser(Organization t, String name) {
         return new CurrentUser(null, "link", name, UserRole.VIEWER, t.getId(), t.getCode(), t.getName(), t.getCurrency(), Feature.all(), false);
     }
 
-    private static <T> T asTenant(Organization tenant, Supplier<T> work) {
+    static <T> T asTenant(Organization tenant, Supplier<T> work) {
         CurrentUser previous = UserContext.current().orElse(null);
         OrgClock.showFor(tenant.getId());   // the answer is written after this: in the organization's zone
         UserContext.set(new CurrentUser(null, "agreement-link", "Agreement link", UserRole.VIEWER, tenant.getId(), tenant.getCode(),
@@ -671,7 +671,7 @@ public class ClaimAgreementService {
         }
     }
 
-    private static String blank(String s) {
+    static String blank(String s) {
         return s == null || s.isBlank() ? null : s.trim();
     }
 }

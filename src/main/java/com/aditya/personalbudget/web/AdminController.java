@@ -35,9 +35,12 @@ public class AdminController {
 
     private final com.aditya.personalbudget.service.HostedChitService chits;
     private final OrgTimeZoneService timeZones;
+    private final com.aditya.personalbudget.service.ClaimService claimService;
 
     public AdminController(UserService users, AppSettingsService appSettings, com.aditya.personalbudget.service.TenantMailService mail,
-                           com.aditya.personalbudget.service.HostedChitService chits, OrgTimeZoneService timeZones) {
+                           com.aditya.personalbudget.service.HostedChitService chits, OrgTimeZoneService timeZones,
+                           com.aditya.personalbudget.service.ClaimService claimService) {
+        this.claimService = claimService;
         this.timeZones = timeZones;
         this.chits = chits;
         this.mail = mail;
@@ -50,6 +53,37 @@ public class AdminController {
     @RequiresPermission(Permission.MANAGE_USERS)
     public AppSettingsService.AppSettings updateAppSettings(@RequestBody AppSettingsService.AppSettings settings) {
         return appSettings.update(settings);
+    }
+
+    /** The yearly rate interest-free lending is compared with: what is set, what is in use and where it came from. */
+    public record ClaimBenchmark(java.math.BigDecimal configured, java.math.BigDecimal effective, String source) {
+    }
+
+    @GetMapping("/claim-benchmark")
+    @RequiresPermission(Permission.VIEW)
+    public ClaimBenchmark claimBenchmark() {
+        var b = claimService.benchmark();
+        return new ClaimBenchmark(appSettings.claimBenchmark(com.aditya.personalbudget.security.UserContext.tenantId()), b.rate(), b.source());
+    }
+
+    @PutMapping("/claim-benchmark")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public ClaimBenchmark saveClaimBenchmark(@RequestBody ClaimBenchmark body) {
+        appSettings.saveClaimBenchmark(com.aditya.personalbudget.security.UserContext.tenantId(), body.configured());
+        return claimBenchmark();
+    }
+
+    /** What the phone app may do and show for this household (sections, balance privacy). */
+    @GetMapping("/mobile-config")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public AppSettingsService.MobileConfig mobileConfig() {
+        return appSettings.mobileConfig(com.aditya.personalbudget.security.UserContext.tenantId());
+    }
+
+    @PutMapping("/mobile-config")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public AppSettingsService.MobileConfig saveMobileConfig(@RequestBody AppSettingsService.MobileConfig config) {
+        return appSettings.saveMobileConfig(com.aditya.personalbudget.security.UserContext.tenantId(), config);
     }
 
     /** Host a Chit: the household's chit-funds company name, which new chits are named after. */

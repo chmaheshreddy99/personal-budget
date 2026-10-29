@@ -16,6 +16,8 @@ import { exportButton, bindExport } from '../core/export.js';
 import { chitSummaryReport } from './chit-summary.js';
 import { hostedChitReport } from './hosted-chit-report.js';
 import { emiReport } from './emi-report.js';
+import { deepAnalysis } from './deep-analysis.js';
+import { investmentPlan } from './investment-plan.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, isoDate, firstOfMonth, date, orgNow } from '../core/format.js';
 import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, sparkline } from '../core/charts.js';
@@ -36,6 +38,8 @@ const REPORTS = [
     { key: 'trial-balance', label: 'Trial balance', iconName: 'scale', note: 'Debit and credit balances' },
     { key: 'cash-flow', label: 'Cash flow', iconName: 'droplet', note: 'Money in and out of cash & bank' },
     { key: 'expense-analysis', label: 'Expense analysis', iconName: 'pie', note: 'Where the money went' },
+    { key: 'deep-analysis', label: 'Deep analysis', iconName: 'sparkles', note: 'Trend, forecast, outliers and volatility with the statistics' },
+    { key: 'investment-plan', label: 'Investment plan', iconName: 'piggy', note: 'Where the income should go: debt, safety net, then investments' },
 ];
 
 /** Quick period choices for the date filters. */
@@ -102,7 +106,7 @@ export async function render(container, params, isCurrent) {
     const content = container.querySelector('#report-content');
     const usesAsOf = active.key === 'trial-balance';
     const ownToolbar = active.key === 'chit-summary';   // picks chits, not a period, and brings its own export
-    const periodless = active.key === 'emi';             // every EMI, whenever bought: a savings rate instead of a period
+    const periodless = active.key === 'emi' || active.key === 'investment-plan';             // every EMI, whenever bought: a savings rate instead of a period
 
     toolbar.innerHTML = `
         <h2 class="page-title">${icon(active.iconName)} ${active.label}</h2>
@@ -119,7 +123,7 @@ export async function render(container, params, isCurrent) {
         content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
         const drawer = { insights: insightsReport, categories: categoriesReport, accounts: accountsReport, chits: chitsReport,
                          'chit-summary': chitSummaryReport, 'hosted-chits': hostedChitReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
-                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport }[active.key];
+                         'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport, 'deep-analysis': deepAnalysis, 'investment-plan': investmentPlan }[active.key];
         if (isCurrent()) showRoute(routeHash(`reports/${active.key}`, ownToolbar || periodless ? {} : usesAsOf ? { asOf: period.asOf } : { from: period.from, to: period.to }));
         exportRows = await drawer(content, toolbar, period);
     };

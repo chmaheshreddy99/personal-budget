@@ -2,6 +2,8 @@ package com.personalbudget.app.bridge
 
 import android.Manifest
 import android.app.Activity
+import android.app.KeyguardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -183,7 +185,40 @@ class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactCo
         }
     }
 
+    // ------------------------------------------------------------------ the phone's own lock
+
+    private var authPending: Promise? = null
+
+    /**
+     * Asks for the phone's screen lock (pattern, PIN, password or fingerprint, whatever the person set up). Resolves "ok" when it is passed,
+     * "denied" when it is cancelled or failed, and "none" when the phone has no screen lock at all (then there is nothing to ask).
+     */
+    @ReactMethod
+    fun deviceAuth(title: String, message: String, promise: Promise) {
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguard == null || !keyguard.isDeviceSecure) { promise.resolve("none"); return }
+        val activity = context.currentActivity
+        if (activity == null) { promise.reject("AUTH", "The app is not in front"); return }
+        if (authPending != null) { promise.reject("AUTH", "Already asking"); return }
+        @Suppress("DEPRECATION")
+        val intent = keyguard.createConfirmDeviceCredentialIntent(title, message)
+        if (intent == null) { promise.resolve("none"); return }
+        authPending = promise
+        try {
+            activity.startActivityForResult(intent, REQ_AUTH)
+        } catch (e: Exception) {
+            authPending = null
+            promise.reject("AUTH", e.message, e)
+        }
+    }
+
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQ_AUTH) {
+            val p = authPending ?: return
+            authPending = null
+            p.resolve(if (resultCode == Activity.RESULT_OK) "ok" else "denied")
+            return
+        }
         if (requestCode != REQ_CAMERA && requestCode != REQ_FILES) return
         val promise = pending ?: return
         pending = null
@@ -306,6 +341,7 @@ class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactCo
         const val NAME = "BudgetBridge"
         private const val REQ_CAMERA = 7301
         private const val REQ_FILES = 7302
+        private const val REQ_AUTH = 7303
         private const val MAX_SIDE = 1600
         const val EVENT_SMS = "BudgetSms"
         @Volatile

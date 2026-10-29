@@ -272,7 +272,7 @@ function partyText(p) {
 
 /** The stamp band of the first page (stamp-paper style), or nothing on real stamp paper (its printed top is the sheet's). */
 function stampHtml(doc) {
-    if (doc.realStampPaper) return '';
+    if (doc.realStampPaper || doc.plainPaper) return '';   // real stamp paper brings its own band; plain paper takes a revenue stamp
     const duty = Number(doc.stampDuty || 0);
     const value = duty ? `₹${duty.toLocaleString('en-IN')}` : '₹ —';
     return `<div class="bond-sheet">
@@ -289,10 +289,10 @@ function stampHtml(doc) {
         </div>`;
 }
 
-function signBox(doc, p, label, { seal = null, thumb = false, lead = '' } = {}) {
+function signBox(doc, p, label, { seal = null, thumb = false, lead = '', revenue = false } = {}) {
     return `<div class="bond-signbox">
         ${lead ? `<small class="bond-sign-lead">${esc(lead)}</small>` : ''}
-        <div class="bond-signspace">${p?.signature ? signatureSvg(p.signature) : ''}${seal ? `<span class="bond-seal-wrap">${sealSvg(seal, 'SEAL')}</span>` : ''}</div>
+        <div class="bond-signspace">${p?.signature ? signatureSvg(p.signature) : ''}${seal ? `<span class="bond-seal-wrap">${sealSvg(seal, 'SEAL')}</span>` : ''}${revenue ? '<span class="bond-revenue"><i>Affix revenue<br>stamp here<br>and sign across it</i></span>' : ''}</div>
         <div class="bond-signline"><b>${esc(p?.name || '')}</b><small>${esc(label)}${p?.accepted ? ` · ${esc(p.accepted)}` : ''}</small></div>
         ${thumb ? '<div class="bond-thumb"><span>Left thumb impression</span></div>' : ''}
         ${p?.address ? `<small class="bond-signaddr">${esc(p.address)}</small>` : ''}
@@ -360,7 +360,7 @@ export function bondBlocks(doc) {
     const thumbs = !!doc.thumbBoxes;
     add('signs', `<div class="bond-signs">
             ${signBox(doc, first, first.role || a, { seal: first.seal, thumb: thumbs, lead: doc.kind ? `Signed and delivered by the within-named ${a}` : '' })}
-            ${signBox(doc, second, second.role || b, { thumb: thumbs || !second.signature, lead: doc.kind ? `Signed and delivered by the within-named ${b}` : '' })}
+            ${signBox(doc, second, second.role || b, { thumb: thumbs || !second.signature, revenue: !!doc.revenueStamp, lead: doc.kind ? `Signed and delivered by the within-named ${b}` : '' })}
         </div>`, { keep: true });
     if (doc.thirdParty?.name) {
         add('signs-3', `<div class="bond-signs one">${signBox(doc, doc.thirdParty, doc.thirdParty.role || 'Third party',
@@ -433,6 +433,62 @@ export function bondHtml(doc) {
     </article>`;
 }
 
+/**
+ * Downloads a sealed record's evidence as one self-contained file: the exact text that was signed, the signature, the public
+ * key that made it and its fingerprint. With it the signature can be checked anywhere, on any machine, with no access to the
+ * application it came from (the page /verify.html, or a few lines of Python or Java; the file says how).
+ * e: { evidencePayload, digitalSignature, publicKey, keyFingerprint }
+ */
+export function downloadEvidence(kind, number, e) {
+    if (!e?.evidencePayload || !e?.digitalSignature) return false;
+    const bundle = {
+        format: 'personal-budget-evidence/1', kind, number, exportedAt: new Date().toISOString(),
+        algorithm: 'ECDSA P-256 with SHA-256; the signature is r||s (IEEE P1363, 64 bytes), Base64; the public key is X.509 SubjectPublicKeyInfo, Base64',
+        signedText: e.evidencePayload, signature: e.digitalSignature, publicKey: e.publicKey, keyFingerprint: e.keyFingerprint,
+        howToVerify: ['Open /verify.html (it also works saved as a file, offline) and choose this file; or',
+            'Python: key = load_der_public_key(b64decode(publicKey)); r, s = int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big"); key.verify(encode_dss_signature(r, s), signedText.encode("utf-8"), ec.ECDSA(hashes.SHA256()))',
+            'Java: Signature.getInstance("SHA256withECDSAinP1363Format") with the public key, update(signedText UTF-8 bytes), verify(signature)',
+            'Compare the key fingerprint with the one the issuer gave you separately: the signature proves the record is unchanged and was made with that key.'],
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${String(kind).toLowerCase()}-${String(number).replace(/[^\w-]+/g, '')}-evidence.json`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+}
+
+/** Adds a "Download the evidence" button to an element (the signature check line of a public page). */
+export function addEvidenceButton(el, kind, number, e) {
+    if (!el || !e?.evidencePayload || el.querySelector('[data-evidence-dl]')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cs-print';
+    b.dataset.evidenceDl = '';
+    b.textContent = 'Download the evidence (verifiable anywhere)';
+    b.addEventListener('click', () => downloadEvidence(kind, number, e));
+    el.append(b);
+}
+
+/**
+ * The digital signature of a sealed record as rows for an annexure, shown in full (never cut short) so it can be checked
+ * on paper: the signature itself, the key that made it, the public key to check it with, and the exact text that was
+ * signed. e: { digitalSignature, keyFingerprint, publicKey, evidencePayload, verified }; the key and text only when given.
+ */
+export function signatureRows(e) {
+    if (!e.digitalSignature) return [];
+    const code = text => `<code class="bond-sig">${esc(text)}</code>`;
+    return [
+        ['Digital signature (ECDSA P-256, SHA-256, Base64)', `${code(e.digitalSignature)}${e.verified === true ? '<b class="bond-sig-ok">✓ checked by this browser</b>' : ''}`],
+        e.keyFingerprint ? ['Signed with key (fingerprint)', code(e.keyFingerprint)] : null,
+        e.publicKey ? ['Public key to check it with (X.509 / SPKI, Base64)', code(e.publicKey)] : null,
+        e.evidencePayload ? ['Exact text that was signed', `${code(e.evidencePayload)}<small class="bond-sig-note">The signature is over exactly this text (UTF-8). Any change to the record, even one character, no longer matches it.</small>`] : null,
+    ].filter(Boolean);
+}
+
 /** The evidence of an e-acceptance as rows for an annexure (values are HTML-safe). */
 export function evidenceRows(e) {
     const dev = (() => { try { return JSON.parse(e.device || '{}'); } catch { return {}; } })();
@@ -450,7 +506,7 @@ export function evidenceRows(e) {
         ['Location', lat ? `${esc(lat)}, ${esc(lng)} (±${esc(acc || '?')} m)` : 'not shared'],
         e.deviceHash ? ['Device fingerprint', `<code>${esc(e.deviceHash)}</code>`] : null,
         e.seal ? ['Acceptance seal (SHA-256)', `<code>${esc(e.seal)}</code>`] : null,
-        e.digitalSignature ? ['Digital signature (ECDSA P-256)', `<code>${esc(e.digitalSignature.slice(0, 44))}…</code>${e.keyFingerprint ? `<br>key ${esc(e.keyFingerprint)}` : ''}${e.verified === true ? ' · <b>verified</b>' : ''}`] : null,
+        ...signatureRows(e),
     ];
     return rows.filter(Boolean);
 }

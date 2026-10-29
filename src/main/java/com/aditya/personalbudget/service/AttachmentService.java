@@ -72,7 +72,10 @@ public class AttachmentService implements ApplicationRunner {
     }
 
     /** Bytes to send back, with their type and a download name. */
-    public record FileContent(byte[] bytes, String contentType, String fileName) {
+    public record FileContent(byte[] bytes, String contentType, String fileName, boolean intact) {
+        public FileContent(byte[] bytes, String contentType, String fileName) {
+            this(bytes, contentType, fileName, true);
+        }
     }
 
     private final AttachmentRepository attachments;
@@ -458,10 +461,14 @@ public class AttachmentService implements ApplicationRunner {
                 intact(a), a.getDerivedFromSha(), a.getCaption());
     }
 
-    /** The bytes on disk still hash to what was recorded when the file came in (a changed or missing file is not intact). */
+    /**
+     * The file is still there at the size it was recorded with. A listing never reads the files themselves (they are large,
+     * and a list of agreements would read them all): the SHA-256 is checked when a file is opened ({@link #fileOf}), where its
+     * bytes are read anyway, and the page is told if it no longer matches.
+     */
     private boolean intact(Attachment a) {
         try {
-            return a.getSha256().equals(sha256(Files.readAllBytes(path(a))));
+            return Files.isRegularFile(path(a)) && Files.size(path(a)) == a.getSizeBytes();
         } catch (IOException e) {
             return false;
         }
@@ -538,7 +545,10 @@ public class AttachmentService implements ApplicationRunner {
         boolean thumb = thumbnail && Boolean.TRUE.equals(a.getHasThumbnail());
         Path path = thumb ? thumbPath(a) : path(a);
         try {
-            return new FileContent(Files.readAllBytes(path), thumb ? "image/jpeg" : a.getContentType(), a.getFileName());
+            byte[] bytes = Files.readAllBytes(path);
+            // the bytes are read for the response anyway: check them against the SHA-256 recorded when the file came in
+            boolean intact = thumb || a.getSha256() == null || a.getSha256().equals(sha256(bytes));
+            return new FileContent(bytes, thumb ? "image/jpeg" : a.getContentType(), a.getFileName(), intact);
         } catch (IOException e) {
             throw new NotFoundException("Evidence file", a.getId());
         }

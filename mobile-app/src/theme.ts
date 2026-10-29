@@ -2,7 +2,7 @@
 export const colors = {
   navy: '#0b2038',
   navy2: '#123a5e',
-  ocean: '#0b7cbd',
+  ocean: '#0a74b5',
   ocean2: '#3aa0dc',
   oceanSoft: '#e4f2fb',
   aqua: '#13a89a',
@@ -17,17 +17,17 @@ export const colors = {
   redSoft: '#fdecec',
   green: '#11803e',
   greenSoft: '#e3f6ec',
-  bg: '#eef3f8',
+  bg: '#f3f6fb',
   card: '#ffffff',
   sunken: '#f3f6fa',
-  line: '#dfe7ef',
+  line: '#e3e9f1',
   text: '#0f2233',
   text2: '#4b5d70',
   muted: '#8193a5',
   white: '#ffffff',
 };
 
-export const radius = { s: 8, m: 12, l: 16, xl: 22 };
+export const radius = { s: 10, m: 14, l: 18, xl: 26 };
 export const space = { xs: 4, s: 8, m: 12, l: 16, xl: 24 };
 
 /** The tone of an account by what it is. */

@@ -9,6 +9,7 @@
  *   EMI rate  the EMI's true yearly cost (the rate at which its payments are worth the price); below the savings
  *             rate the EMI pays, above it paying at once is cheaper
  * The savings rate can be changed (it is remembered in this browser). Closed EMIs can be included.
+ * The "No-cost EMI" tab (no-cost-emi.js) works out what an offer really costs, month by month against the bank.
  */
 import { api } from '../core/api.js';
 import { panel, table, esc, emptyState } from '../core/ui.js';
@@ -16,6 +17,7 @@ import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, date, monthLabel } from '../core/format.js';
 import { barChart, lineChart, legend } from '../core/charts.js';
 import { getPref, setPref } from '../core/prefs.js';
+import { mountNoCost } from './no-cost-emi.js';
 
 /** The bars of the cost chart, with their colours (shared with the legend). */
 const BAR_SERIES = [{ label: 'EMI cost', color: 'var(--series-2)' }, { label: 'Savings interest', color: 'var(--series-3)' }, { label: 'Net gain', color: 'var(--series-1)' }];
@@ -61,8 +63,10 @@ export function analysePlan(p, rate) {
         noCost: Number(p.ratePercent || 0) === 0, months: pays.length, monthlyPayment: pays.length ? pays[0].amount : 0 };
 }
 
+
 export async function emiReport(content, toolbar) {
-    const prefs = getPref('emiReport', { rate: 6.5, closed: false });
+    const prefs = getPref('emiReport', { rate: 6.5, closed: false, tab: 'nocost' });
+    const tab = prefs.tab === 'mine' ? 'mine' : 'nocost';
     const book = await api.get('/expenses/emis', { closed: prefs.closed });
     const plans = (book.plans || []).filter(p => prefs.closed || p.status !== 'CLOSED');
 
@@ -73,11 +77,33 @@ export async function emiReport(content, toolbar) {
             <input type="number" id="emi-rate" min="0" max="20" step="0.1" value="${prefs.rate}" style="width:64px">%</label>
         <label class="switch sm"><input type="checkbox" id="emi-closed" ${prefs.closed ? 'checked' : ''}><span></span>Closed EMIs</label></span>`);
     const redraw = () => emiReport(content, toolbar);
+    const tabbar = `<div class="emi-tabbar"><div class="tabs sm">
+        <button class="tab ${tab === 'nocost' ? 'active' : ''}" data-emi-tab="nocost">${icon('percent')}No-cost EMI checker</button>
+        <button class="tab ${tab === 'mine' ? 'active' : ''}" data-emi-tab="mine">${icon('calendar')}My EMIs</button></div></div>`;
+    const bindTabs = () => content.querySelectorAll('[data-emi-tab]').forEach(b => b.addEventListener('click', () => {
+        setPref('emiReport', { ...getPref('emiReport', prefs), tab: b.dataset.emiTab });
+        redraw();
+    }));
+    toolbar.querySelector('.emi-controls').classList.toggle('muted-controls', false);
+    if (tab === 'nocost') {
+        // the checker fills the window: the offer, the verdict, the month-by-month table and the charts, each scrolling in its own panel
+        content.className = 'report-content nc-page';
+        content.innerHTML = `${tabbar}<div class="nc-layout-host" id="nc-host"></div>`;
+        bindTabs();
+        mountNoCost(content.querySelector('#nc-host'), prefs.rate, rate => {
+            setPref('emiReport', { ...getPref('emiReport', prefs), rate });
+            const input = toolbar.querySelector('#emi-rate');
+            if (input) input.value = rate;
+        }, plans);
+        return () => [];
+    }
+    content.className = 'report-content emi-mine';
     toolbar.querySelector('#emi-rate').addEventListener('change', e => { setPref('emiReport', { ...prefs, rate: Math.max(0, Number(e.target.value) || 0) }); redraw(); });
     toolbar.querySelector('#emi-closed').addEventListener('change', e => { setPref('emiReport', { ...prefs, closed: e.target.checked }); redraw(); });
 
     if (!plans.length) {
-        content.innerHTML = emptyState('Nothing bought on EMI yet. Add a purchase on EMI in Expenses to see whether it pays.', 'calendar');
+        content.innerHTML = `${tabbar}${emptyState('Nothing bought on EMI yet. Add a purchase on EMI in Expenses to see whether it pays.', 'calendar')}`;
+        bindTabs();
         return () => [];
     }
     const rows = plans.map(p => ({ p, a: analysePlan(p, prefs.rate) }));
@@ -87,6 +113,7 @@ export async function emiReport(content, toolbar) {
     const best = [...rows].sort((x, y) => y.a.net - x.a.net)[0];
 
     content.innerHTML = `
+    ${tabbar}
     <div class="emi-report">
         <div class="stat-cards emi-cards">
             ${card('cart', 'Bought on EMI', moneyShort(sum('price')), `${rows.length} purchase${rows.length === 1 ? '' : 's'} · ${rows.filter(r => r.a.noCost).length} no-cost`)}
@@ -119,6 +146,7 @@ export async function emiReport(content, toolbar) {
             The true rate is the EMI's own yearly cost; while it is below the savings rate the EMI pays.</p>
     </div>`;
 
+    bindTabs();
     const labels = rows.map(r => r.p.narration);
     barChart(content.querySelector('#emi-bars'), { labels, format: moneyShort, labelFormat: l => (l.length > 14 ? l.slice(0, 13) + '…' : l),
         series: [rows.map(r => Math.round(r.a.cost)), rows.map(r => Math.round(r.a.earned)), rows.map(r => Math.round(r.a.net))]

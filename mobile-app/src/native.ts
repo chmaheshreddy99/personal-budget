@@ -13,6 +13,7 @@ type Bridge = {
   storeRemove(key: string): Promise<void>;
   storeSizes(): Promise<string>;
   storeClear(): Promise<void>;
+  deviceAuth?(title: string, message: string): Promise<string>;
   smsSetEnabled(enabled: boolean): Promise<boolean>;
   smsPending(): Promise<string>;
   smsDone(idsJson: string): Promise<void>;
@@ -76,6 +77,14 @@ export const nativeFiles = {
   async pick(source: 'camera' | 'files'): Promise<PickedFile | null> { return native ? native.pickEvidence(source) : null; },
   async remove(path: string) { if (native && path) { try { await native.fileDelete(path); } catch { /* gone already */ } } },
   async size(): Promise<number> { return native ? native.evidenceSize() : 0; },
+};
+
+export const nativeLock = {
+  /** The phone's own lock (pattern, PIN, password, fingerprint): 'ok', 'denied' (cancelled) or 'none' (the phone has no screen lock). */
+  async ask(title: string, message: string): Promise<'ok' | 'denied' | 'none'> {
+    if (!native || !native.deviceAuth) return 'none';
+    try { return (await native.deviceAuth(title, message)) as 'ok' | 'denied' | 'none'; } catch { return 'denied'; }
+  },
 };
 
 export const nativeSettings = {

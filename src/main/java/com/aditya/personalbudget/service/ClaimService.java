@@ -99,12 +99,71 @@ public class ClaimService {
     private final ClaimShareRepository shares;
     private final ClaimAgreementRepository agreements;
     private final AttachmentService files;
+    private final AppSettingsService settings;
+
+    /** The yearly rate a household's idle money is compared with, and where it came from. */
+    public record Benchmark(BigDecimal rate, String source) {
+    }
+
+    /**
+     * What a household's money could have earned: the rate set in Settings, otherwise the best interest rate among its bank,
+     * fixed-deposit and recurring-deposit accounts, otherwise nothing (then no loss is shown).
+     */
+    public Benchmark benchmark() {
+        return benchmark(null);
+    }
+
+    private Benchmark benchmark(Context ctx) {
+        Long tenant = com.aditya.personalbudget.security.UserContext.tenantId();
+        BigDecimal set = settings.claimBenchmark(tenant);
+        if (set != null) return new Benchmark(set, "set in Settings");
+        java.util.Collection<Account> all = ctx != null ? ctx.accounts().values() : accounts.findByTenantId(tenant);
+        Account best = null;
+        for (Account a : all) {
+            if (!Boolean.TRUE.equals(a.getActive()) || a.getInterestRate() == null || a.getInterestRate().signum() <= 0) continue;
+            var t = a.getAccountType();
+            if (t != com.aditya.personalbudget.domain.type.AccountType.BANK && t != com.aditya.personalbudget.domain.type.AccountType.FIXED_DEPOSIT
+                    && t != com.aditya.personalbudget.domain.type.AccountType.RECURRING_DEPOSIT) continue;
+            if (best == null || a.getInterestRate().compareTo(best.getInterestRate()) > 0) best = a;
+        }
+        return best == null ? new Benchmark(null, null) : new Benchmark(best.getInterestRate(), "best of your accounts: " + best.getName());
+    }
+
+    /**
+     * The interest that money lent or paid for someone without interest could have earned at the benchmark rate: simple
+     * interest on the principal still out, day by day, from the day it left until it came back (or today). Null for an
+     * item that charges interest, or when there is no benchmark.
+     */
+    private BigDecimal forgone(Claim c, List<ClaimRepayment> history, Benchmark b) {
+        boolean owedToMe = c.getKind() == com.aditya.personalbudget.domain.type.ClaimKind.LENT || c.getKind() == com.aditya.personalbudget.domain.type.ClaimKind.PAID_FOR;
+        if (!owedToMe || b.rate() == null || (c.getInterestRate() != null && c.getInterestRate().signum() > 0)) return null;
+        LocalDate today = OrgClock.today();
+        BigDecimal principal = c.getAmount();
+        LocalDate at = c.getStartDate();
+        BigDecimal total = BigDecimal.ZERO;
+        for (ClaimRepayment r : history.stream().sorted(Comparator.comparing(ClaimRepayment::getPaidDate)).toList()) {
+            if (Boolean.TRUE.equals(r.getWriteOff())) continue;   // written off: money that never came back, no later day count changes
+            LocalDate on = r.getPaidDate().isAfter(today) ? today : r.getPaidDate();
+            total = total.add(day(principal, b.rate(), at, on));
+            principal = principal.subtract(r.getPrincipal() == null ? BigDecimal.ZERO : r.getPrincipal()).max(BigDecimal.ZERO);
+            at = on;
+        }
+        if (principal.signum() > 0) total = total.add(day(principal, b.rate(), at, today));
+        return Money.round(total);
+    }
+
+    private static BigDecimal day(BigDecimal principal, BigDecimal ratePercent, LocalDate from, LocalDate to) {
+        long days = java.time.temporal.ChronoUnit.DAYS.between(from, to);
+        return days <= 0 ? BigDecimal.ZERO : principal.multiply(ratePercent).multiply(BigDecimal.valueOf(days))
+                .divide(BigDecimal.valueOf(36500), 6, java.math.RoundingMode.HALF_UP);
+    }
 
     public ClaimService(ClaimRepository claims, ClaimRepaymentRepository repayments, AccountRepository accounts,
                         JournalEntryRepository entries, LedgerService ledger, CategoryService categories,
                         ClaimInterestPostingRepository postings, BudgetProperties properties,
                         com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimShareRepository shares,
-                        ClaimAgreementRepository agreements, AttachmentService files) {
+                        ClaimAgreementRepository agreements, AttachmentService files, AppSettingsService settings) {
+        this.settings = settings;
         this.agreements = agreements;
         this.files = files;
         this.shares = shares;
@@ -860,6 +919,7 @@ public class ClaimService {
         long daysOutstanding = ChronoUnit.DAYS.between(c.getStartDate(), open ? today : lastPayment);
         Long daysToDue = c.getDueDate() == null || !open ? null : ChronoUnit.DAYS.between(today, c.getDueDate());
 
+        Benchmark bench = benchmark(ctx);
         Account receivable = ctx.accounts().get(c.getReceivableAccountId());
         ClaimAgreement agreement = agreements.findByClaimId(c.getId()).stream().max(java.util.Comparator.comparing(ClaimAgreement::getId)).orElse(null);
         return new ClaimView(c.getId(), c.getKind(), c.getKind().getLabel(), c.getParty(), c.getNarration(),
@@ -887,7 +947,8 @@ public class ClaimService {
                 c.getJournalEntryId() == null ? 0 : ctx.evidence().getOrDefault(c.getJournalEntryId(), 0),
                 plan, plan.getLabel(), dueNow, nextDate, nextAmount,
                 (int) ctx.shares().getOrDefault(c.getId(), List.of()).stream().filter(s -> s.isActive(ctx.now())).count(),
-                agreement == null ? null : agreement.getStatus(), agreement == null ? null : agreement.getAgreementNo());
+                agreement == null ? null : agreement.getStatus(), agreement == null ? null : agreement.getAgreementNo(),
+                forgone(c, history, bench), bench.rate(), bench.source());
     }
 
     /**

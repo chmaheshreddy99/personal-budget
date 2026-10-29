@@ -918,7 +918,7 @@ function peopleHtml(claims, owe = false, every = claims) {
             <span class="pp-meta">${esc(c.kindLabel)}${c.interestRate ? ` · ${Number(c.interestRate)}% ${c.interestType === 'COMPOUND' ? 'comp.' : 'simple'}` : ''}</span></span>` },
         { label: 'Status', cls: 'pc-status', render: c => `<span class="pp-status">${claimBadge(c)}${dueText(c)}</span>` },
         { label: owe ? 'Borrowed' : 'Given', align: 'r', cls: 'pc-amt', render: c => `<span class="${owe ? 'cr-amt' : 'dr-amt'}">${money(c.amount)}</span>` },
-        { label: 'Outstanding', align: 'r', cls: 'pc-amt', render: c => `<b class="${Number(c.outstanding) > 0 ? 'neg' : 'muted'}">${money(c.outstanding)}</b>` },
+        { label: 'Outstanding', align: 'r', cls: 'pc-amt', render: c => `<b class="${Number(c.outstanding) > 0 ? 'neg' : 'muted'}">${money(c.outstanding)}</b>${c.forgoneInterest != null && Number(c.forgoneInterest) > 0 ? `<div class="loss" title="${esc(`What the bank would have paid on this money at ${Number(c.benchmarkRate)}% a year (${c.benchmarkSource || ''})`)}">−${money(c.forgoneInterest)} forgone</div>` : ''}` },
         { label: 'Payable now', align: 'r', cls: 'pc-amt', render: c => Number(c.outstanding) > 0
             ? `<b title="${esc(`${money(c.outstanding)} principal${Number(c.interestDue) ? ` + ${money(Math.round(Number(c.interestDue)))} interest` : ''}`)}">${money(Math.round(Number(c.settlementAmount)))}</b>`
             : '<span class="muted">settled</span>' },

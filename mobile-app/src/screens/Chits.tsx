@@ -229,7 +229,7 @@ function PayChit({ chit, inst, onClose }: { chit: Chit; inst: Installment | null
               <AccountBubble type={a.type} size={28} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={st.payerName} numberOfLines={1}>{a.name}</Text>
-                <Text style={st.meta} numberOfLines={1}>{money(liveBalance(a, app.queue, app.chitQueue, app.records).balance)}</Text>
+                <Text style={st.meta} numberOfLines={1}>{app.bal(liveBalance(a, app.queue, app.chitQueue, app.records).balance, a.id)}</Text>
               </View>
             </Pressable>
           );

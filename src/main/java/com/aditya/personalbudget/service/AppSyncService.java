@@ -74,7 +74,9 @@ public class AppSyncService {
                            /* income received in the period */
                            List<AppIncome> incomes,
                            /* gifts given and received */
-                           List<AppGift> gifts) {
+                           List<AppGift> gifts,
+                           /* what this household allows the app to do and show (Settings > Mobile app on the web) */
+                           AppSettingsService.MobileConfig mobile) {
     }
 
     /** Money coming back on a claim (or written off). */
@@ -85,7 +87,9 @@ public class AppSyncService {
     public record AppClaim(Long id, String kind, String kindLabel, String party, String narration, BigDecimal amount, LocalDate date,
                            LocalDate dueDate, String status, String statusLabel, boolean overdue, BigDecimal outstanding, BigDecimal repaid,
                            BigDecimal interestRate, BigDecimal interestDue, String accountName, String entryNo, String reference, String notes,
-                           LocalDate lastPaymentDate, List<AppRepayment> repayments) {
+                           LocalDate lastPaymentDate, List<AppRepayment> repayments,
+                           /* what the money could have earned in the bank while it was out (items without interest), at benchmarkRate a year */
+                           BigDecimal forgoneInterest, BigDecimal benchmarkRate) {
     }
 
     public record AppEmiInstalment(int seq, LocalDate dueDate, BigDecimal emi, String status, boolean overdue, LocalDate paidOn) {
@@ -150,12 +154,22 @@ public class AppSyncService {
                                  Long accountId) {
     }
 
+    /** Money moved between two of my accounts (bank to cash, a card bill paid ...). */
+    public record SyncTransfer(@NotBlank @Size(max = 64) String clientId, @NotNull LocalDate date, @NotNull @Positive BigDecimal amount,
+                               @NotNull Long fromId, @NotNull Long toId, @Size(max = 255) String narration, @Size(max = 60) String reference) {
+    }
+
     public record SyncRequest(List<@Valid SyncExpense> expenses, List<@Valid SyncChitPayment> chitPayments,
                               List<@Valid SyncClaim> claims, List<@Valid SyncRepayment> repayments, List<@Valid SyncIncome> incomes,
-                              List<@Valid SyncGift> gifts, List<@Valid SyncEmiPayment> emiPayments) {
+                              List<@Valid SyncGift> gifts, List<@Valid SyncEmiPayment> emiPayments, List<@Valid SyncTransfer> transfers) {
+
+        public SyncRequest(List<SyncExpense> expenses, List<SyncChitPayment> chitPayments, List<SyncClaim> claims, List<SyncRepayment> repayments,
+                           List<SyncIncome> incomes, List<SyncGift> gifts, List<SyncEmiPayment> emiPayments) {
+            this(expenses, chitPayments, claims, repayments, incomes, gifts, emiPayments, null);
+        }
 
         public SyncRequest(List<SyncExpense> expenses, List<SyncChitPayment> chitPayments) {
-            this(expenses, chitPayments, null, null, null, null, null);
+            this(expenses, chitPayments, null, null, null, null, null, null);
         }
     }
 
@@ -186,10 +200,12 @@ public class AppSyncService {
     private final EmiService emis;
     private final GiftService gifts;
     private final TransactionService transactions;
+    private final AppSettingsService settings;
 
     public AppSyncService(AccountService accounts, CategoryService categories, ExpenseService expenses, ReportService reports,
                           ConstructionProjectRepository projects, HostedChitRepository chits, AppSyncWriter writer, ChitService myChits,
-                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions) {
+                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions, AppSettingsService settings) {
+        this.settings = settings;
         this.claims = claims;
         this.emis = emis;
         this.gifts = gifts;
@@ -253,7 +269,8 @@ public class AppSyncService {
                 .map(c -> new AppClaim(c.id(), c.kind().name(), c.kindLabel(), c.party(), c.narration(), c.amount(), c.startDate(), c.dueDate(),
                         c.status().name(), c.statusLabel(), c.overdue(), c.outstanding(), c.repaid(), c.interestRate(), c.interestDue(),
                         c.paidFromAccount(), c.entryNo(), c.reference(), c.notes(), c.lastPaymentDate(),
-                        c.repayments().stream().map(r -> new AppRepayment(r.paidDate(), r.principal(), r.interest(), r.accountName(), r.writeOff())).toList()))
+                        c.repayments().stream().map(r -> new AppRepayment(r.paidDate(), r.principal(), r.interest(), r.accountName(), r.writeOff())).toList(),
+                        c.forgoneInterest(), c.benchmarkRate()))
                 .toList();
         List<AppEmi> emiList = !f.contains(com.aditya.personalbudget.domain.type.Feature.EXPENSES) ? List.of() : emis.book(false).plans().stream()
                 .map(p -> new AppEmi(p.id(), p.kind(), p.narration(), p.lender(), p.emiAmount(), p.months(), p.paidCount(), p.left(), p.dueNow(),
@@ -268,7 +285,7 @@ public class AppSyncService {
                         g.value(), g.quantity(), g.unit(), g.mode(), g.donation(), g.notes(), g.accountName(), g.entryNo()))
                 .toList();
         return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay,
-                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord, claimList, emiList, incomeList, giftList);
+                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord, claimList, emiList, incomeList, giftList, settings.mobileConfig(tenant));
     }
 
     /** The income received since {@code from}: entries that credit an income category, into the account they debit. */
@@ -313,6 +330,12 @@ public class AppSyncService {
     /** The phone's expenses, each on its own: one that fails does not stop the others. */
     public List<SyncResult> sync(SyncRequest r) {
         List<SyncResult> out = new ArrayList<>();
+        // a section switched off in Settings > Mobile app is refused here, whatever an older copy of the app still offers
+        var allowed = settings.mobileConfig(UserContext.tenantId()).features();
+        r = new SyncRequest(off(out, allowed, "EXPENSES", r.expenses(), SyncExpense::clientId), off(out, allowed, "CHITS", r.chitPayments(), SyncChitPayment::clientId),
+                off(out, allowed, "CLAIMS", r.claims(), SyncClaim::clientId), off(out, allowed, "CLAIMS", r.repayments(), SyncRepayment::clientId),
+                off(out, allowed, "INCOME", r.incomes(), SyncIncome::clientId), off(out, allowed, "GIFTS", r.gifts(), SyncGift::clientId),
+                off(out, allowed, "EMIS", r.emiPayments(), SyncEmiPayment::clientId), off(out, allowed, "TRANSFERS", r.transfers(), SyncTransfer::clientId));
         for (SyncExpense e : r.expenses() == null ? List.<SyncExpense>of() : r.expenses()) {
             try {
                 out.add(writer.write(e));
@@ -333,7 +356,15 @@ public class AppSyncService {
         each(out, r.incomes(), SyncIncome::clientId, writer::writeIncome);
         each(out, r.gifts(), SyncGift::clientId, writer::writeGift);
         each(out, r.emiPayments(), SyncEmiPayment::clientId, writer::writeEmiPayment);
+        each(out, r.transfers(), SyncTransfer::clientId, writer::writeTransfer);
         return out;
+    }
+
+    /** The items of a section that is switched off answer FAILED and are dropped; the rest of the list goes on. */
+    private static <T> List<T> off(List<SyncResult> out, java.util.Set<String> allowed, String section, List<T> items, java.util.function.Function<T, String> id) {
+        if (items == null || allowed.contains(section)) return items;
+        for (T item : items) out.add(new SyncResult(id.apply(item), "FAILED", null, null, "This is switched off for the phone app in Settings > Mobile app on the web", null));
+        return List.of();
     }
 
 }

@@ -81,6 +81,7 @@ async function renderOrganization(body, reload) {
         ? await Promise.all([api.get('/admin/organization/time-zone'), api.get('/admin/time-zones')])
         : [{ effective: state.user?.timeZone, timeZone: state.user?.timeZone }, []];
     const current = tz.timeZone || '';
+    const bench = await api.get('/admin/claim-benchmark').catch(() => null);
     body.innerHTML = panel({ title: 'Organization', iconName: 'clock', sub: esc(state.user?.tenantName || ''),
         body: `<form class="form-grid one" id="tz-form" style="max-width:620px">
             <label class="field"><span>Time zone</span>
@@ -89,15 +90,19 @@ async function renderOrganization(body, reload) {
                     ${zones.map(z => `<option value="${esc(z.id)}" ${z.id === current ? 'selected' : ''}>${esc(z.label)}</option>`).join('')}
                 </select>` : `<input value="${esc(tz.effective || '')}" readonly data-plain>`}
                 <small>Dates and times are recorded and shown in this zone: "today", when an entry was made, sign-ins, due dates.</small></label>
+            ${bench ? `<label class="field"><span>Interest-free lending: compare with <small class="muted">% a year</small></span>
+                <input name="benchmark" type="number" min="0" max="40" step="0.1" value="${bench.configured ?? ''}" placeholder="${bench.effective ?? 'none'}" data-plain ${admin ? '' : 'readonly'}>
+                <small>Money lent or paid for someone without interest shows, greyed out, what the bank would have paid on it. Empty = the best interest rate among your bank and deposit accounts${bench.effective ? ` (now ${bench.effective}%, ${esc(bench.source)})` : ' (none of your accounts has a rate yet)'}.</small></label>` : ''}
             ${admin ? `<div class="book-note">${icon('clock')}<span>Now in <b>${esc(tz.effectiveLabel)}</b>: <b>${esc(dateTime(tz.now))}</b>.
                 Times are kept in ${esc(tz.serverTimeZone)} and shown in this zone, so a change moves every time shown, those saved before it too.</span></div>
-                <div class="row"><button class="btn primary" type="submit">${icon('check')}Save time zone</button></div>`
+                <div class="row"><button class="btn primary" type="submit">${icon('check')}Save</button></div>`
                 : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
         </form>` });
     body.querySelector('#tz-form').addEventListener('submit', async e => {
         e.preventDefault();
         if (!admin) return;
         try {
+            if (e.target.benchmark) await api.put('/admin/claim-benchmark', { configured: e.target.benchmark.value === '' ? null : Number(e.target.benchmark.value) });
             const saved = await api.put('/admin/organization/time-zone', { timeZone: e.target.timeZone.value || null });
             if (state.user) state.user.timeZone = saved.effective;
             setTimeZone(saved.effective);
@@ -203,6 +208,7 @@ async function renderMobile(body, reload) {
     const admin = can('MANAGE_USERS');
     const users = admin ? await api.get('/admin/users').catch(() => []) : [];
     const url = `${location.origin}/${app.mobilePath}/`;
+    const cfg = admin ? await api.get('/admin/mobile-config').catch(() => null) : null;
     body.innerHTML = panel({ title: 'Mobile app', iconName: 'phone',
         actions: `<a class="btn sm" href="${esc(url)}" target="_blank" rel="noopener">${icon('link')}Open</a>`,
         body: `<div class="mobile-settings">
@@ -216,6 +222,22 @@ async function renderMobile(body, reload) {
                             pattern="[a-z0-9][a-z0-9-]{0,29}" maxlength="30" required data-plain><span class="muted">/</span></span></label>
                     ${admin ? `<button class="btn primary" type="submit">${icon('check')}Save address</button>` : '<span class="small muted">Only an admin can change the address.</span>'}
                 </form>
+                ${cfg ? `<div class="section-title">What the phone app offers</div>
+                    <form id="mobile-config-form" class="ms-config">
+                        <p class="small muted">${icon('info')} Switch a section off and it disappears from the phone app, and the app can no longer record it. A user still needs the section shared under Users.</p>
+                        <div class="ms-features">${[['EXPENSES', 'wallet', 'Expenses', 'Record spending, the detected SMS list'], ['INCOME', 'arrow-in', 'Income', 'Record money received'],
+                            ['TRANSFERS', 'arrow-right', 'Transfers', 'Move money between your accounts'], ['ACCOUNTS', 'bank', 'Accounts', 'See accounts and statements'],
+                            ['CHITS', 'chit', 'Chits', 'Pay installments'], ['CLAIMS', 'hand', 'Money owed', 'Lent and paid-for money, repayments'],
+                            ['EMIS', 'calendar', 'EMIs', 'See and pay EMIs'], ['GIFTS', 'gift', 'Gifts', 'Gifts given and received']].map(([k, ic, t, d]) => `
+                            <label class="ms-feature"><input type="checkbox" name="f-${k}" ${cfg.features.includes(k) ? 'checked' : ''}><span>${icon(ic)}<b>${t}</b><small>${d}</small></span></label>`).join('')}</div>
+                        <div class="section-title">Privacy on the phone</div>
+                        <label class="cs-check"><input type="checkbox" name="hideBalances" ${cfg.hideBalances ? 'checked' : ''}> <span><b>Hide balances</b> until the person taps “View balances” (the phone opens with dots, not figures)</span></label>
+                        <label class="cs-check"><input type="checkbox" name="maskNetWorth" ${cfg.maskNetWorth ? 'checked' : ''}> <span><b>Never show the overall net worth</b> in the app</span></label>
+                        <label class="field"><span>Keep a balance hidden when it is above ₹ <small class="muted">even after “View balances”; tap that one to see it. Empty = no limit</small></span>
+                            <input name="hideAbove" type="number" min="0" step="1000" value="${cfg.hideAbove ?? ''}" placeholder="e.g. 100000" data-plain></label>
+                        <p class="small muted">${icon('shield')} This is a screen against onlookers and a borrowed phone, not security: the figures still travel to a signed-in app.</p>
+                        <button class="btn primary" type="submit">${icon('check')}Save for the phone app</button>
+                    </form>` : ''}
                 ${admin ? `<div class="section-title">Who can use it</div>
                     <div class="ms-users">${users.map(u => `<div class="ms-user"><span class="avatar sm">${esc(u.fullName.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</span>
                         <div class="grow min-0"><b>${esc(u.fullName)}</b><small class="muted">${u.mobileAccess
@@ -225,6 +247,16 @@ async function renderMobile(body, reload) {
                     <p class="small muted">${icon('info')} Change a user's sections and mobile access under <a href="#/admin/users">Users</a>.</p>` : ''}
             </div>
         </div>` });
+    body.querySelector('#mobile-config-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const f = e.target;
+        try {
+            const features = [...f.querySelectorAll('[name^="f-"]:checked')].map(x => x.name.slice(2));
+            await api.put('/admin/mobile-config', { features, hideBalances: f.hideBalances.checked, maskNetWorth: f.maskNetWorth.checked,
+                hideAbove: f.hideAbove.value === '' ? null : Number(f.hideAbove.value) });
+            toast('Saved: the phone app picks it up the next time it syncs');
+        } catch (error) { toast(error.message, 'error'); }
+    });
     body.querySelector('#mobile-path-form').addEventListener('submit', async e => {
         e.preventDefault();
         try {

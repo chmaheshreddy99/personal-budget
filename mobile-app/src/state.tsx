@@ -10,8 +10,8 @@ import {
   Account, BalanceSheet, Budgets, Chit, DEFAULT_SETTINGS, Installment, LocalChitPayment, LocalExpense, LocalRecord, Meta, Settings, Snapshot, Statement, Upload,
   enforceLimit, fetchBalanceSheet, fetchBudgets, fetchStatement, liveBalance, login, normalizeUrl, store, syncNow, thisMonth, usage, visibleAccounts,
 } from './data';
-import { uuid } from './format';
-import { PickedFile, RawSms, SmsPermissions, nativeFiles, nativeSettings, nativeSms, smsSupported } from './native';
+import { money, moneyShort, uuid } from './format';
+import { PickedFile, RawSms, SmsPermissions, nativeFiles, nativeLock, nativeSettings, nativeSms, smsSupported } from './native';
 import { ParsedSms, parseSms } from './sms';
 
 type NewExpense = Omit<LocalExpense, 'clientId' | 'createdAt' | 'status'>;
@@ -57,6 +57,23 @@ type AppContext = {
   removeRecord(clientId: string): Promise<void>;
   /** an account's balance with what waits on the phone */
   balanceOf(a: Account): number;
+  /** the app is waiting for the phone's own lock (pattern, PIN, password, fingerprint) before it shows anything */
+  locked: boolean;
+  unlock(): Promise<boolean>;
+  lockNow(): void;
+  /**
+   * Balance privacy (Settings > Mobile app on the web): balances are dots until the person chooses to view them, for a minute or until
+   * the app goes to the background; a balance above the household's limit stays hidden until it is tapped by itself.
+   */
+  balancesVisible: boolean;
+  showBalances(): void;
+  hideBalances(): void;
+  reveal(accountId: number): void;
+  /** an amount as text, or dots when it is hidden; id is the account it is the balance of (for the above-the-limit rule) */
+  bal(amount: number, accountId?: number, decimals?: number): string;
+  balShort(amount: number, accountId?: number): string;
+  /** the net worth as text: dots, or "Hidden" when the household never shows it */
+  net(amount: number): string;
   loadSheet(): Promise<BalanceSheet | null>;
   /** a month's budgets from the server (this month when none is given; offline: the kept copy of this month) */
   loadBudgets(month?: string): Promise<Budgets | null>;
@@ -97,6 +114,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [raw, setRaw] = useState<RawSms[]>([]);
   const [used, setUsed] = useState<Used>({ total: 0, cache: 0, statements: 0, evidence: 0 });
   const [perms, setPerms] = useState<SmsPermissions | null>(null);
+  const [shown, setShown] = useState(false);
+  const [locked, setLocked] = useState(true);
+  const leftAt = useRef(0);
+  const [revealed, setRevealed] = useState<number[]>([]);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // the latest values for callbacks that outlive a render (timers, events)
   const ref = useRef({ settings, queue, chitQueue, uploads, syncing, snapshot, records });
   ref.current = { settings, queue, chitQueue, uploads, syncing, snapshot, records };
@@ -180,7 +202,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- back to the front: sync and pick up SMS caught meanwhile; every minute while something waits
   useEffect(() => {
     const sub = AppState.addEventListener('change', st => {
-      if (st !== 'active') return;
+      if (st !== 'active') { setShown(false); setRevealed([]); leftAt.current = Date.now(); return; }   // out of sight: balances go back to dots
+      // away for more than a minute: the phone's lock is asked again
+      if (leftAt.current && Date.now() - leftAt.current > 60000 && ref.current.settings.deviceLock !== false) setLocked(true);
       loadSms();
       checkPerms();
       if (ref.current.settings.token && !ref.current.settings.offline) sync(true);
@@ -373,6 +397,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const accounts = useMemo(() => visibleAccounts(settings, snapshot?.accounts || []), [settings, snapshot]);
   const balanceOf = useCallback((a: Account) => liveBalance(a, queue, chitQueue, records).balance, [queue, chitQueue, records]);
 
+  // ---- the phone's own lock: pattern, PIN, password or fingerprint opens the app (no typing); a phone with no lock opens straight away
+  const unlock = useCallback(async () => {
+    const out = await nativeLock.ask('Personal Budget', 'Unlock with your phone lock');
+    if (out === 'ok' || out === 'none') { setLocked(false); return true; }
+    return false;
+  }, []);
+  const lockNow = useCallback(() => setLocked(true), []);
+
+  // ---- balance privacy
+  const mobile = snapshot?.mobile;
+  const hideAll = mobile ? mobile.hideBalances : true;   // an older server says nothing: stay private
+  const hideAbove = mobile?.hideAbove ?? null;
+  const balancesVisible = !hideAll || shown;
+  const showBalances = useCallback(() => {
+    setShown(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => { setShown(false); setRevealed([]); }, 60000);
+  }, []);
+  const hideBalances = useCallback(() => { setShown(false); setRevealed([]); if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
+  const reveal = useCallback((id: number) => setRevealed(r => (r.includes(id) ? r : [...r, id])), []);
+  const masked = (amount: number, id?: number) => !balancesVisible || (hideAbove != null && Math.abs(amount) > hideAbove && (id == null || !revealed.includes(id)));
+  const bal = (amount: number, id?: number, decimals?: number) => (masked(amount, id) ? '••••••' : money(amount, decimals));
+  const balShort = (amount: number, id?: number) => (masked(amount, id) ? '••••' : moneyShort(amount));
+  const net = (amount: number) => (mobile?.maskNetWorth ? 'Hidden' : masked(amount) ? '••••••' : money(amount));
+
   // an SMS is matched to the accounts shown first, then to any of my own
   const readSms = useCallback((body: string, sender = 'SMS') => {
     const all = snapshot?.accounts || [];
@@ -404,7 +453,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppContext = {
     ready, settings, snapshot, accounts, queue, chitQueue, records, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
     saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment,
-    addRecord, removeRecord, balanceOf, loadSheet, loadBudgets,
+    addRecord, removeRecord, balanceOf, locked: locked && !!settings.token && settings.deviceLock !== false, unlock, lockNow, loadSheet, loadBudgets, balancesVisible, showBalances, hideBalances, reveal, bal, balShort, net,
     statement, dismissSms, scanInbox, enableSms, checkPerms, readSms, clearCache, notify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

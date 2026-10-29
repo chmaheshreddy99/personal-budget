@@ -140,6 +140,8 @@ button, a, input, select, textarea, label { -webkit-tap-highlight-color: rgba(11
     .acct-banner, .chit-banner, .claim-head { grid-template-columns: auto minmax(0, 1fr) !important; row-gap: 8px; }
     .acct-banner .ab-bal, .chit-banner .ab-bal { grid-column: 1 / -1; align-items: flex-start; }
     .acct-banner .ab-actions, .chit-banner .ab-actions, .chit-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; }
+    .chit-actions.ca-grouped { flex-direction: row; align-items: center; max-width: none; }
+    .chit-actions.ca-grouped .ca-main, .chit-actions.ca-grouped .ca-side { justify-content: flex-start; }
     .claim-head .claim-progress { grid-column: 1 / -1; }
     .acct-banner > *, .chit-banner > * { min-width: 0; }
     .ab-name, .ab-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

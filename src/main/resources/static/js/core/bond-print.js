@@ -183,7 +183,9 @@ function printSheets(html, title) {
 export async function openPrintView(source, title) {
     const doc0 = await withRatios(source);
     const o = loadPrefs();
-    let real = !!doc0.realStampPaper;
+    let paper = doc0.realStampPaper ? 'real' : doc0.plainPaper ? 'plain' : 'style';
+    let real = paper === 'real';
+    const flags = { revenueStamp: !!doc0.revenueStamp || paper === 'plain', thumbBoxes: !!doc0.thumbBoxes };
     const breaks = new Set();
     const layer = document.createElement('div');
     layer.className = 'bp-layer';
@@ -192,12 +194,14 @@ export async function openPrintView(source, title) {
     const opt = (v, label, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${label}</option>`;
     layer.innerHTML = `<div class="bp-bar">
             <div class="bp-bar-title"><b>Print view</b><small data-meta></small></div>
-            <label>Paper<select data-o="paper">${opt('style', 'A4 · stamp-paper style', real ? 'real' : 'style')}${opt('real', 'Real stamp paper (1st sheet legal)', real ? 'real' : 'style')}</select></label>
+            <label>Paper<select data-o="paper">${opt('style', 'A4 · stamp-paper style', paper)}${opt('real', 'Real stamp paper (1st sheet legal)', paper)}${opt('plain', 'Plain A4 · for a revenue / other stamp', paper)}</select></label>
             <label>Text<select data-o="pt">${[11, 12, 13, 14].map(v => opt(v, `${v} pt`, o.pt)).join('')}</select></label>
             <label>Spacing<select data-o="lh">${[[1.15, 'Single'], [1.5, '1.5 lines'], [2, 'Double']].map(([v, l]) => opt(v, l, o.lh)).join('')}</select></label>
             <label>Margins<select data-o="margin">${[['narrow', 'Narrow'], ['normal', 'Normal'], ['wide', 'Wide']].map(([v, l]) => opt(v, l, o.margin)).join('')}</select></label>
             <label>ID proofs<select data-o="ids">${[['large', 'Large (full width)'], ['medium', 'Medium'], ['small', 'Small']].map(([v, l]) => opt(v, l, o.ids)).join('')}</select></label>
             <label class="bp-check"><input type="checkbox" data-o="strip" ${o.strip ? 'checked' : ''}>Sign & seal on every page</label>
+            <label class="bp-check"><input type="checkbox" data-f="revenueStamp" ${flags.revenueStamp ? 'checked' : ''}>Revenue stamp box</label>
+            <label class="bp-check"><input type="checkbox" data-f="thumbBoxes" ${flags.thumbBoxes ? 'checked' : ''}>Thumb impression boxes</label>
             <div class="bp-bar-acts">
                 <button type="button" data-act="auto" title="Undo the page breaks made by hand">Auto layout</button>
                 <button type="button" class="primary" data-act="print">Print / Save PDF</button>
@@ -213,7 +217,7 @@ export async function openPrintView(source, title) {
     const holder = layer.querySelector('.bp-pages');
     const scroller = layer.querySelector('.bp-scroll');
     let pages = [];
-    const doc = () => ({ ...doc0, realStampPaper: real });
+    const doc = () => ({ ...doc0, realStampPaper: real, plainPaper: paper === 'plain', ...flags });
     const fit = () => {
         const avail = scroller.clientWidth - 24;
         holder.style.zoom = String(Math.min(1, avail / (216 * MM)));
@@ -236,9 +240,15 @@ export async function openPrintView(source, title) {
     document.addEventListener('keydown', onKey, true);
     addEventListener('resize', fit);
     layer.addEventListener('change', e => {
+        if (e.target.dataset.f) { flags[e.target.dataset.f] = e.target.checked; draw(); return; }
         const k = e.target.dataset.o;
         if (!k) return;
-        if (k === 'paper') real = e.target.value === 'real';
+        if (k === 'paper') {
+            paper = e.target.value;
+            real = paper === 'real';
+            if (paper === 'plain') flags.revenueStamp = true;   // the plain sheet is for a stamp to be stuck on
+            layer.querySelector('[data-f="revenueStamp"]').checked = flags.revenueStamp;
+        }
         else if (k === 'strip') o.strip = e.target.checked;
         else o[k] = ['pt', 'lh'].includes(k) ? Number(e.target.value) : e.target.value;
         savePrefs(o);

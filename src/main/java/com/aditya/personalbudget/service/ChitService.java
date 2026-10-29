@@ -24,6 +24,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.ChitInstallmentRepository;
+import com.aditya.personalbudget.repository.ChitReceiptAckRepository;
 import com.aditya.personalbudget.repository.ChitRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
 import com.aditya.personalbudget.security.UserContext;
@@ -72,11 +73,14 @@ public class ChitService {
     private final AccountService accountService;
     private final LedgerService ledger;
     private final CategoryService categories;
+    private final ChitReceiptAckRepository receipts;
 
     public ChitService(ChitRepository chits, ChitInstallmentRepository installments,
                        AccountRepository accountRepository, JournalEntryRepository entries,
-                       AccountService accountService, LedgerService ledger, CategoryService categories) {
+                       AccountService accountService, LedgerService ledger, CategoryService categories,
+                       ChitReceiptAckRepository receipts) {
         this.categories = categories;
+        this.receipts = receipts;
         this.chits = chits;
         this.installments = installments;
         this.accountRepository = accountRepository;
@@ -272,6 +276,7 @@ public class ChitService {
         if (installment.getStatus() != InstallmentStatus.PAID) {
             throw new BusinessException("Installment " + installment.getInstallmentNo() + " is not paid");
         }
+        ChitReceiptService.refuseIfAcknowledged(receipts, chit.getId(), installment);
         Long entryId = installment.getJournalEntryId();
         installment.setDividend(null);
         installment.setPaidAmount(null);
@@ -381,6 +386,7 @@ public class ChitService {
         if (part.first()) {
             throw new BusinessException(part.entryNo() + " is the payout itself. Undo the payout to take it out");
         }
+        ChitReceiptService.refusePayoutUndo(receipts, chit.getId());
         ledger.delete(entryId);
         chit.setPayoutReceived(received(chit).subtract(part.amount()).max(Money.ZERO));
         chits.save(chit);
@@ -412,6 +418,7 @@ public class ChitService {
         if (chit.getPayoutAmount() == null) {
             throw new BusinessException("No payout recorded for this chit");
         }
+        ChitReceiptService.refusePayoutUndo(receipts, chit.getId());
         ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());   // every part of it
         chit.setPayoutAmount(null);
         chit.setPayoutDate(null);
@@ -589,7 +596,7 @@ public class ChitService {
                 c.getCommissionPercent(), c.getInterestRate(), c.getStatus(), c.getAccountId(),
                 account == null ? null : account.getName(), c.getPayoutAmount(), c.getPayoutDate(),
                 c.getPayoutAmount() == null ? null : received(c), c.getPayoutAmount() == null ? null : payoutPending(c), c.getNotes(),
-                c.getOrganizerUpi(), c.getUpiNote(), c.getDefaultPaymentAccountId(),
+                c.getOrganizerUpi(), c.getUpiNote(), c.getOrganizerPhone(), c.getDefaultPaymentAccountId(),
                 c.getDefaultPaymentAccountId() == null || books.account(c.getDefaultPaymentAccountId()) == null
                         ? null : books.account(c.getDefaultPaymentAccountId()).getName(),
                 paid.size(), pending.size(), overdue.size(), overdueAmount,
@@ -642,6 +649,8 @@ public class ChitService {
         chit.setNotes(r.notes());
         chit.setOrganizerUpi(blankToNull(r.organizerUpi()));
         chit.setUpiNote(blankToNull(r.upiNote()));
+        // null: the caller does not know the number (keep it); empty clears it
+        if (r.organizerPhone() != null) chit.setOrganizerPhone(ChitReceiptService.phoneOrNull(r.organizerPhone()));
         if (r.defaultPaymentAccountId() != null) {
             Account payFrom = accountService.require(r.defaultPaymentAccountId());
             if (payFrom.getAccountClass() != AccountClass.ASSET && payFrom.getAccountClass() != AccountClass.LIABILITY

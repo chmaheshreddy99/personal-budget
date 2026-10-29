@@ -162,6 +162,18 @@ public class AppSyncWriter {
         });
     }
 
+    /** Money moved between two accounts of mine. */
+    @Transactional
+    public SyncResult writeTransfer(AppSyncService.SyncTransfer t) {
+        return once(t.clientId(), Feature.ACCOUNTS, "transfer between accounts", () -> {
+            if (t.fromId().equals(t.toId())) throw new BusinessException("Pick two different accounts");
+            EntryView v = transactions.postQuick(new QuickTransactionRequest(QuickKind.TRANSFER, t.date(), t.amount(), t.fromId(), t.toId(), null,
+                    blank(t.narration()), blank(t.reference()), null));
+            activity.record("ADDED", "Transfers", "Synced from the phone app · " + ActivityService.money(t.amount()) + " · " + ActivityService.cut(v.narration(), 60));
+            return new Booked(v.id(), v.entryNo());
+        });
+    }
+
     /** A gift given or received (cash given may be booked as an expense too). */
     @Transactional
     public SyncResult writeGift(AppSyncService.SyncGift g) {

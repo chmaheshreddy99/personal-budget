@@ -44,7 +44,17 @@ public final class ChitDtos {
             /* Installments already paid before you started tracking (posted against opening equity). */
             @PositiveOrZero Integer alreadyPaidInstallments,
             /* the version the form was loaded with; a stale edit is refused */
-            Long version) {
+            Long version,
+            @Size(max = 20) String organizerPhone) {
+
+        /** Without the organizer's mobile number (callers that do not know it). */
+        public ChitRequest(String name, String organizer, String ticketNo, BigDecimal maturityAmount, BigDecimal monthlyInstallment,
+                           Integer numberOfInstallments, LocalDate startDate, LocalDate endDate, BigDecimal interestRate,
+                           BigDecimal commissionPercent, String notes, String organizerUpi, String upiNote, Long defaultPaymentAccountId,
+                           Integer alreadyPaidInstallments, Long version) {
+            this(name, organizer, ticketNo, maturityAmount, monthlyInstallment, numberOfInstallments, startDate, endDate, interestRate,
+                    commissionPercent, notes, organizerUpi, upiNote, defaultPaymentAccountId, alreadyPaidInstallments, version, null);
+        }
     }
 
     /**
@@ -111,6 +121,7 @@ public final class ChitDtos {
             String notes,
             String organizerUpi,
             String upiNote,
+            String organizerPhone,
             Long defaultPaymentAccountId,
             String defaultPaymentAccountName,
             // ---- progress

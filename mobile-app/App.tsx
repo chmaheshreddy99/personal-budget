@@ -14,6 +14,7 @@ import { money } from './src/format';
 import { ParsedSms } from './src/sms';
 import { colors, space } from './src/theme';
 import { Button, Pill } from './src/ui';
+import { LockScreen } from './src/screens/Lock';
 import { SetupScreen } from './src/screens/Setup';
 import { AccountsScreen } from './src/screens/Accounts';
 import { AccountDetail } from './src/screens/AccountDetail';
@@ -27,6 +28,8 @@ import { BudgetScreen } from './src/screens/Budget';
 import { CategoriesScreen } from './src/screens/Categories';
 import { MorePage, MoreScreen } from './src/screens/More';
 import { GiftsScreen } from './src/screens/Gifts';
+import { TransferSheet } from './src/screens/Transfer';
+import { mobileOn } from './src/data';
 
 type Tab = 'accounts' | 'expenses' | 'chits' | 'more';
 
@@ -47,6 +50,7 @@ function Shell() {
   const [account, setAccount] = useState<Account | null>(null);
   const [page, setPage] = useState<MorePage | null>(null);
   const [adding, setAdding] = useState<{ prefill?: Prefill; editing?: LocalExpense } | null>(null);
+  const [transfer, setTransfer] = useState(false);
   const [prompt, setPrompt] = useState<ParsedSms | null>(null);
   const prompted = useRef(new Set<string>());
   const insets = useSafeAreaInsets();
@@ -69,6 +73,7 @@ function Shell() {
 
   if (!app.ready) return <View style={st.splash}><ActivityIndicator color={colors.ocean} size="large" /></View>;
   if (!app.settings.token) return <View style={{ flex: 1, backgroundColor: colors.bg }}><SetupScreen /></View>;
+  if (app.locked) return <LockScreen />;
 
   const record = (p: ParsedSms) => {
     setPrompt(null);
@@ -80,7 +85,8 @@ function Shell() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ flex: 1 }}>
         {account ? <AccountDetail account={account} onBack={() => setAccount(null)} onAdd={a => setAdding({ prefill: { paidFromId: a.id } })} />
-          : tab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }} />
+          : tab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }}
+              onTransfer={mobileOn(app.snapshot, 'TRANSFERS') && app.snapshot?.canRecord !== false ? () => setTransfer(true) : undefined} />
           : tab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
           : tab === 'chits' ? <ChitsScreen />
           : page === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />
@@ -93,14 +99,15 @@ function Shell() {
       </View>
       {/* the status bar keeps a solid background while the page scrolls under it */}
       <View pointerEvents="none" style={[st.statusStrip, { height: insets.top }]} />
-      <TabBar tab={tab} onTab={t => { setAccount(null); if (t === tab && t === 'more') setPage(null); setTab(t); }} onAdd={() => setAdding({})} smsCount={app.detected.length} />
+      <TabBar tab={tab} onTab={t => { setAccount(null); if (t === tab && t === 'more') setPage(null); setTab(t); }} onAdd={() => setAdding({})} smsCount={app.detected.length} chits={mobileOn(app.snapshot, 'CHITS')} />
+      <TransferSheet visible={transfer} onClose={() => setTransfer(false)} />
       <AddExpense visible={!!adding} onClose={() => setAdding(null)} prefill={adding?.prefill} editing={adding?.editing} />
       <SmsPrompt p={prompt} onLater={() => setPrompt(null)} onRecord={record} onDismiss={id => { app.dismissSms([id]); setPrompt(null); }} />
     </View>
   );
 }
 
-function TabBar({ tab, onTab, onAdd, smsCount }: { tab: Tab; onTab: (t: Tab) => void; onAdd: () => void; smsCount: number }) {
+function TabBar({ tab, onTab, onAdd, smsCount, chits }: { tab: Tab; onTab: (t: Tab) => void; onAdd: () => void; smsCount: number; chits: boolean }) {
   const insets = useSafeAreaInsets();
   const item = (key: Tab, label: string, Icon: any, badge = 0) => {
     const on = tab === key;
@@ -115,13 +122,13 @@ function TabBar({ tab, onTab, onAdd, smsCount }: { tab: Tab; onTab: (t: Tab) => 
     );
   };
   return (
-    <View style={[st.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <View style={[st.bar, { bottom: Math.max(insets.bottom, 10) }]}>
       {item('accounts', 'Accounts', Landmark)}
       {item('expenses', 'Expenses', Receipt)}
       <Pressable onPress={onAdd} style={({ pressed }) => [st.fab, pressed && { transform: [{ scale: 0.95 }] }]}>
         <Plus color={colors.white} size={28} strokeWidth={2.6} />
       </Pressable>
-      {item('chits', 'Chits', HandCoins)}
+      {chits ? item('chits', 'Chits', HandCoins) : null}
       {item('more', 'More', LayoutGrid, smsCount)}
     </View>
   );
@@ -158,11 +165,11 @@ function SmsPrompt({ p, onLater, onRecord, onDismiss }: { p: ParsedSms | null; o
 const st = StyleSheet.create({
   statusStrip: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: colors.bg },
   splash: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line, paddingTop: 8, elevation: 12, shadowColor: '#0b2038', shadowOpacity: 0.1, shadowRadius: 12 },
+  bar: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 30,
+    paddingTop: 9, paddingBottom: 9, elevation: 16, shadowColor: '#0b2038', shadowOpacity: 0.16, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   tab: { flex: 1, alignItems: 'center', gap: 3 },
   tabText: { fontSize: 11, fontWeight: '700', color: colors.muted },
-  fab: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.ocean, alignItems: 'center', justifyContent: 'center', marginTop: -26,
+  fab: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.ocean, alignItems: 'center', justifyContent: 'center', marginTop: -30,
     elevation: 8, shadowColor: colors.ocean, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, borderWidth: 4, borderColor: colors.bg },
   badge: { position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: colors.white, fontSize: 10, fontWeight: '800' },

@@ -127,7 +127,9 @@ public final class ClaimDtos {
             /* statement links that still work */
             int activeShares,
             /* the loan agreement, if one is made: DRAFT, ACCEPTED or SIGNED, and its number */
-            String agreementStatus, String agreementNo) {
+            String agreementStatus, String agreementNo,
+            /* what the money could have earned in the bank while it was out, at benchmarkRate a year (items without interest only) */
+            BigDecimal forgoneInterest, BigDecimal benchmarkRate, String benchmarkSource) {
     }
 
     public record PostingView(Long id, int periodNo, LocalDate from, LocalDate to, BigDecimal amount,

@@ -24,7 +24,7 @@ export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
       cats.length ? `${expense} expense · ${cats.length - expense} income` : 'Expense and income categories', 0],
     ...(hasFeature(app.snapshot, 'GIFTS') ? [['gifts', Gift, colors.coral, colors.coralSoft, 'Gifts', giftLine(app), 0] as [MorePage, any, string, string, string, string, number]] : []),
     ['sheet', Scale, colors.green, colors.greenSoft, 'Balance sheet',
-      app.sheet ? `Net worth ${money(app.sheet.netWorth)} · updated ${ago(app.sheet.fetchedAt)}` : 'What you own and owe, by group', 0],
+      app.sheet ? `Net worth ${app.net(app.sheet.netWorth)} · updated ${ago(app.sheet.fetchedAt)}` : 'What you own and owe, by group', 0],
     ['sms', MessageSquareText, colors.violet, colors.violetSoft, 'Bank SMS',
       app.settings.smsEnabled ? (app.detected.length ? `${app.detected.length} to record` : 'Detection on · nothing to record') : 'Detection off', app.detected.length],
     ['settings', Cog, colors.ocean, colors.oceanSoft, 'Settings', 'Server, accounts shown, offline, storage, SMS', 0],

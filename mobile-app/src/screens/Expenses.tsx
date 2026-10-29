@@ -11,7 +11,7 @@ import { LayoutAnimation, Platform, Pressable, RefreshControl, SectionList, Styl
 import { AlertTriangle, ArrowDownLeft, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock, HandCoins, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EvidenceTarget, useApp } from '../state';
-import { LocalExpense, hasFeature } from '../data';
+import { LocalExpense, hasFeature, mobileOn } from '../data';
 import { date, dayLabel, isoDate, money, moneyShort } from '../format';
 import { Button, Card, Chip, Empty, GradientPanel, IconBubble, Pill, categoryLook } from '../ui';
 import { EvidenceStrip } from '../evidence';
@@ -44,7 +44,7 @@ export function ExpensesScreen({ onEdit, onRecord }: { onEdit: (e: LocalExpense)
   const collect = (app.snapshot?.claims || []).filter(c => c.status !== 'SETTLED' && c.status !== 'WRITTEN_OFF').length
     + app.records.filter(r => r.kind === 'CLAIM' && r.status !== 'SYNCED').length;
   const parts: [Part, string, any, number][] = [
-    ...(expenses ? [['expenses', 'Expenses', Receipt, 0], ['collect', 'To collect', HandCoins, collect], ['emis', 'EMIs', CalendarClock, (app.snapshot?.emis || []).length]] as [Part, string, any, number][] : []),
+    ...(expenses ? [['expenses', 'Expenses', Receipt, 0], ...(mobileOn(app.snapshot, 'CLAIMS') ? [['collect', 'To collect', HandCoins, collect]] : []), ...(mobileOn(app.snapshot, 'EMIS') ? [['emis', 'EMIs', CalendarClock, (app.snapshot?.emis || []).length]] : [])] as [Part, string, any, number][] : []),
     ...(hasFeature(app.snapshot, 'INCOME') ? [['income', 'Income', ArrowDownLeft, 0]] as [Part, string, any, number][] : []),
   ];
   const current = parts.some(x => x[0] === part) ? part : parts[0]?.[0] || 'expenses';

@@ -77,7 +77,7 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
               <Text style={st.h}>Balance sheet</Text>
             </View>
             <Text style={st.label}>NET WORTH · {date(b.asOf).toUpperCase()}</Text>
-            <Text style={st.big}>{money(b.netWorth)}</Text>
+            <Text style={st.big}>{app.net(b.netWorth)}</Text>
             {b.netWorthChange != null && b.netWorthChange !== 0 && b.previousNetWorth ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
                 {b.netWorthChange > 0 ? <TrendingUp color="#a8e3c2" size={14} /> : <TrendingDown color="#ffb4a0" size={14} />}

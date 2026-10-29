@@ -118,7 +118,7 @@ export function deedOf(a, urls = {}, real = false, verified = null) {
     const ev = a.status === 'ACCEPTED' ? [{ title: 'Evidence of the online acceptance', rows: evidenceRows({
         name: a.acceptedName, at: a.acceptedAt, phone: a.acceptedPhone, phoneMatches: true, aadhaarLast4: a.aadhaarLast4, ip: a.acceptedIp,
         device: a.acceptedDevice, userAgent: a.acceptedUserAgent, location: a.acceptedLocation, deviceHash: a.deviceHash, seal: a.acceptanceSeal,
-        digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, verified }) }] : [];
+        digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified }) }] : [];
     return {
         kind: 'CONSTRUCTION', title: a.title, number: a.agreementNo, date: a.agreementDate, place: a.place,
         stampDuty: a.stampDuty, stampSerial: a.stampSerial, realStampPaper: real, thumbBoxes: a.thumbBoxes, twoWitnesses: true,
@@ -212,7 +212,7 @@ async function openDeed(project, first, onChanged) {
                     <small>ECDSA P-256 · key ${esc(a.keyFingerprint)}</small></div>
                 <table class="bond-facts ev"><tbody>${evidenceRows({ name: a.acceptedName, at: a.acceptedAt, phone: a.acceptedPhone, phoneMatches: true,
                     aadhaarLast4: a.aadhaarLast4, ip: a.acceptedIp, device: a.acceptedDevice, userAgent: a.acceptedUserAgent, location: a.acceptedLocation,
-                    deviceHash: a.deviceHash, seal: a.acceptanceSeal, digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, verified: st.verified })
+                    deviceHash: a.deviceHash, seal: a.acceptanceSeal, digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified: st.verified })
                     .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</tbody></table>
             </div>`;
         },

@@ -164,7 +164,44 @@ export function categoryIcon(name = '') {
     return hit ? { name: hit[1], tone: hit[2] } : { name: 'tag', tone: 'gray' };
 }
 
+/**
+ * Full-colour artwork for the money accounts (cash, wallets, coins): real-looking rupee notes, a wallet with notes in it and a
+ * stack of coins, drawn flat so they stay crisp at 20 px. icon(name) returns these as they are (they keep their own colours).
+ */
+const ART = {
+    'cash-note': `<g transform="rotate(-9 24 24)"><rect x="6" y="11" width="37" height="22" rx="3" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.6"/></g>
+        <rect x="4" y="15" width="38" height="23" rx="3" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.6"/>
+        <rect x="7.5" y="18.5" width="31" height="16" rx="1.8" fill="none" stroke="#2f7d3a" stroke-width="1" stroke-dasharray="2.2 1.8"/>
+        <circle cx="23" cy="26.5" r="6.4" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.3"/>
+        <text x="23" y="30.3" text-anchor="middle" font-size="10" font-weight="800" fill="#1d5a27" font-family="Arial, Helvetica, sans-serif">₹</text>
+        <circle cx="11.5" cy="26.5" r="1.5" fill="#2f7d3a"/><circle cx="34.5" cy="26.5" r="1.5" fill="#2f7d3a"/>`,
+    'cash-stack': `<rect x="8" y="9" width="33" height="19" rx="2.6" fill="#5aae60" stroke="#2f7d3a" stroke-width="1.5"/>
+        <rect x="6" y="14" width="35" height="19" rx="2.6" fill="#8fd187" stroke="#2f7d3a" stroke-width="1.5"/>
+        <rect x="4" y="19" width="37" height="20" rx="2.8" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.6"/>
+        <circle cx="22.5" cy="29" r="5.8" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.2"/>
+        <text x="22.5" y="32.4" text-anchor="middle" font-size="9" font-weight="800" fill="#1d5a27" font-family="Arial, Helvetica, sans-serif">₹</text>
+        <circle cx="9.5" cy="29" r="1.3" fill="#2f7d3a"/><circle cx="35.5" cy="29" r="1.3" fill="#2f7d3a"/>`,
+    'wallet-cash': `<rect x="12" y="6" width="26" height="15" rx="2" fill="#8fd187" stroke="#2f7d3a" stroke-width="1.4" transform="rotate(-6 25 13)"/>
+        <rect x="16" y="9" width="26" height="15" rx="2" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.4" transform="rotate(5 29 16)"/>
+        <rect x="4" y="16" width="40" height="26" rx="5" fill="#c98544" stroke="#7a4a1e" stroke-width="1.7"/>
+        <path d="M4 22h40" stroke="#7a4a1e" stroke-width="1.2" opacity=".5"/>
+        <rect x="29" y="25" width="15" height="11" rx="3.5" fill="#e3a766" stroke="#7a4a1e" stroke-width="1.5"/>
+        <circle cx="35" cy="30.5" r="2.1" fill="#7a4a1e"/>
+        <path d="M8 20c8-1.5 16-1.5 24 0" stroke="#e8b27a" stroke-width="1.4" fill="none" stroke-linecap="round"/>`,
+    'coin-stack': `<ellipse cx="17" cy="37" rx="12" ry="5" fill="#d99a1b" stroke="#8a5d00" stroke-width="1.4"/>
+        <path d="M5 31v6c0 2.8 5.4 5 12 5s12-2.2 12-5v-6z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.4"/>
+        <ellipse cx="17" cy="31" rx="12" ry="5" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.4"/>
+        <path d="M5 24v7c0 2.8 5.4 5 12 5s12-2.2 12-5v-7z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.4"/>
+        <ellipse cx="17" cy="24" rx="12" ry="5" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.4"/>
+        <ellipse cx="33" cy="30" rx="10" ry="4.3" fill="#d99a1b" stroke="#8a5d00" stroke-width="1.3"/>
+        <path d="M23 22v8c0 2.4 4.5 4.3 10 4.3S43 32.4 43 30v-8z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.3"/>
+        <ellipse cx="33" cy="22" rx="10" ry="4.3" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.3"/>
+        <text x="33" y="24.4" text-anchor="middle" font-size="6.5" font-weight="800" fill="#8a5d00" font-family="Arial, Helvetica, sans-serif">₹</text>
+        <text x="17" y="26.4" text-anchor="middle" font-size="6.5" font-weight="800" fill="#8a5d00" font-family="Arial, Helvetica, sans-serif">₹</text>`,
+};
+
 export function icon(name, extraClass = '') {
+    if (ART[name]) return `<svg class="icon art ${extraClass}" viewBox="0 0 48 48" aria-hidden="true">${ART[name]}</svg>`;
     const body = PATHS[name] || PATHS.info;
     return `<svg class="icon ${extraClass}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -180,11 +217,11 @@ export function hydrateIcons(root = document) {
 /** The icon and color family that represents an account type. */
 export function accountTypeIcon(type) {
     const map = {
-        CASH: ['cash', 'aqua'], BANK: ['bank', ''], WALLET: ['wallet', 'aqua'],
+        CASH: ['cash-note', 'art'], BANK: ['bank', ''], WALLET: ['wallet-cash', 'art'],
         FIXED_DEPOSIT: ['lock', 'violet'], RECURRING_DEPOSIT: ['repeat', 'violet'], SAVINGS_SCHEME: ['piggy', 'violet'],
         MUTUAL_FUND: ['trending', 'violet'], STOCKS: ['trending', 'violet'], BONDS: ['report', 'violet'],
         GOLD: ['gem', 'gold'], SILVER: ['gem', 'gray'], REAL_ESTATE: ['home', ''], VEHICLE: ['car', 'gray'],
-        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['chit', 'aqua'], RECEIVABLE: ['arrow-in', 'aqua'],
+        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['coin-stack', 'art'], RECEIVABLE: ['arrow-in', 'aqua'],
         LOAN_GIVEN: ['hand', 'aqua'], OTHER_ASSET: ['layers', 'gray'],
         CREDIT_CARD: ['card', 'coral'], HOME_LOAN: ['home', 'red'], VEHICLE_LOAN: ['car', 'red'],
         PERSONAL_LOAN: ['briefcase', 'red'], GOLD_LOAN: ['gem', 'red'], EDUCATION_LOAN: ['journal', 'red'],

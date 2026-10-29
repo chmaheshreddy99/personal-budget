@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Check a digital signature · Personal Budget</title>
+    <style>
+        :root { color-scheme: light dark; --bg: #f4f8fb; --card: #fff; --ink: #14202b; --muted: #5a6773; --line: #d6e3ee; --ok: #0b7a3b; --okbg: #e4f6ea; --bad: #a32222; --badbg: #fdecec; --accent: #0b7cbd; }
+        @media (prefers-color-scheme: dark) { :root { --bg: #0e1620; --card: #16222f; --ink: #e8eef4; --muted: #9fb0bf; --line: #2a3b4c; --okbg: #11301d; --badbg: #3a1717; --ok: #5fd68c; --bad: #ff8a8a; } }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
+        h1 { margin: 0; font-size: 22px; } h2 { margin: 0 0 6px; font-size: 15px; }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+        p { margin: 4px 0; color: var(--muted); }
+        textarea { width: 100%; min-height: 110px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; background: var(--bg); color: var(--ink); }
+        button, label.btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+        label.btn.alt, button.alt { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+        input[type=file] { display: none; }
+        .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .result { border-radius: 12px; padding: 12px 14px; font-weight: 600; }
+        .result.ok { background: var(--okbg); color: var(--ok); } .result.bad { background: var(--badbg); color: var(--bad); }
+        .result small { display: block; font-weight: 400; margin-top: 3px; color: inherit; opacity: 0.9; }
+        code, pre { font: 11.5px/1.45 ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; word-break: break-all; white-space: pre-wrap; }
+        pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+        dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; } dt { color: var(--muted); } dd { margin: 0; min-width: 0; }
+        details summary { cursor: pointer; font-weight: 600; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Check a digital signature</h1>
+    <p>This page checks, in your own browser, that a record was signed with the key it names and has not been changed since. It sends nothing anywhere and does not need the
+        application the record came from: the file you open holds the signed text, the signature and the public key. You can save this page and use it offline.</p>
+
+    <section class="card">
+        <h2>1. Open the evidence file</h2>
+        <div class="row">
+            <label class="btn">Choose the evidence file (.json)<input type="file" id="file" accept=".json,application/json"></label>
+            <button class="alt" id="paste-toggle" type="button">or paste its contents</button>
+        </div>
+        <div id="paste" hidden style="margin-top:8px"><textarea id="text" placeholder="Paste the contents of the evidence .json file here"></textarea>
+            <div class="row" style="margin-top:6px"><button id="check" type="button">Check it</button></div></div>
+    </section>
+
+    <section class="card" id="out" hidden>
+        <h2>2. Result</h2>
+        <div id="result"></div>
+        <dl id="facts" style="margin-top:10px"></dl>
+        <details style="margin-top:10px"><summary>The exact text that was signed</summary><pre id="signed"></pre></details>
+        <details style="margin-top:6px"><summary>Try changing one character</summary>
+            <p>Edit the text below and press Check: the signature no longer matches, which is how any change to a record shows.</p>
+            <textarea id="edit"></textarea><div class="row" style="margin-top:6px"><button id="recheck" type="button" class="alt">Check this text</button></div><div id="edit-result" style="margin-top:8px"></div></details>
+    </section>
+
+    <section class="card">
+        <h2>What this proves, and what it does not</h2>
+        <p>It proves the text is exactly what the key holder signed, and that nobody changed a character since. It does not say who holds the key: compare the key's
+            <b>fingerprint</b> shown above with the one the issuer gave you separately (printed on the document or told to you in person). If they are the same, the record is the issuer's and is unchanged.</p>
+        <details><summary>Check it without this page</summary>
+            <pre>from base64 import b64decode
+import json
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+
+b = json.load(open("evidence.json"))
+key = serialization.load_der_public_key(b64decode(b["publicKey"]))
+sig = b64decode(b["signature"])
+r, s = int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")
+key.verify(encode_dss_signature(r, s), b["signedText"].encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+print("valid")   # raises InvalidSignature if anything differs</pre></details>
+    </section>
+</main>
+<script>
+    const $ = id => document.getElementById(id);
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const fromB64 = b => Uint8Array.from(atob(b.trim()), c => c.charCodeAt(0));
+    let bundle = null;
+
+    async function verify(signedText) {
+        const key = await crypto.subtle.importKey('spki', fromB64(bundle.publicKey), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+        return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, fromB64(bundle.signature), new TextEncoder().encode(signedText));
+    }
+    async function fingerprint(b64) {
+        const h = new Uint8Array(await crypto.subtle.digest('SHA-256', fromB64(b64))).slice(0, 10);
+        return [...h].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase().replace(/(.{4})(?!$)/g, '$1 ');
+    }
+    function show(el, ok, text, sub) { el.innerHTML = `<div class="result ${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${esc(text)}<small>${esc(sub)}</small></div>`; }
+
+    async function load(raw) {
+        try {
+            bundle = JSON.parse(raw);
+            if (!bundle.signedText || !bundle.signature || !bundle.publicKey) throw new Error('This is not an evidence file: it has no signed text, signature or public key.');
+            if (!crypto?.subtle) throw new Error('This browser cannot check signatures here. Open the page in Chrome, Edge, Firefox or Safari (over https, or from a saved file).');
+            const ok = await verify(bundle.signedText);
+            const fp = await fingerprint(bundle.publicKey);
+            $('out').hidden = false;
+            show($('result'), ok, ok ? 'The signature is valid: this record is unchanged since it was signed.' : 'The signature does not match: the text was changed after it was signed, or the key is not the signer\'s.',
+                ok ? `Signed with the key whose fingerprint is ${fp}. Compare it with the fingerprint the issuer gave you.` : 'Do not rely on this record.');
+            $('facts').innerHTML = [['Kind', bundle.kind], ['Number', bundle.number], ['Key fingerprint (computed now)', fp],
+                ['Fingerprint written in the file', bundle.keyFingerprint], ['Algorithm', 'ECDSA P-256 / SHA-256'], ['Exported', bundle.exportedAt]]
+                .filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${k.startsWith('Key fingerprint') ? `<code>${esc(v)}</code>` : esc(v)}</dd>`).join('');
+            $('signed').textContent = (() => { try { return JSON.stringify(JSON.parse(bundle.signedText), null, 2); } catch { return bundle.signedText; } })();
+            $('edit').value = bundle.signedText;
+            $('edit-result').innerHTML = '';
+        } catch (e) {
+            $('out').hidden = false;
+            show($('result'), false, e.message || 'The file could not be read.', 'Open the .json file exported from the record.');
+        }
+    }
+
+    $('file').addEventListener('change', async e => { const f = e.target.files?.[0]; if (f) load(await f.text()); });
+    $('paste-toggle').addEventListener('click', () => { $('paste').hidden = !$('paste').hidden; });
+    $('check').addEventListener('click', () => load($('text').value));
+    $('recheck').addEventListener('click', async () => {
+        const ok = await verify($('edit').value);
+        show($('edit-result'), ok, ok ? 'Still valid: the text is exactly the signed text.' : 'Does not match: this is what a change looks like.', '');
+    });
+</script>
+</body>
+</html>

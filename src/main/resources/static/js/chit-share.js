@@ -12,7 +12,7 @@
 import { trackedFetch } from './core/busy.js';
 import { upiLogo } from './core/upi-logos.js';
 import { qrSvg } from './core/qr.js';
-import { printBond, openCamera, shrinkImage, verifyEvidence, chitRecitals } from './core/bond.js';
+import { printBond, openCamera, shrinkImage, verifyEvidence, chitRecitals, signatureRows, addEvidenceButton } from './core/bond.js';
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -522,6 +522,7 @@ async function checkEvidence() {
     el.innerHTML = ok === null ? '<b>This browser cannot check the digital signature</b><small>Open the link in Chrome or Safari over https.</small>'
         : ok ? `<b>✓ Digital signature verified</b><small>The record of your acceptance is signed with the organiser's key <code>${esc(a.keyFingerprint)}</code>; any change to it would show here.</small>`
         : '<b>✗ The signature does not match</b><small>The record was changed after it was signed. Tell the organiser.</small>';
+    addEvidenceButton(el, 'CHIT-AGREEMENT', a.agreementNo || 'agreement', a);
 }
 
 /** The agreement as a stamp-paper deed, for the member to print. */
@@ -542,7 +543,7 @@ function bondDoc() {
         terms: a.terms, fingerprint: a.contentHash,
         annexures: a.acceptanceSeal ? [{ title: 'Evidence of the online acceptance', rows: [['Accepted by', esc(a.acceptedName)], ['Accepted at', esc(when(a.acceptedAt))],
             ['Mobile', esc(a.acceptedPhoneMasked || '')], ['Acceptance seal (SHA-256)', `<code>${esc(a.acceptanceSeal)}</code>`],
-            ...(a.digitalSignature ? [['Digital signature', `<code>${esc(a.digitalSignature.slice(0, 44))}…</code><br>key ${esc(a.keyFingerprint || '')}`]] : [])] }] : [],
+            ...signatureRows({ digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload })] }] : [],
     };
 }
 

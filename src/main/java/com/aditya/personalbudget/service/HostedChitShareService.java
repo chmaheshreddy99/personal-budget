@@ -508,7 +508,7 @@ public class HostedChitShareService {
                     a.stampDuty(), a.stampSerial(), a.organiserName(), a.organiserSignature(), a.witnessName(), a.witnessSignature(),
                     a.kycFromMember(), a.files().stream().map(AttachmentService.AgreementFile::docType).distinct().toList(),
                     a.aadhaarLast4(), a.panMasked(), a.evidencePayload(), a.digitalSignature(),
-                    settings.payLinkPublicKey(), settings.payLinkFingerprint());
+                    settings.publicKeyFor(a.evidencePayload(), a.digitalSignature()), settings.fingerprintFor(a.evidencePayload(), a.digitalSignature()));
         }
         boolean full = CHIT.equals(kind) || MEMBER.equals(kind);
         return new PublicChit(kind, t.getName(), s.getCreatedByName(), s.getSharedWith(), s.getMessage(), t.getCurrency(),

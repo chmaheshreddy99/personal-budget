@@ -18,9 +18,10 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { showRoute } from '../core/route.js';
+import { openReceiptSend, openPayoutSend, receiptsTabHtml, handleReceiptClick, ackByInstallment, ackBadge, isFinal } from '../components/chit-receipt.js';
 
 const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
-const CHIT_TABS = ['installments', 'interest', 'payout', 'details'];
+const CHIT_TABS = ['installments', 'receipts', 'interest', 'payout', 'details'];
 
 const prefs = getPref('chits', { includeMatured: false });
 const savePrefs = () => setPref('chits', prefs);
@@ -354,18 +355,33 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     const liftNow = takeHomeNow(c);
     const closed = c.status === 'CLOSED';
     target.classList.toggle('is-closed', closed);
+    let acks = [];   // the organizer's acknowledgements of the payments, loaded after the page is drawn
+    const anyPaid = installments.some(i => i.status === 'PAID');
+    const payoutReady = paidOut && toCome === 0;   // the whole payout is in: the organizer can be asked to confirm it
 
-    const actions = manage && closed ? `
+    // The banner keeps what is done most (pay, the next step of the chit, edit); the rest sits in a "More" menu
+    const menu = [];
+    if (anyPaid) menu.push({ act: 'ack', icon: 'shield', label: 'Acknowledge payments', hint: 'Ask the organizer to sign for what you paid' });
+    if (payoutReady) menu.push({ act: 'payout-ack', icon: 'gift', label: 'Payout receipt', hint: 'Organizer confirms the payout; earlier acknowledgements are cancelled' });
+    const step = closed ? null : toCome ? 'payout-part' : c.closable ? 'close' : !paidOut ? 'payout' : null;
+    if (!closed && !paidOut && step !== 'payout') menu.push({ act: 'payout', icon: 'gift', label: 'Record the payout', hint: 'The prize or maturity amount you received' });
+    if (!closed && paidOut) menu.push({ act: 'undo-payout', icon: 'undo', label: 'Undo payout', hint: 'Takes the payout out of the books' });
+    if (!closed) menu.push({ sep: true }, { act: 'delete', icon: 'trash', label: 'Delete chit', danger: true });
+    const moreBtn = menu.length ? `<button class="btn sm on-dark" data-cm='${esc(JSON.stringify(menu))}' title="More actions" aria-haspopup="menu">${icon('more')}More${icon('chevron-down')}</button>` : '';
+    const stepBtn = {
+        'payout-part': `<button class="btn sm gold-btn" data-act="payout-part" title="The organizer paid another part of the payout">${icon('plus')}Record part · ${moneyShort(toCome)} due</button>`,
+        close: `<button class="btn sm gold-btn" data-act="close" title="Finished: put it away (it can be reopened)">${icon('lock')}Close chit</button>`,
+        payout: `<button class="btn sm gold-btn" data-act="payout" title="Record the prize or maturity amount you received">${icon('gift')}Payout</button>`,
+    }[step] || '';
+    const actions = !manage ? '' : closed ? `
         <button class="btn sm primary" data-act="reopen" title="Open the chit again to pay, undo or edit">${icon('refresh')}Reopen</button>
-        <button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>` : manage ? `
-        ${nextPending && c.organizerUpi ? `<button class="btn sm on-dark" data-upi="${nextPending.id}" title="Pay #${nextPending.installmentNo} by UPI QR">${icon('qr')}UPI</button>` : ''}
-        ${nextPending ? `<button class="btn sm primary" data-pay="${nextPending.id}">${icon('check')}Pay #${nextPending.installmentNo}</button>` : ''}
-        ${c.closable ? `<button class="btn sm gold-btn" data-act="close" title="Finished: put it away (it can be reopened)">${icon('lock')}Close chit</button>` : ''}
-        ${toCome ? `<button class="btn sm gold-btn" data-act="payout-part" title="The organizer paid another part of the payout">${icon('plus')}Record part · ${moneyShort(toCome)} due</button>` : ''}
-        ${paidOut ? `<button class="btn sm on-dark" data-act="undo-payout">${icon('undo')}Undo payout</button>`
-                  : `<button class="btn sm on-dark" data-act="payout">${icon('gift')}Payout</button>`}
-        <button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>
-        <button class="btn sm on-dark icon" data-act="delete" title="Delete chit">${icon('trash')}</button>` : '';
+        <button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>${moreBtn}` : `
+        <div class="ca-main">
+            ${nextPending && c.organizerUpi ? `<button class="btn sm on-dark" data-upi="${nextPending.id}" title="Pay #${nextPending.installmentNo} by UPI QR">${icon('qr')}UPI</button>` : ''}
+            ${nextPending ? `<button class="btn sm primary" data-pay="${nextPending.id}">${icon('check')}Pay #${nextPending.installmentNo}</button>` : ''}
+            ${stepBtn}
+        </div>
+        <div class="ca-side"><button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>${moreBtn}</div>`;
     const gain = paidOut ? Number(c.realizedGain) : Number(c.projectedNetGain);
 
     target.innerHTML = `
@@ -385,7 +401,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
                         : toCome ? `of ${money(c.payoutAmount)} · <b class="ab-due">${money(toCome)} to come</b>` : date(c.payoutDate)}</span>
                     ${toCome ? `<i class="payout-meter" title="${percent(Number(c.payoutReceived) / Number(c.payoutAmount) * 100, 0)} of the payout received"><em style="width:${Number(c.payoutReceived) / Number(c.payoutAmount) * 100}%"></em></i>` : ''}
                 </div>
-                <div class="ab-actions chit-actions">${actions}</div>
+                <div class="ab-actions chit-actions ca-grouped">${actions}</div>
             </div>
             <div class="chit-key">
                 ${keyTile('arrow-up', 'Paid in', money(c.paidIn), `${c.installmentsPaid} of ${c.numberOfInstallments} installments`,
@@ -413,6 +429,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
             title: 'Chit passbook', iconName: 'calendar', cls: 'p-chit-tabs', bodyClass: 'flush',
             actions: `${exportButton({ label: '' })}<div class="tabs sm" id="chit-tabs">
                 <button class="tab ${view.tab === 'installments' ? 'active' : ''}" data-tab="installments">${icon('list')}Installments</button>
+                <button class="tab ${view.tab === 'receipts' ? 'active' : ''}" data-tab="receipts">${icon('shield')}Acknowledgements<span class="count warn" data-ack-count hidden></span></button>
                 <button class="tab ${view.tab === 'interest' ? 'active' : ''}" data-tab="interest">${icon('trending')}Interest by month</button>
                 ${paidOut ? `<button class="tab ${view.tab === 'payout' ? 'active' : ''}" data-tab="payout">${icon('gift')}Payout${toCome ? `<span class="count warn">${payoutReceipts.length}</span>` : ''}</button>` : ''}
                 <button class="tab ${view.tab === 'details' ? 'active' : ''}" data-tab="details">${icon('info')}Details</button></div>`,
@@ -421,11 +438,22 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
 
     const tabBody = target.querySelector('#chit-tab-body');
     const drawTab = () => {
-        tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi))
+        tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi), ackByInstallment(acks, installments))
+            : view.tab === 'receipts' ? receiptsTabHtml(acks, manage, { payoutReady, payoutDone: acks.some(a => a.kind === 'PAYOUT' && isFinal(a)) })
             : view.tab === 'interest' ? interestHtml(c, interestSchedule)
             : view.tab === 'payout' ? payoutHtml(c, payoutReceipts, manage && !closed) : detailsHtml(c, installments, interestSchedule);
     };
     drawTab();
+    const loadAcks = () => api.get(`/chits/${c.id}/receipts`).then(list => {
+        acks = list;
+        const waiting = acks.filter(a => a.status === 'PENDING' || a.status === 'DISPUTED').length;
+        const badge = target.querySelector('[data-ack-count]');
+        if (badge) { badge.hidden = !waiting; badge.textContent = waiting; }
+        drawTab();
+    }).catch(() => { /* the passbook works without them */ });
+    loadAcks();
+    const ctx = { chit: c, installments, payoutReceipts, get acks() { return acks; }, reload: () => loadAcks(), redraw: () => drawTab() };
+    const showReceipts = () => { view.tab = 'receipts'; showRoute(`#/chits/${c.id}/receipts`); target.querySelectorAll('#chit-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'receipts')); return loadAcks(); };
     bindExport(target.querySelector('.p-chit-tabs'), () => ({
         title: `${c.name} · chit passbook`, subtitle: [c.organizer, c.ticketNo ? `Ticket ${c.ticketNo}` : '', `${c.numberOfInstallments} × ${money(c.monthlyInstallment)}`].filter(Boolean).join(' · '),
         filename: `chit-${c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -447,6 +475,16 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     }));
 
     target.addEventListener('click', async e => {
+        const more = e.target.closest('[data-cm]');
+        if (more) { openMoreMenu(more, JSON.parse(more.dataset.cm), act => {
+            // the menu lives outside this page (the banner clips it): its choice is passed on as a click of the same button
+            const proxy = document.createElement('button');
+            proxy.dataset.act = act;
+            proxy.hidden = true;
+            target.append(proxy);
+            proxy.click();
+            proxy.remove();
+        }); return; }
         const tab = e.target.closest('[data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
@@ -455,6 +493,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
             drawTab();
             return;
         }
+        if (await handleReceiptClick(e, ctx)) return;
         const filter = e.target.closest('[data-interest-filter]');
         if (filter) { view.interestFilter = filter.dataset.interestFilter; drawTab(); return; }
         const entryRow = e.target.closest('tr[data-entry]');
@@ -462,7 +501,10 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
         if (entryRow && !btn) { toggleEntryRow(entryRow, null, { onChanged: reload }); return; }
         if (!btn) return;
         try {
-            if (btn.dataset.pay) openPayForm(c, installments.find(i => i.id === Number(btn.dataset.pay)), reload);
+            if (btn.dataset.ack) openReceiptSend(c, installments, acks, [Number(btn.dataset.ack)], loadAcks);
+            else if (btn.dataset.act === 'ack') openReceiptSend(c, installments, acks, [], showReceipts);
+            else if (btn.dataset.act === 'payout-ack') openPayoutSend({ chit: c, installments, payoutReceipts, acks }, showReceipts);
+            else if (btn.dataset.pay) openPayForm(c, installments.find(i => i.id === Number(btn.dataset.pay)), reload);
             else if (btn.dataset.upi) {
                 const inst = installments.find(i => i.id === Number(btn.dataset.upi));
                 openUpiDialog(c, inst, { onRecord: () => openPayForm(c, inst, reload) });
@@ -519,6 +561,46 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     });
 }
 
+/**
+ * The "More" menu of the chit banner: a popover under the button (fixed, so the banner cannot clip it) that closes on a
+ * choice, a click elsewhere, Escape or scrolling.
+ */
+function openMoreMenu(anchor, items, onPick) {
+    document.querySelector('.cm-pop')?.remove();
+    const pop = document.createElement('div');
+    pop.className = 'cm-pop';
+    pop.setAttribute('role', 'menu');
+    pop.innerHTML = items.map(i => i.sep ? '<hr>' : `<button type="button" role="menuitem" class="cm-item ${i.danger ? 'danger' : ''}" data-pick="${i.act}">
+        <span class="cm-ico">${icon(i.icon)}</span><span class="cm-txt"><b>${esc(i.label)}</b>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</span></button>`).join('');
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.right - w))}px`;
+    pop.style.top = `${r.bottom + 6 + h > innerHeight && r.top - h - 6 > 0 ? r.top - h - 6 : r.bottom + 6}px`;
+    anchor.setAttribute('aria-expanded', 'true');
+    const close = () => {
+        pop.remove();
+        anchor.removeAttribute('aria-expanded');
+        document.removeEventListener('pointerdown', away, true);
+        document.removeEventListener('keydown', key, true);
+        removeEventListener('scroll', close, true);
+        removeEventListener('resize', close);
+    };
+    const away = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+    const key = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); anchor.focus(); } };
+    pop.addEventListener('click', e => {
+        const item = e.target.closest('[data-pick]');
+        if (!item) return;
+        close();
+        onPick(item.dataset.pick);
+    });
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', key, true);
+    addEventListener('scroll', close, true);
+    addEventListener('resize', close);
+    pop.querySelector('.cm-item')?.focus();
+}
+
 /** A key figure of the selected chit: label, value, a short note and an optional bar. */
 function keyTile(iconName, label, value, note, extra = '', cls = '', title = '') {
     return `<div class="ck-tile ${cls}" ${title ? `title="${esc(title)}"` : ''}><span class="ck-icon">${icon(iconName)}</span>
@@ -538,7 +620,7 @@ function dueText(iso, plain = false) {
 
 // ===================================================================== tabs
 
-function installmentsHtml(installments, manage, upi) {
+function installmentsHtml(installments, manage, upi, acked = new Map()) {
     const next = installments.find(i => i.status !== 'PAID');
     const payable = i => i.status !== 'PAID' && (i.overdue || i === next);
     const state = i => i.status === 'PAID' ? ['good', 'check-circle', 'Paid'] : i.overdue ? ['critical', 'alert', 'Overdue'] : i === next ? ['warning', 'clock', 'Next'] : ['gray', 'calendar', 'Upcoming'];
@@ -555,10 +637,12 @@ function installmentsHtml(installments, manage, upi) {
                 <td class="r">${i.paidAmount !== null && !withDividends ? `<b>${money(i.paidAmount)}</b>` : money(i.dueAmount)}</td>
                 ${withDividends ? `<td class="r">${Number(i.dividend) ? `<span class="pos">${money(i.dividend)}</span>` : '<span class="muted">—</span>'}</td>
                 <td class="r">${i.paidAmount !== null ? `<b>${money(i.paidAmount)}</b>` : ''}</td>` : ''}
-                <td>${i.paidDate ? `<span class="paid-on" title="From ${esc(i.paidFromAccountName || '')}">${icon(ico)}${shortDate(i.paidDate)}<small>${esc(i.paidFromAccountName || '')}</small></span>`
+                <td>${i.paidDate ? `<span class="paid-on" title="From ${esc(i.paidFromAccountName || '')}">${icon(ico)}${shortDate(i.paidDate)}<small>${esc(i.paidFromAccountName || '')}</small></span>${ackBadge(acked.get(i.id))}`
                     : `<span class="badge ${tone}">${icon(ico)}${label}</span>`}</td>
                 <td class="r">${!manage ? '' : i.status === 'PAID'
-                    ? `<button class="btn sm ghost icon" data-undo="${i.id}" title="Undo payment">${icon('undo')}</button>`
+                    ? `${isFinal(acked.get(i.id)) ? '' : `<button class="btn sm ghost icon" data-ack="${i.id}" title="Ask the organizer to acknowledge this payment">${icon('shield')}</button>`}${isFinal(acked.get(i.id))
+                        ? `<span class="muted" title="Acknowledged by the organizer: it cannot be undone">${icon('lock')}</span>`
+                        : `<button class="btn sm ghost icon" data-undo="${i.id}" title="Undo payment">${icon('undo')}</button>`}`
                     : payable(i) ? `${upi ? `<button class="btn sm ghost icon" data-upi="${i.id}" title="Pay by UPI QR">${icon('qr')}</button>` : ''}<button class="btn sm ${i.overdue ? 'primary' : ''}" data-pay="${i.id}">${icon('check')}Pay</button>`
                     : `<button class="btn sm ghost icon quiet" data-pay="${i.id}" title="Pay in advance">${icon('check')}</button>`}</td>
             </tr>`;
@@ -704,6 +788,7 @@ function detailsHtml(c, installments = [], schedule = []) {
             ${item('Ticket / group', esc(c.ticketNo || '—'))}
             ${item('Status', statusBadge(c.status))}
             ${item('Pays from', esc(c.defaultPaymentAccountName || '—'))}
+            ${item('Organizer mobile', c.organizerPhone ? `<span class="mono">${esc(c.organizerPhone)}</span>` : '—')}
             ${item('Organizer UPI', c.organizerUpi ? `<span class="mono">${esc(c.organizerUpi)}</span>` : '—')}
             ${item('Commission', commission ? `${percent(c.commissionPercent, 2)} · ${money(Math.round(commission))}` : '—')}
             ${c.notes ? item('Notes', esc(c.notes)) : ''}
@@ -919,6 +1004,8 @@ async function openChitForm(chit, onSaved) {
             ${field({ label: 'Chit name', name: 'name', value: c.name, required: true, span: 'span-2' })}
             ${field({ label: 'Ticket / group no.', name: 'ticketNo', value: c.ticketNo })}
             ${field({ label: 'Organizer / foreman', name: 'organizer', value: c.organizer })}
+            ${field({ label: 'Organizer mobile', name: 'organizerPhone', type: 'tel', value: c.organizerPhone, placeholder: '10-digit mobile',
+                      attrs: 'maxlength="16" inputmode="tel" data-plain', hint: 'To send receipts for acknowledgement' })}
             ${field({ label: 'Organizer UPI ID', name: 'organizerUpi', value: c.organizerUpi, placeholder: 'name@bank',
                       attrs: 'pattern="[A-Za-z0-9._\\-]{2,}@[A-Za-z0-9.\\-]{2,}" data-plain', hint: 'Shows a QR code to pay installments' })}
             ${field({ label: 'UPI note', name: 'upiNote', value: c.upiNote, attrs: 'maxlength="40" data-plain', placeholder: 'Auto: chit name + ticket',

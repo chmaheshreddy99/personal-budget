@@ -579,3 +579,17 @@ table.grid.compact th { padding: 5px 8px; }
     font-size: 10px;
     color: var(--text-secondary);
 }
+
+/* Full-colour money artwork (cash, wallet, coins): no tinted tile behind it, and a little larger than a line icon */
+.chip-icon.art { background: transparent; box-shadow: none; }
+.chip-icon.art svg, svg.icon.art { width: 26px; height: 26px; color: initial; stroke: none; fill: none; }
+.chip-icon.sm.art svg { width: 20px; height: 20px; }
+svg.icon.art text { stroke: none; }
+
+/* the cash, wallet and coin artwork needs room to read: a larger tile and a larger picture than a line icon */
+.chip-icon.art { width: 38px; height: 38px; border-radius: 11px; background: linear-gradient(180deg, #f6fbf4, #e4f2df); box-shadow: inset 0 1px 0 #fff, 0 1px 3px rgba(10, 46, 79, 0.12); }
+.chip-icon.art svg, svg.icon.art { width: 34px; height: 34px; }
+.chip-icon.sm.art { width: 30px; height: 30px; }
+.chip-icon.sm.art svg { width: 27px; height: 27px; }
+.loss { color: #8a949e; font-weight: 500; font-size: 11.5px; }
+b .loss, .fig .loss, .mini .loss { font-weight: 600; }

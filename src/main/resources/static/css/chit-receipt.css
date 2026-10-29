@@ -1,0 +1,17 @@
+/* The organizer's page of an acknowledgement of receipt (chit-receipt.html), on top of loan-agreement.css */
+.cr-lines { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; background: #fff; border: 1px solid #d6e3ee; border-radius: 12px; overflow: hidden; }
+.cr-lines th, .cr-lines td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e6eef5; vertical-align: top; }
+.cr-lines th { font-size: 12px; font-weight: 650; color: #5f6b77; background: #f4f9fc; }
+.cr-lines .r { text-align: right; font-variant-numeric: tabular-nums; }
+.cr-lines tfoot td { font-weight: 700; border-bottom: 0; background: #f4f9fc; }
+.cr-lines small { display: block; color: #5f6b77; font-weight: 400; }
+.cr-wrong { margin-top: 12px; text-align: center; }
+.cr-wrong button { background: none; border: 0; color: #8a4b00; text-decoration: underline; font-size: 14px; cursor: pointer; padding: 8px; }
+.cr-dispute { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 12px; border-radius: 12px; border: 1px solid #f0c9a0; background: #fff6ec; }
+.cr-dispute[hidden] { display: none; }
+.cr-dispute textarea { min-height: 84px; padding: 10px 12px; border-radius: 10px; border: 1.5px solid #e2c19b; font: inherit; }
+.cr-dispute .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.cr-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff6ec; color: #8a4b00; font-size: 14px; }
+#cr-kyc-error:empty, #cr-error:empty, #cr-dispute-error:empty, #cr-gate-error:empty { display: none; }
+@media (max-width: 480px) { .cr-lines th:nth-child(3), .cr-lines td:nth-child(3) { display: none; } }
+.cr-h { margin: 14px 0 2px; font-size: 14px; }

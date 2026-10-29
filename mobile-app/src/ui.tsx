@@ -1,7 +1,7 @@
 /** The app's building blocks: cards, a gradient header, icon bubbles, chips, buttons, fields and bottom sheets. */
 import React from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleProp, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import {
   Banknote, Briefcase, Building2, Car, CreditCard, Gem, HandCoins, HardHat, HeartPulse, Home, Landmark, LucideIcon, PiggyBank, Plane, Receipt,
   ShoppingBag, ShoppingCart, Smartphone, Sparkles, Ticket, TrainFront, Utensils, Wallet, Wrench, Zap, Fuel, GraduationCap, Shirt, Gift, Film, Shield,
@@ -65,7 +65,50 @@ export function accountIcon(type: string, group?: string): LucideIcon {
   }
 }
 
+/** Full-colour cash artwork (a rupee note, a wallet with notes, a stack of coins) for the money accounts, drawn like the web app's. */
+export function CashArt({ kind, size = 36 }: { kind: 'note' | 'wallet' | 'coins'; size?: number }) {
+  const stroke = kind === 'coins' ? '#8a5d00' : kind === 'wallet' ? '#7a4a1e' : '#2f7d3a';
+  return (
+    <Svg width={size} height={size} viewBox="0 0 48 48">
+      {kind === 'note' ? (
+        <>
+          <G rotation={-9} origin="24, 24"><Rect x={6} y={11} width={37} height={22} rx={3} fill="#6fbf73" stroke={stroke} strokeWidth={1.6} /></G>
+          <Rect x={4} y={15} width={38} height={23} rx={3} fill="#b4e6a8" stroke={stroke} strokeWidth={1.6} />
+          <Rect x={7.5} y={18.5} width={31} height={16} rx={1.8} fill="none" stroke={stroke} strokeWidth={1} strokeDasharray="2.2 1.8" />
+          <Circle cx={23} cy={26.5} r={6.4} fill="#6fbf73" stroke={stroke} strokeWidth={1.3} />
+          <SvgText x={23} y={30.3} textAnchor="middle" fontSize={10} fontWeight="bold" fill="#1d5a27">₹</SvgText>
+          <Circle cx={11.5} cy={26.5} r={1.5} fill={stroke} /><Circle cx={34.5} cy={26.5} r={1.5} fill={stroke} />
+        </>
+      ) : kind === 'wallet' ? (
+        <>
+          <G rotation={-6} origin="25, 13"><Rect x={12} y={6} width={26} height={15} rx={2} fill="#8fd187" stroke="#2f7d3a" strokeWidth={1.4} /></G>
+          <G rotation={5} origin="29, 16"><Rect x={16} y={9} width={26} height={15} rx={2} fill="#b4e6a8" stroke="#2f7d3a" strokeWidth={1.4} /></G>
+          <Rect x={4} y={16} width={40} height={26} rx={5} fill="#c98544" stroke={stroke} strokeWidth={1.7} />
+          <Rect x={29} y={25} width={15} height={11} rx={3.5} fill="#e3a766" stroke={stroke} strokeWidth={1.5} />
+          <Circle cx={35} cy={30.5} r={2.1} fill={stroke} />
+        </>
+      ) : (
+        <>
+          <Ellipse cx={17} cy={37} rx={12} ry={5} fill="#d99a1b" stroke={stroke} strokeWidth={1.4} />
+          <Path d="M5 31v6c0 2.8 5.4 5 12 5s12-2.2 12-5v-6z" fill="#f0b73a" stroke={stroke} strokeWidth={1.4} />
+          <Ellipse cx={17} cy={31} rx={12} ry={5} fill="#ffd25e" stroke={stroke} strokeWidth={1.4} />
+          <Path d="M5 24v7c0 2.8 5.4 5 12 5s12-2.2 12-5v-7z" fill="#f0b73a" stroke={stroke} strokeWidth={1.4} />
+          <Ellipse cx={17} cy={24} rx={12} ry={5} fill="#ffd25e" stroke={stroke} strokeWidth={1.4} />
+          <Path d="M23 22v8c0 2.4 4.5 4.3 10 4.3S43 32.4 43 30v-8z" fill="#f0b73a" stroke={stroke} strokeWidth={1.3} />
+          <Ellipse cx={33} cy={22} rx={10} ry={4.3} fill="#ffd25e" stroke={stroke} strokeWidth={1.3} />
+          <SvgText x={33} y={24.4} textAnchor="middle" fontSize={6.5} fontWeight="bold" fill={stroke}>₹</SvgText>
+          <SvgText x={17} y={26.4} textAnchor="middle" fontSize={6.5} fontWeight="bold" fill={stroke}>₹</SvgText>
+        </>
+      )}
+    </Svg>
+  );
+}
+
 export function AccountBubble({ type, group, size }: { type: string; group?: string; size?: number }) {
+  if (!group || group === 'OWN') {
+    const art = type === 'CASH' ? 'note' : type === 'WALLET' ? 'wallet' : type === 'CHIT_FUND' ? 'coins' : null;
+    if (art) return <View style={{ width: size || 44, height: size || 44, alignItems: 'center', justifyContent: 'center' }}><CashArt kind={art} size={(size || 44) * 0.95} /></View>;
+  }
   const t = accountTone(type, group);
   return <IconBubble Icon={accountIcon(type, group)} fg={t.fg} bg={t.bg} size={size} />;
 }
@@ -232,29 +275,30 @@ export function Sheet({ visible, onClose, title, children, footer }:
 }
 
 export const s = StyleSheet.create({
-  card: { backgroundColor: colors.card, borderRadius: radius.l, padding: space.m, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line,
-    shadowColor: '#0b2038', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  card: { backgroundColor: colors.card, borderRadius: radius.l, padding: space.m + 2, borderWidth: StyleSheet.hairlineWidth, borderColor: '#e8edf4',
+    shadowColor: '#0b2038', shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   grad: { borderRadius: radius.xl, overflow: 'hidden', padding: space.l },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, height: 20, borderRadius: 10, alignSelf: 'flex-start' },
   pillText: { fontSize: 10.5, fontWeight: '700' },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: colors.card,
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 36, borderRadius: 18, backgroundColor: colors.card,
     borderWidth: 1, borderColor: colors.line },
   chipOn: { backgroundColor: colors.navy, borderColor: colors.navy },
   chipText: { fontSize: 13, fontWeight: '600', color: colors.text2 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: radius.m, borderWidth: 1, paddingHorizontal: space.l },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: radius.m, borderWidth: 1, paddingHorizontal: space.l,
+    shadowColor: '#0b2038', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 1 },
   btnText: { fontSize: 15, fontWeight: '700' },
   label: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, color: colors.muted, textTransform: 'uppercase' },
-  input: { height: 48, borderRadius: radius.m, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card, paddingHorizontal: 14,
-    fontSize: 15.5, color: colors.text },
+  input: { height: 50, borderRadius: radius.m, borderWidth: 1.2, borderColor: colors.line, backgroundColor: '#fafcfe', paddingHorizontal: 15,
+    fontSize: 16, color: colors.text },
   hint: { fontSize: 11.5, color: colors.muted },
   section: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space.l, marginBottom: space.s, paddingHorizontal: 2 },
-  sectionText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.7, color: colors.text2, textTransform: 'uppercase' },
+  sectionText: { fontSize: 11.5, fontWeight: '800', letterSpacing: 0.9, color: colors.muted, textTransform: 'uppercase' },
   empty: { alignItems: 'center', gap: 8, padding: space.xl },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
   emptyText: { fontSize: 13, color: colors.text2, textAlign: 'center', lineHeight: 19 },
   sheetWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(11,32,56,0.45)' },
-  sheet: { maxHeight: '92%', backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: space.l, paddingTop: space.s },
+  sheet: { maxHeight: '92%', backgroundColor: colors.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: space.l, paddingTop: space.s },
   grabber: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.line, marginBottom: space.s },
   sheetTitle: { fontSize: 19, fontWeight: '800', color: colors.text, marginBottom: space.m },
   sheetFooter: { paddingVertical: space.m, gap: space.s, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line },

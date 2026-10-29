@@ -53,6 +53,10 @@ public class Chit implements TenantOwned {
     @Column(length = 100)
     private String organizer;
 
+    /** Organizer's mobile number (10 digits): receipts are sent to it for acknowledgement. */
+    @Column(length = 20)
+    private String organizerPhone;
+
     /** Organizer's UPI ID (VPA) for paying installments by QR code, e.g. shriram@hdfcbank. */
     @Column(length = 60)
     private String organizerUpi;

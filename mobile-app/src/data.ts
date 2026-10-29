@@ -57,6 +57,8 @@ export type Claim = {
   date: string; dueDate: string | null; status: 'OPEN' | 'PARTIAL' | 'SETTLED' | 'WRITTEN_OFF'; statusLabel: string; overdue: boolean;
   outstanding: number; repaid: number; interestRate: number | null; interestDue: number | null; accountName: string | null; entryNo: string | null;
   reference: string | null; notes: string | null; lastPaymentDate: string | null; repayments: ClaimRepayment[];
+  /** what the bank would have paid on money lent without interest (at benchmarkRate a year); null when it charges interest */
+  forgoneInterest?: number | null; benchmarkRate?: number | null;
 };
 export const owedToMe = (c: { kind: string }) => c.kind === 'LENT' || c.kind === 'PAID_FOR';
 
@@ -87,10 +89,18 @@ export type Snapshot = {
   /** missing in a snapshot kept from an older server: then every section is assumed */
   features?: string[]; canRecord?: boolean;
   claims?: Claim[]; emis?: Emi[]; incomes?: ServerIncome[]; gifts?: Gift[];
+  /** what the household allows the app to offer and show (Settings > Mobile app on the web); missing on an older server */
+  mobile?: MobileConfig;
 };
 
+/** features: the sections on; hideBalances: balances show as dots until viewed; maskNetWorth: never show the total; hideAbove: a balance above this stays hidden until tapped. */
+export type MobileConfig = { features: string[]; hideBalances: boolean; maskNetWorth: boolean; hideAbove: number | null };
+
+/** Is a section switched on for the app in the household's settings? (an older server does not say: yes) */
+export const mobileOn = (snap: Snapshot | null, key: string) => !snap?.mobile || snap.mobile.features.includes(key);
+
 /** Is a section shared with the user? (an older server does not say: yes) */
-export const hasFeature = (snap: Snapshot | null, f: string) => !snap?.features || snap.features.includes(f);
+export const hasFeature = (snap: Snapshot | null, f: string) => (!snap?.features || snap.features.includes(f)) && mobileOn(snap, f);
 
 export type LocalStatus = 'QUEUED' | 'FAILED' | 'SYNCED' | 'PENDING';
 
@@ -113,7 +123,7 @@ export type LocalChitPayment = {
  * back on one (REPAYMENT), income (INCOME), a gift (GIFT) or EMIs paid (EMI_PAY). payload is what the server gets;
  * the rest is what the phone shows meanwhile, and how it moves an account's balance (flow OUT of / IN to accountId).
  */
-export type RecordKind = 'CLAIM' | 'REPAYMENT' | 'INCOME' | 'GIFT' | 'EMI_PAY';
+export type RecordKind = 'CLAIM' | 'REPAYMENT' | 'INCOME' | 'GIFT' | 'EMI_PAY' | 'TRANSFER';
 export type LocalRecord = {
   clientId: string; kind: RecordKind; createdAt: number; status: LocalStatus; message?: string; entryNo?: string; entryId?: number; syncedAt?: number;
   title: string; sub: string; date: string; amount: number; accountId: number | null; accountName: string; flow: 'OUT' | 'IN' | 'NONE';
@@ -177,6 +187,8 @@ export type Settings = {
   /** 'chosen': only the accounts in chosenAccounts are shown (and offered to pay from) */
   accountFilter: 'all' | 'chosen';
   chosenAccounts: number[];
+  /** open the app with the phone's own lock (pattern, PIN, password, fingerprint) instead of typing the password: on unless turned off */
+  deviceLock?: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -387,7 +399,7 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
             narration: e.narration || null, party: e.party || null, reference: e.reference || null, notes: e.notes || null })),
           chitPayments: chitsWaiting.map(c => ({ clientId: c.clientId, chitId: c.chitId, installmentId: c.installmentId, paidDate: c.paidDate,
             fromAccountId: c.fromAccountId, dividend: c.dividend || null })),
-          claims: of('CLAIM'), repayments: of('REPAYMENT'), incomes: of('INCOME'), gifts: of('GIFT'), emiPayments: of('EMI_PAY'),
+          claims: of('CLAIM'), repayments: of('REPAYMENT'), incomes: of('INCOME'), gifts: of('GIFT'), emiPayments: of('EMI_PAY'), transfers: of('TRANSFER'),
         },
       });
       const byId = new Map(results.map(r => [r.clientId, r]));
@@ -545,7 +557,9 @@ export async function fetchStatement(settings: Settings, id: number): Promise<St
  * (expenses and chit instalments; a card's balance is what is owed, so it goes up).
  */
 export function liveBalance(a: Account, queue: LocalExpense[], chits: LocalChitPayment[] = [], records: LocalRecord[] = []): { balance: number; pending: number } {
-  const mine = records.filter(r => r.accountId === a.id && waits(r.status));
+  // a transfer moves two accounts: it leaves payload.fromId and goes into payload.toId
+  const mine = records.filter(r => waits(r.status) && (r.kind === 'TRANSFER' ? r.payload.fromId === a.id || r.payload.toId === a.id : r.accountId === a.id))
+    .map(r => (r.kind === 'TRANSFER' ? { ...r, flow: (r.payload.fromId === a.id ? 'OUT' : 'IN') as 'OUT' | 'IN' } : r));
   const pending = queue.filter(e => e.paidFromId === a.id && waits(e.status)).reduce((s, e) => s + e.amount, 0)
     + chits.filter(c => c.fromAccountId === a.id && waits(c.status)).reduce((s, c) => s + c.amount, 0)
     + mine.reduce((s, r) => s + (r.flow === 'OUT' ? r.amount : r.flow === 'IN' ? -r.amount : 0), 0);

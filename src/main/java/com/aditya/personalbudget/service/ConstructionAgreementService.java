@@ -577,8 +577,8 @@ public class ConstructionAgreementService {
                 Boolean.TRUE.equals(a.getRequireLocation()), link, a.getLinkExpiresAt(), a.getViews() == null ? 0 : a.getViews(), a.getLastViewedAt(),
                 a.getFailedAttempts() == null ? 0 : a.getFailedAttempts(), a.getLockedAt(), a.getAcceptedName(), a.getAcceptedAt(), a.getAcceptedPhone(),
                 a.getAcceptedIp(), a.getAcceptedUserAgent(), a.getAcceptedDevice(), a.getDeviceHash(), a.getAcceptedLocation(), a.getSignature(),
-                a.getAadhaarLast4(), a.getAcceptanceSeal(), a.getEvidencePayload(), a.getDigitalSignature(), settings.payLinkPublicKey(),
-                settings.payLinkFingerprint(), files.listForAgreement(FILES, a.getId()), p.getName(), a.getCreatedBy(), a.getCreatedAt());
+                a.getAadhaarLast4(), a.getAcceptanceSeal(), a.getEvidencePayload(), a.getDigitalSignature(), settings.publicKeyFor(a.getEvidencePayload(), a.getDigitalSignature()),
+                settings.fingerprintFor(a.getEvidencePayload(), a.getDigitalSignature()), files.listForAgreement(FILES, a.getId()), p.getName(), a.getCreatedBy(), a.getCreatedAt());
     }
 
     private PublicAgreement gate(ConstructionAgreement a, Organization t, String error) {
@@ -603,7 +603,7 @@ public class ConstructionAgreementService {
                 !Boolean.FALSE.equals(a.getThumbBoxes()), Boolean.TRUE.equals(a.getRequireAadhaar()), Boolean.TRUE.equals(a.getRequireSelfie()),
                 Boolean.TRUE.equals(a.getRequireLocation()), docs, a.getStatus(), a.getAcceptedName(), a.getAcceptedAt(), a.getSignature(),
                 a.getAadhaarLast4(), a.getAcceptanceSeal(), a.getAcceptedLocation() != null, a.getEvidencePayload(), a.getDigitalSignature(),
-                settings.payLinkPublicKey(), settings.payLinkFingerprint());
+                settings.publicKeyFor(a.getEvidencePayload(), a.getDigitalSignature()), settings.fingerprintFor(a.getEvidencePayload(), a.getDigitalSignature()));
     }
 
     private static List<String> lines(String s) {

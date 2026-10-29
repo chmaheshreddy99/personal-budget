@@ -7,13 +7,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import {
   ArrowLeft, CalendarClock, CheckSquare, Database, Eye, HandCoins, HardDrive, HardHat, History, LogOut, MessageSquareText, RefreshCw, Search, Server,
-  Square, Trash2, WifiOff,
+  Square, Trash2, WifiOff, Lock as LockIcon,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { ago, bytes } from '../format';
 import { smsSupported } from '../native';
-import { Account, GROUP_LABELS, Group } from '../data';
+import { Account, GROUP_LABELS, Group, normalizeUrl } from '../data';
 import { AccountBubble, Button, Card, Chip, IconBubble, SectionTitle, Sheet } from '../ui';
 import { colors, space } from '../theme';
 
@@ -52,6 +52,8 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
   const limit = s.storageMb * 1024 * 1024;
   const pct = Math.min(100, (app.used.cache / limit) * 100);
 
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [url, setUrl] = useState('');
   return (
     <ScrollView contentContainerStyle={{ padding: space.l, paddingTop: insets.top + space.m, paddingBottom: 120 }}>
       {onBack ? <Pressable onPress={onBack} style={st.back} hitSlop={12}><ArrowLeft color={colors.text} size={20} /><Text style={st.backText}>More</Text></Pressable> : null}
@@ -62,6 +64,10 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
         <Row Icon={Server} fg={colors.ocean} bg={colors.oceanSoft} title={s.serverUrl || 'Not set'} sub={`Signed in as ${s.userName || s.username}${app.snapshot ? ` · ${app.snapshot.household}` : ''}`} />
         <Row Icon={RefreshCw} fg={colors.aqua} bg={colors.aquaSoft} title={`Last sync ${ago(app.meta.lastSync)}`} sub={app.meta.lastError || 'Up to date'}
           right={<Button title="Sync" kind="soft" onPress={() => app.sync()} busy={app.syncing} style={{ height: 38 }} />} />
+        <Row Icon={LockIcon} fg={colors.violet} bg={colors.violetSoft} title="Open with the phone lock"
+          sub="Your pattern, PIN, password or fingerprint opens the app: no typing. A phone with no screen lock opens straight away."
+          right={<Switch value={s.deviceLock !== false} onValueChange={v => app.saveSettings({ deviceLock: v })} trackColor={{ true: colors.violet, false: colors.line }} />} />
+        <Button title="Change the server address" kind="ghost" Icon={Server} onPress={() => { setUrl(s.serverUrl); setUrlOpen(true); }} />
         <Button title="Sign out" kind="ghost" Icon={LogOut} onPress={() => Alert.alert('Sign out?', app.queue.some(e => e.status === 'QUEUED')
           ? 'Expenses waiting to sync stay on the phone and go up after you sign in again.' : 'You can sign in again any time.',
           [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => app.signOut() }])} />
@@ -125,6 +131,12 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
       <SectionTitle title="About" Icon={Database} />
       <Card><Text style={st.sub}>Personal Budget for Android · keeps your accounts, statements, chits and expenses on the phone and syncs them with your Personal Budget server.</Text></Card>
       <ChooseAccounts visible={choosing} onClose={() => setChoosing(false)} accounts={all.filter(a => a.group === 'OWN' || (s.showGroups || []).includes(a.group))} />
+      <Sheet visible={urlOpen} onClose={() => setUrlOpen(false)} title="Server address"
+        footer={<Button title="Save and sign in again" onPress={async () => { await app.saveSettings({ serverUrl: normalizeUrl(url), token: null }); setUrlOpen(false); }} />}>
+        <Text style={st.sub}>The address is asked once and kept. Change it only when the server moves: you sign in again afterwards.</Text>
+        <TextInput value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://your-name.ngrok-free.app"
+          style={{ height: 50, borderRadius: 14, borderWidth: 1.2, borderColor: colors.line, paddingHorizontal: 15, fontSize: 16, color: colors.text, backgroundColor: '#fafcfe' }} />
+      </Sheet>
     </ScrollView>
   );
 }

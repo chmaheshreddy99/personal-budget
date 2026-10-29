@@ -151,7 +151,7 @@ function PayEmi({ emi, waiting, onClose }: { emi: Emi; waiting: number; onClose:
             <AccountBubble type={a.type} size={26} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={st.accName} numberOfLines={1}>{a.name}</Text>
-              <Text style={st.sub} numberOfLines={1}>{money(app.balanceOf(a))}</Text>
+              <Text style={st.sub} numberOfLines={1}>{app.bal(app.balanceOf(a), a.id)}</Text>
             </View>
           </Pressable>
         ))}

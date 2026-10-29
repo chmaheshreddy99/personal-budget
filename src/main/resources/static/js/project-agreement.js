@@ -13,7 +13,7 @@
  * fingerprint, sealed and digitally signed; the signature is checked here once accepted.
  */
 import { trackedFetch } from './core/busy.js';
-import { bondHtml, printBond, signaturePad, signatureSvg, deviceInfo, locate, openCamera, shrinkImage, verifyEvidence } from './core/bond.js';
+import { bondHtml, printBond, signaturePad, signatureSvg, deviceInfo, locate, openCamera, shrinkImage, verifyEvidence, signatureRows, addEvidenceButton } from './core/bond.js';
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,6 +259,7 @@ async function checkSignature() {
     el.innerHTML = ok === null ? '<b>This browser cannot check the digital signature</b><small>Open the link in Chrome or Safari over https.</small>'
         : ok ? `<b>✓ Digital signature verified</b><small>The record of your acceptance is signed with key <code>${esc(ag.keyFingerprint)}</code>; any change to it would show here.</small>`
         : '<b>✗ The signature does not match</b><small>The record was changed after it was signed. Tell the company.</small>';
+    addEvidenceButton(el, 'PROJECT-AGREEMENT', ag.agreementNo || 'agreement', ag);
 }
 
 /** The agreement as a stamp-paper deed. */
@@ -276,7 +277,7 @@ function deed() {
         recitals: ag.recitals, particulars: ag.particulars, terms: ag.terms, fingerprint: ag.contentHash,
         annexures: ag.acceptanceSeal ? [{ title: 'Evidence of the online acceptance', rows: [['Accepted by', esc(ag.acceptedName)], ['Accepted at', esc(when(ag.acceptedAt))],
             ['Acceptance seal (SHA-256)', `<code>${esc(ag.acceptanceSeal)}</code>`],
-            ...(ag.digitalSignature ? [['Digital signature', `<code>${esc(ag.digitalSignature.slice(0, 44))}…</code><br>key ${esc(ag.keyFingerprint || '')}`]] : [])] }] : [],
+            ...signatureRows({ digitalSignature: ag.digitalSignature, keyFingerprint: ag.keyFingerprint, publicKey: ag.publicKey, evidencePayload: ag.evidencePayload })] }] : [],
     };
 }
 

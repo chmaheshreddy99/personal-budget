@@ -7,7 +7,7 @@
  */
 import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { ChevronDown, ChevronRight, CloudOff, HandCoins, HardHat, RefreshCw, User, WifiOff, CalendarClock, AlertTriangle, EyeOff } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, CloudOff, HandCoins, HardHat, RefreshCw, User, WifiOff, CalendarClock, AlertTriangle, EyeOff, Eye, ArrowLeftRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { Account, liveBalance } from '../data';
@@ -23,7 +23,7 @@ const OWN_ORDER: [string, (a: Account) => boolean][] = [
   ['Loans & dues', a => a.accountClass === 'LIABILITY' && a.type !== 'CREDIT_CARD'],
 ];
 
-export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) => void; onSettings?: () => void }) {
+export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a: Account) => void; onSettings?: () => void; onTransfer?: () => void }) {
   const app = useApp();
   const insets = useSafeAreaInsets();
   const [closed, setClosed] = useState<Record<string, boolean>>({});
@@ -59,16 +59,24 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
           <View style={{ flex: 1 }}>
             <Text style={st.hello}>{app.snapshot?.household || 'Personal Budget'}</Text>
             <Text style={st.label}>{chosen ? 'NET WORTH · CHOSEN ACCOUNTS' : 'NET WORTH · MY ACCOUNTS'}</Text>
-            <Text style={st.big}>{money(netWorth)}</Text>
+            <Text style={st.big}>{app.net(netWorth)}</Text>
           </View>
           <Pressable onPress={() => app.sync()} style={({ pressed }) => [st.syncBtn, pressed && { opacity: 0.8 }]} disabled={app.syncing}>
             {app.syncing ? <ActivityIndicator color={colors.white} /> : <RefreshCw color={colors.white} size={20} />}
             <Text style={st.syncText}>Sync</Text>
           </Pressable>
         </View>
+        <View style={st.privacyRow}>
+          <Pressable onPress={() => (app.balancesVisible ? app.hideBalances() : app.showBalances())} style={({ pressed }) => [st.privacyBtn, pressed && { opacity: 0.8 }]}>
+            {app.balancesVisible ? <EyeOff color={colors.white} size={15} /> : <Eye color={colors.white} size={15} />}
+            <Text style={st.privacyText}>{app.balancesVisible ? 'Hide balances' : 'View balances'}</Text>
+          </Pressable>
+          {onTransfer ? <Pressable onPress={onTransfer} style={({ pressed }) => [st.privacyBtn, pressed && { opacity: 0.8 }]}>
+            <ArrowLeftRight color={colors.white} size={15} /><Text style={st.privacyText}>Transfer</Text></Pressable> : null}
+        </View>
         <View style={st.figs}>
-          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{moneyShort(cash)}</Text></View>
-          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{moneyShort(cards)}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{app.balShort(cash)}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{app.balShort(cards)}</Text></View>
           <View style={st.fig}><Text style={st.figLabel}>To sync</Text><Text style={[st.figValue, waiting.length ? { color: '#ffd68a' } : null]}>{waiting.length}</Text></View>
         </View>
         <View style={st.statusRow}>
@@ -110,7 +118,7 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
               <Text style={st.groupTitle}>{label}</Text>
               <Text style={st.groupCount}>{list.length}</Text>
               <View style={{ flex: 1 }} />
-              <Text style={st.groupTotal}>{money(total)}</Text>
+              <Text style={st.groupTotal}>{app.bal(total)}</Text>
               {closed[label] ? <ChevronRight color={colors.muted} size={18} /> : <ChevronDown color={colors.muted} size={18} />}
             </Pressable>
             {!closed[label] ? list.map(a => <AccountRow key={a.id} a={a} onPress={() => onOpen(a)} />) : null}
@@ -150,15 +158,15 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   const card = a.type === 'CREDIT_CARD';
   const available = card && a.creditLimit ? a.creditLimit - balance : null;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [st.row, pressed && { backgroundColor: colors.sunken }]} android_ripple={{ color: '#00000008' }}>
+    <Pressable onPress={onPress} onLongPress={() => app.reveal(a.id)} style={({ pressed }) => [st.row, pressed && { backgroundColor: colors.sunken }]} android_ripple={{ color: '#00000008' }}>
       <AccountBubble type={a.type} group={a.group} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={st.name} numberOfLines={1}>{a.name}</Text>
         <Text style={st.meta} numberOfLines={1}>{[a.typeLabel, a.institution, a.last4 ? `•• ${a.last4}` : null].filter(Boolean).join(' · ')}</Text>
-        {available !== null ? <Text style={st.avail}>Available {money(available, 2)}</Text> : null}
+        {available !== null ? <Text style={st.avail}>Available {app.bal(available, a.id, 2)}</Text> : null}
       </View>
       <View style={{ alignItems: 'flex-end', gap: 3 }}>
-        <Text style={[st.balance, balance < 0 && a.accountClass === 'ASSET' ? { color: colors.red } : card && balance > 0 ? { color: colors.coral } : null]}>{money(balance, card ? 2 : undefined)}</Text>
+        <Text style={[st.balance, balance < 0 && a.accountClass === 'ASSET' ? { color: colors.red } : card && balance > 0 ? { color: colors.coral } : null]}>{app.bal(balance, a.id, card ? 2 : undefined)}</Text>
         {pending ? <Pill text={`${a.accountClass === 'LIABILITY' ? '+' : '−'}${moneyShort(pending)} waiting`} fg={colors.gold} bg={colors.goldSoft} /> : null}
       </View>
     </Pressable>
@@ -183,6 +191,9 @@ const st = StyleSheet.create({
   hiddenText: { fontSize: 12, color: colors.muted, flexShrink: 1 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: space.m },
   bannerText: { flex: 1, fontSize: 13, fontWeight: '600' },
+  privacyRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  privacyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.16)' },
+  privacyText: { color: colors.white, fontSize: 12.5, fontWeight: '700' },
   groupCard: { padding: 0, marginBottom: space.s, overflow: 'hidden' },
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: space.m, paddingVertical: 10, backgroundColor: colors.sunken },
   groupTitle: { fontSize: 13.5, fontWeight: '800', color: colors.text, flexShrink: 1 },
