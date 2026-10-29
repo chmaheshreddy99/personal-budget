@@ -44,7 +44,17 @@ public final class ChitDtos {
             /* Installments already paid before you started tracking (posted against opening equity). */
             @PositiveOrZero Integer alreadyPaidInstallments,
             /* the version the form was loaded with; a stale edit is refused */
-            Long version) {
+            Long version,
+            /* the organizer's mobile: payment receipts go to it on WhatsApp and it opens them */
+            @Size(max = 20) String organizerPhone) {
+
+        public ChitRequest(String name, String organizer, String ticketNo, BigDecimal maturityAmount, BigDecimal monthlyInstallment,
+                           Integer numberOfInstallments, LocalDate startDate, LocalDate endDate, BigDecimal interestRate,
+                           BigDecimal commissionPercent, String notes, String organizerUpi, String upiNote, Long defaultPaymentAccountId,
+                           Integer alreadyPaidInstallments, Long version) {
+            this(name, organizer, ticketNo, maturityAmount, monthlyInstallment, numberOfInstallments, startDate, endDate, interestRate,
+                    commissionPercent, notes, organizerUpi, upiNote, defaultPaymentAccountId, alreadyPaidInstallments, version, null);
+        }
     }
 
     /**
@@ -145,9 +155,17 @@ public final class ChitDtos {
             Long payoutEntryId,
             /* closed by the user (null while open), and whether it can be closed now */
             LocalDateTime closedAt,
-            boolean closable) {
+            boolean closable,
+            String organizerPhone,
+            /* payment receipts: how many the organizer has signed, and how many wait for them */
+            int receiptsSigned,
+            int receiptsPending) {
     }
 
+    /**
+     * {@code ackId} / {@code ackNo} / {@code ackStatus}: the organizer's receipt this installment is on (PENDING, SIGNED,
+     * PAPER or CANCELLED once the payout settlement cancels it), or null when none was asked for yet.
+     */
     public record InstallmentView(
             Long id,
             int installmentNo,
@@ -160,7 +178,10 @@ public final class ChitDtos {
             String paidFromAccountName,
             Long journalEntryId,
             InstallmentStatus status,
-            boolean overdue) {
+            boolean overdue,
+            Long ackId,
+            String ackNo,
+            String ackStatus) {
     }
 
     /** Status of one month of the interest schedule. */

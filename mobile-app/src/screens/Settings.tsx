@@ -7,8 +7,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import {
   ArrowLeft, CalendarClock, CheckSquare, Database, Eye, HandCoins, HardDrive, HardHat, History, LogOut, MessageSquareText, RefreshCw, Search, Server,
-  Square, Trash2, WifiOff,
+  Square, Trash2, WifiOff, Grid3x3, Lock, EyeOff, ShieldCheck,
 } from 'lucide-react-native';
+import { QuickSetupScreen } from './Lock';
+import { Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { ago, bytes } from '../format';
@@ -41,6 +43,8 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
   const insets = useSafeAreaInsets();
   const s = app.settings;
   const [choosing, setChoosing] = useState(false);
+  const [settingQuick, setSettingQuick] = useState(false);
+  const maskRule = app.balanceMask;
   useEffect(() => {
     if (!onBack) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => { onBack(); return true; });
@@ -66,6 +70,24 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
           ? 'Expenses waiting to sync stay on the phone and go up after you sign in again.' : 'You can sign in again any time.',
           [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => app.signOut() }])} />
       </Card>
+
+      <SectionTitle title="Security & privacy" Icon={ShieldCheck} />
+      <Card style={{ gap: space.m }}>
+        <Row Icon={s.quick?.kind === 'PIN' ? Lock : Grid3x3} fg={colors.violet} bg={colors.violetSoft}
+          title={s.quick ? `Quick unlock · ${s.quick.kind === 'PIN' ? 'PIN' : 'pattern'}` : 'Quick unlock is off'}
+          sub={s.quick ? 'The app opens with it, and locks again after 2 minutes away' : 'Open the app with a pattern or PIN instead of the password'}
+          right={<Button title={s.quick ? 'Change' : 'Set up'} kind="soft" onPress={() => setSettingQuick(true)} style={{ height: 38 }} />} />
+        {s.quick ? <Button title="Turn off quick unlock" kind="ghost" onPress={() => Alert.alert('Turn off quick unlock?', 'The password will be asked when you sign in again.',
+          [{ text: 'Cancel', style: 'cancel' }, { text: 'Turn off', style: 'destructive', onPress: () => app.turnOffQuick() }])} /> : null}
+        <Row Icon={EyeOff} fg={colors.ocean} bg={colors.oceanSoft} title="Hide balances"
+          sub={maskRule === 'ALWAYS' ? 'Your admin keeps balances hidden on the phone' : maskRule === 'TAP' ? 'Your admin hides them until you tap the eye'
+            : 'Show ₹ ••••• until you tap the eye on Accounts'}
+          right={<Switch value={maskRule !== 'NONE' || !!s.hideBalances} disabled={maskRule !== 'NONE'} onValueChange={v => app.saveSettings({ hideBalances: v })}
+            trackColor={{ true: colors.ocean, false: colors.line }} />} />
+      </Card>
+      <Modal visible={settingQuick} animationType="slide" onRequestClose={() => setSettingQuick(false)} statusBarTranslucent>
+        <QuickSetupScreen onDone={() => setSettingQuick(false)} />
+      </Modal>
 
       <SectionTitle title="Accounts shown" Icon={Eye} />
       <Card style={{ gap: space.m }}>

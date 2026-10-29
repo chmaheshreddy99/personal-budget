@@ -1332,3 +1332,21 @@ input[data-click-edit].editing { background: #fffef4; border-color: var(--ocean-
 .hc-lg-row .hc-lg-amt { min-width: 86px; text-align: right; }
 .hc-lg-row .hc-lg-acts { display: inline-flex; justify-content: flex-end; min-width: 84px; }
 .hc-lg-row .hc-lg-late { min-width: 0; }
+
+/* ---- chit receipts from the organizer */
+.ack-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin: 6px 8px; border-radius: 10px; background: #eef7fd; border: 1px solid rgba(11,124,189,.25); font-size: 13px; }
+.ack-bar[hidden] { display: none; }
+.ack-bar svg { width: 16px; height: 16px; color: var(--ocean-600, #0b7cbd); }
+.chit-inst .ack-pick { width: 28px; text-align: center; }
+.ack-badge { cursor: pointer; white-space: nowrap; }
+.ack-tab { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.ack-intro { display: flex; gap: 10px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(135deg, #f3f9fd, #f6fbf7); border: 1px solid var(--hairline, #dfe7ef); font-size: 12.5px; line-height: 1.5; }
+.ack-intro > svg { width: 20px; height: 20px; flex-shrink: 0; color: #13a89a; margin-top: 2px; }
+.ack-intro b { display: block; font-size: 13px; margin-bottom: 2px; }
+.ack-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.ack-table td small.block { display: block; margin-top: 2px; }
+.ack-none { margin: 4px 2px; }
+.ack-chosen { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ack-chosen .chip-sm { padding: 3px 9px; border-radius: 999px; background: #eef3f8; font-size: 12px; font-weight: 600; }
+.ack-phone { gap: 6px; } .ack-phone input { flex: 1; min-width: 0; }
+.wa-btn { background: #1faa59 !important; border-color: #1faa59 !important; color: #fff !important; justify-content: center; }

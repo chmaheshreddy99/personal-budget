@@ -57,6 +57,10 @@ public class Chit implements TenantOwned {
     @Column(length = 60)
     private String organizerUpi;
 
+    /** Organizer's 10-digit mobile number: payment receipts are sent to it on WhatsApp, and it opens them. */
+    @Column(length = 20)
+    private String organizerPhone;
+
     /** Optional short text that starts the UPI payment note; the installment number is always appended. */
     @Column(length = 40)
     private String upiNote;

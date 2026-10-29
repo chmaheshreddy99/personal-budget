@@ -2,6 +2,7 @@ package com.aditya.personalbudget.service;
 
 import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.Chit;
+import com.aditya.personalbudget.domain.entity.ChitAcknowledgement;
 import com.aditya.personalbudget.domain.entity.ChitInstallment;
 import com.aditya.personalbudget.domain.entity.JournalEntry;
 import com.aditya.personalbudget.domain.type.AccountClass;
@@ -23,6 +24,7 @@ import com.aditya.personalbudget.dto.JournalDtos.LineView;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
+import com.aditya.personalbudget.repository.ChitAcknowledgementRepository;
 import com.aditya.personalbudget.repository.ChitInstallmentRepository;
 import com.aditya.personalbudget.repository.ChitRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
@@ -41,6 +43,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Chit fund tracking.
@@ -72,10 +76,13 @@ public class ChitService {
     private final AccountService accountService;
     private final LedgerService ledger;
     private final CategoryService categories;
+    private final ChitAcknowledgementRepository acks;
 
     public ChitService(ChitRepository chits, ChitInstallmentRepository installments,
                        AccountRepository accountRepository, JournalEntryRepository entries,
-                       AccountService accountService, LedgerService ledger, CategoryService categories) {
+                       AccountService accountService, LedgerService ledger, CategoryService categories,
+                       ChitAcknowledgementRepository acks) {
+        this.acks = acks;
         this.categories = categories;
         this.chits = chits;
         this.installments = installments;
@@ -89,9 +96,11 @@ public class ChitService {
 
     public List<ChitView> list() {
         LedgerSnapshot books = ledger.snapshot();
+        Map<Long, List<ChitAcknowledgement>> receipts = acks.findByTenantId(UserContext.tenantId()).stream()
+                .collect(Collectors.groupingBy(ChitAcknowledgement::getChitId));
         return chits.findByTenantId(UserContext.tenantId()).stream()
                 .sorted(Comparator.comparing(Chit::getStartDate).reversed())
-                .map(c -> toView(c, installments.findByChitIdOrderByInstallmentNo(c.getId()), books))
+                .map(c -> toView(c, installments.findByChitIdOrderByInstallmentNo(c.getId()), books, receipts.getOrDefault(c.getId(), List.of())))
                 .toList();
     }
 
@@ -100,14 +109,18 @@ public class ChitService {
         List<ChitInstallment> schedule = installments.findByChitIdOrderByInstallmentNo(chitId);
         LedgerSnapshot books = ledger.snapshot();
         LocalDate today = OrgClock.today();
+        List<ChitAcknowledgement> chitAcks = acks.findByChitId(chit.getTenantId(), chitId);
+        Map<Long, ChitAcknowledgement> receiptOf = ChitAckService.receiptsByInstallment(chitAcks);
         List<InstallmentView> rows = schedule.stream().map(i -> {
             Account from = i.getPaidFromAccountId() == null ? null : books.account(i.getPaidFromAccountId());
+            ChitAcknowledgement ack = receiptOf.get(i.getId());
             return new InstallmentView(i.getId(), i.getInstallmentNo(), i.getDueDate(), i.getDueAmount(),
                     i.getDividend(), i.getPaidAmount(), i.getPaidDate(), i.getPaidFromAccountId(),
                     from == null ? null : from.getName(), i.getJournalEntryId(), i.getStatus(),
-                    i.getStatus() == InstallmentStatus.PENDING && i.getDueDate().isBefore(today));
+                    i.getStatus() == InstallmentStatus.PENDING && i.getDueDate().isBefore(today),
+                    ack == null ? null : ack.getId(), ack == null ? null : ack.getAckNo(), ack == null ? null : ack.effectiveStatus());
         }).toList();
-        return new ChitDetail(toView(chit, schedule, books), rows, interestSchedule(chit, schedule, today), payoutReceipts(chit));
+        return new ChitDetail(toView(chit, schedule, books, chitAcks), rows, interestSchedule(chit, schedule, today), payoutReceipts(chit));
     }
 
     /** The payout entries of a chit, oldest first: the first settled the chit, the others are later parts. */
@@ -207,6 +220,7 @@ public class ChitService {
         }
         schedule.forEach(i -> ledger.deleteForSource(LedgerService.SOURCE_CHIT_INSTALLMENT, i.getId()));
         ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chitId);
+        acks.deleteAll(acks.findByChitId(chit.getTenantId(), chitId));
         installments.deleteAll(schedule);
         chits.deleteById(chitId);
     }
@@ -271,6 +285,11 @@ public class ChitService {
         ChitInstallment installment = requireInstallment(chit, installmentId);
         if (installment.getStatus() != InstallmentStatus.PAID) {
             throw new BusinessException("Installment " + installment.getInstallmentNo() + " is not paid");
+        }
+        ChitAcknowledgement receipt = ChitAckService.receiptsByInstallment(acks.findByChitId(chit.getTenantId(), chitId)).get(installment.getId());
+        if (receipt != null && receipt.getCancelledAt() == null) {
+            throw new BusinessException("Installment " + installment.getInstallmentNo() + " is on the organizer's receipt " + receipt.getAckNo()
+                    + (receipt.isPending() ? " (waiting for them)" : " (signed)") + ". Delete the receipt first, then undo the payment");
         }
         Long entryId = installment.getJournalEntryId();
         installment.setDividend(null);
@@ -376,6 +395,7 @@ public class ChitService {
     public ChitDetail undoPayoutPart(Long chitId, Long entryId) {
         Chit chit = require(chitId);
         requireOpen(chit);
+        requireNoSettlement(chit);
         PayoutReceiptView part = payoutReceipts(chit).stream().filter(p -> p.entryId().equals(entryId)).findFirst()
                 .orElseThrow(() -> new NotFoundException("Payout part", entryId));
         if (part.first()) {
@@ -412,6 +432,7 @@ public class ChitService {
         if (chit.getPayoutAmount() == null) {
             throw new BusinessException("No payout recorded for this chit");
         }
+        requireNoSettlement(chit);
         ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chit.getId());   // every part of it
         chit.setPayoutAmount(null);
         chit.setPayoutDate(null);
@@ -549,7 +570,7 @@ public class ChitService {
         return value;
     }
 
-    private ChitView toView(Chit c, List<ChitInstallment> schedule, LedgerSnapshot books) {
+    private ChitView toView(Chit c, List<ChitInstallment> schedule, LedgerSnapshot books, List<ChitAcknowledgement> receipts) {
         LocalDate today = OrgClock.today();
         List<ChitInstallment> paid = schedule.stream().filter(i -> i.getStatus() == InstallmentStatus.PAID).toList();
         List<ChitInstallment> pending = schedule.stream().filter(i -> i.getStatus() == InstallmentStatus.PENDING).toList();
@@ -602,7 +623,9 @@ public class ChitService {
                 compoundEarned, simpleEarned, compoundProjected, simpleProjected,
                 Money.round(currentValue), realizedGain, c.getVersion(),
                 c.getPayoutAmount() == null ? null : payoutEntries(c).stream().findFirst().map(JournalEntry::getId).orElse(null),
-                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today));
+                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today), c.getOrganizerPhone(),
+                (int) receipts.stream().filter(ChitAcknowledgement::isInForce).count(),
+                (int) receipts.stream().filter(a -> a.isPending() && a.getCancelledAt() == null).count());
     }
 
     /**
@@ -641,6 +664,8 @@ public class ChitService {
         chit.setCommissionPercent(r.commissionPercent());
         chit.setNotes(r.notes());
         chit.setOrganizerUpi(blankToNull(r.organizerUpi()));
+        chit.setOrganizerPhone(r.organizerPhone() == null || r.organizerPhone().isBlank() ? null
+                : HostedChitService.cleanPhone(r.organizerPhone(), "The organizer"));
         chit.setUpiNote(blankToNull(r.upiNote()));
         if (r.defaultPaymentAccountId() != null) {
             Account payFrom = accountService.require(r.defaultPaymentAccountId());
@@ -712,6 +737,13 @@ public class ChitService {
             fresh.setStatus(status);
             chits.save(fresh);
         }
+    }
+
+    /** The payout settlement acknowledges the payout as it is: it goes first. */
+    private void requireNoSettlement(Chit chit) {
+        acks.findByChitId(chit.getTenantId(), chit.getId()).stream().filter(a -> !a.isReceipt()).findFirst().ifPresent(a -> {
+            throw new BusinessException("The payout settlement " + a.getAckNo() + " acknowledges this payout. Delete it first");
+        });
     }
 
     private Chit require(Long chitId) {

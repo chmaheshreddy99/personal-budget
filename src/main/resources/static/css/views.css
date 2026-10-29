@@ -256,3 +256,15 @@ a.list-item { color: inherit; }
 .acc-bank-head small { color: var(--text-muted); font-size: 11.5px; }
 .acc-bank[hidden], .acc-bank-head[hidden] { display: none !important; }
 .acc-form-note { margin: 0 0 12px; }
+
+/* interest lost on money given without interest: a quiet grey figure */
+.xd-lost { display: block; font-size: 10.5px; font-weight: 600; color: #98a4b1; white-space: nowrap; margin-top: 1px; }
+small .xd-lost { display: inline; }
+.cc-lost { opacity: 0.75; }
+.cc-lost b { color: #8a96a3 !important; }
+.bench-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.bench-list .chip-sm { padding: 3px 9px; border-radius: 999px; background: #eef3f8; font-size: 12px; }
+.mp-table td { vertical-align: top; }
+.mp-feats { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.mp-feat { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.mp-foot { padding: 10px 12px; gap: 12px; align-items: center; }

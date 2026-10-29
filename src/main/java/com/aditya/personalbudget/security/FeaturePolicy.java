@@ -60,6 +60,8 @@ public final class FeaturePolicy {
         set.addAll(Feature.parse(user.getMobileFeatures(), Feature.allMobile()));
         set.retainAll(desktop);
         set.removeIf(f -> !f.isMobile());
+        // and only those the admin lets the user's role use on the phone
+        set.retainAll(MobilePolicy.features(MobilePolicy.of(tenant, user.getRole())));
         return set;
     }
 

@@ -272,7 +272,7 @@ function partyText(p) {
 
 /** The stamp band of the first page (stamp-paper style), or nothing on real stamp paper (its printed top is the sheet's). */
 function stampHtml(doc) {
-    if (doc.realStampPaper) return '';
+    if (doc.realStampPaper || doc.plainPaper) return '';
     const duty = Number(doc.stampDuty || 0);
     const value = duty ? `₹${duty.toLocaleString('en-IN')}` : '₹ —';
     return `<div class="bond-sheet">
@@ -289,10 +289,11 @@ function stampHtml(doc) {
         </div>`;
 }
 
-function signBox(doc, p, label, { seal = null, thumb = false, lead = '' } = {}) {
+function signBox(doc, p, label, { seal = null, thumb = false, lead = '', revenue = false } = {}) {
     return `<div class="bond-signbox">
         ${lead ? `<small class="bond-sign-lead">${esc(lead)}</small>` : ''}
-        <div class="bond-signspace">${p?.signature ? signatureSvg(p.signature) : ''}${seal ? `<span class="bond-seal-wrap">${sealSvg(seal, 'SEAL')}</span>` : ''}</div>
+        <div class="bond-signspace">${p?.signature ? signatureSvg(p.signature) : ''}${seal ? `<span class="bond-seal-wrap">${sealSvg(seal, 'SEAL')}</span>` : ''}${revenue
+            ? '<span class="bond-revenue" title="Affix a revenue stamp here and sign across it"><b>Revenue<br>stamp</b><small>sign across</small></span>' : ''}</div>
         <div class="bond-signline"><b>${esc(p?.name || '')}</b><small>${esc(label)}${p?.accepted ? ` · ${esc(p.accepted)}` : ''}</small></div>
         ${thumb ? '<div class="bond-thumb"><span>Left thumb impression</span></div>' : ''}
         ${p?.address ? `<small class="bond-signaddr">${esc(p.address)}</small>` : ''}
@@ -308,13 +309,14 @@ function signBox(doc, p, label, { seal = null, thumb = false, lead = '' } = {}) 
 export function bondBlocks(doc) {
     const first = doc.firstParty || {}, second = doc.secondParty || {};
     const a = first.term || first.role || 'First party', b = second.term || second.role || 'Second party';
+    const term = doc.docTerm || 'Agreement';
     const front = [];
     const add = (id, html, extra = {}) => front.push({ id, html, ...extra });
     const stamp = stampHtml(doc);
     if (stamp) add('stamp', stamp, { keep: true });
     add('title', `<h1 class="bond-title">${esc(doc.title)}</h1><p class="bond-no">${esc(doc.number || '')}</p>`, { keep: true });
     if (doc.kind) {
-        add('pre-1', `<p class="bond-pre">This <b>${esc(String(doc.title || 'Agreement').toUpperCase())}</b> (the “Agreement”) is made and executed at
+        add('pre-1', `<p class="bond-pre">This <b>${esc(String(doc.title || 'Agreement').toUpperCase())}</b> (the “${esc(term)}”) is made and executed at
             <b>${esc(doc.place || '____________________')}</b> on this <b>${esc(DAY(doc.date) || '____________')}</b>,</p>`, { keep: true });
         add('pre-2', `<p class="bond-pre-c">BY AND BETWEEN</p>`, { keep: true });
         add('pre-3', `<p class="bond-pre">${partyText(first)}, hereinafter referred to as the “<b>${esc(a)}</b>” (which expression shall, unless repugnant to
@@ -342,8 +344,20 @@ export function bondBlocks(doc) {
         add('facts-h', `<p class="bond-sub">Particulars of this Agreement</p>`, { keep: true });
         add('facts', `<table class="bond-facts"><tbody>${doc.particulars.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`);
     }
+    // schedules (e.g. the installments a receipt covers), a block per 12 rows so a long one breaks between rows
+    (doc.tables || []).forEach((t, ti) => {
+        const rows = t.rows || [];
+        const head = `<thead><tr>${t.head.map((h, i) => `<th class="${t.right?.includes(i) ? 'r' : ''}">${esc(h)}</th>`).join('')}</tr></thead>`;
+        const cell = (r, tag = 'td') => `<tr>${r.map((v, i) => `<${tag} class="${t.right?.includes(i) ? 'r' : ''}">${esc(v)}</${tag}>`).join('')}</tr>`;
+        add(`tb${ti}-h`, `<p class="bond-sub">${esc(t.title)}</p>`, { keep: true });
+        for (let i = 0; i < Math.max(1, rows.length); i += 12) {
+            const last = i + 12 >= rows.length;
+            add(`tb${ti}-${i}`, `<table class="bond-sched">${head}<tbody>${rows.slice(i, i + 12).map(r => cell(r)).join('')}</tbody>${last && t.foot ? `<tfoot>${cell(t.foot, 'th')}</tfoot>` : ''}</table>`);
+        }
+        if (t.note) add(`tb${ti}-n`, `<p class="bond-annex-note">${esc(t.note)}</p>`);
+    });
     add('witnesseth', doc.kind
-        ? `<p class="bond-pre"><b>NOW, THEREFORE, THIS AGREEMENT WITNESSETH</b> and it is hereby agreed by and between the Parties as follows:</p>`
+        ? `<p class="bond-pre"><b>NOW, THEREFORE, THIS ${esc(term.toUpperCase())} WITNESSETH</b> and it is hereby agreed by and between the Parties as follows:</p>`
         : `<p class="bond-sub">Now it is agreed as follows:</p>`, { keep: true });
     String(doc.terms || '').split('\n').filter(l => l.trim()).forEach((l, i) => {
         const c = clauseLi(l, i);
@@ -354,12 +368,12 @@ export function bondBlocks(doc) {
     const lastClause = [...front].reverse().find(x => x.li);
     if (lastClause) lastClause.keep = true;
     add('in-witness', `<p class="bond-witness-line">${doc.kind
-        ? `<b>IN WITNESS WHEREOF</b> the Parties hereto have set their respective hands to this Agreement on the day, month and year first above written, in the presence of the witness named below.`
+        ? `<b>IN WITNESS WHEREOF</b> the Parties hereto have set their respective hands to this ${esc(term)} on the day, month and year first above written, in the presence of the witness named below.`
         : 'In witness whereof the parties have signed this agreement on the date and at the place written above, in the presence of the witness below.'}</p>`, { keep: true });
     // thumbBoxes: both parties' left thumb impressions are taken on the paper copy, as many deeds in India have them
     const thumbs = !!doc.thumbBoxes;
     add('signs', `<div class="bond-signs">
-            ${signBox(doc, first, first.role || a, { seal: first.seal, thumb: thumbs, lead: doc.kind ? `Signed and delivered by the within-named ${a}` : '' })}
+            ${signBox(doc, first, first.role || a, { seal: first.seal, thumb: thumbs, revenue: !!doc.revenueStamp, lead: doc.kind ? `Signed and delivered by the within-named ${a}` : '' })}
             ${signBox(doc, second, second.role || b, { thumb: thumbs || !second.signature, lead: doc.kind ? `Signed and delivered by the within-named ${b}` : '' })}
         </div>`, { keep: true });
     if (doc.thirdParty?.name) {
@@ -369,7 +383,7 @@ export function bondBlocks(doc) {
     const witnesses = [doc.witness?.name ? doc.witness : { name: '' }, ...(doc.witness2?.name || doc.twoWitnesses ? [doc.witness2 || { name: '' }] : [])];
     add('witness', `<div class="bond-signs ${witnesses.length > 1 ? '' : 'one'}">${witnesses.map((w, i) => signBox(doc, w, witnesses.length > 1 ? `Witness ${i + 1}` : 'Witness',
         { lead: doc.kind && i === 0 ? 'In the presence of' : '' })).join('')}</div>`);
-    add('foot', `<p class="bond-foot">Agreement fingerprint (SHA-256): <code>${esc(doc.fingerprint || '')}</code>${doc.footnote ? `<br>${esc(doc.footnote)}` : ''}</p>`);
+    add('foot', `<p class="bond-foot">${esc(term)} fingerprint (SHA-256): <code>${esc(doc.fingerprint || '')}</code>${doc.footnote ? `<br>${esc(doc.footnote)}` : ''}</p>`);
 
     const annexures = (doc.annexures || []).filter(x => x.images?.length || x.rows?.length).map((x, i) => {
         const letter = String.fromCharCode(65 + i);
@@ -391,6 +405,15 @@ export function loanRecitals(kind, amount, inWords) {
             'the Borrower admits the said sum to be a debt due to the Lender and has agreed to repay it on the terms and conditions set out hereinafter']
         : [`the Borrower has requested the Lender for a loan of ${sum} for the Borrower's personal needs`,
             'the Lender has agreed to lend, and has lent, the said sum to the Borrower on the terms and conditions set out hereinafter'];
+}
+
+/** The WHEREAS clauses of a chit payment receipt (kind RECEIPT) or payout settlement (SETTLEMENT). */
+export function chitReceiptRecitals(kind, chitName, amount, payout) {
+    return kind === 'SETTLEMENT'
+        ? [`the Organizer conducts the chit known as “${chitName}”, in which the Member is a subscriber, and the Member has paid the installments set out in the Schedule`,
+            `the Organizer has paid the Member the payout of ${payout} in full, and the Parties wish to record the settlement of their accounts and cancel the receipts issued earlier`]
+        : [`the Organizer conducts the chit known as “${chitName}”, in which the Member is a subscriber`,
+            `the Member has paid the Organizer ${amount} towards the installments set out in the Schedule, and the Organizer has agreed to acknowledge its receipt in writing`];
 }
 
 /** The WHEREAS clauses of a chit prize amount agreement. */
@@ -424,7 +447,7 @@ export function bondHtml(doc) {
     if (list) body += `<ol class="bond-terms">${list}</ol>`;
     const initials = `<div class="bond-initials"><span>${esc(doc.firstParty?.role || 'First party')}</span><span>${esc(doc.secondParty?.role || 'Second party')}</span><span>Witness</span></div>`;
     return `<article class="bond ${doc.realStampPaper ? 'real' : ''}">
-        <section class="bond-page first">${doc.realStampPaper ? `<div class="bond-blank-top"><span>Printed area of the stamp paper — leave blank</span></div>` : ''}${body}${initials}</section>
+        <section class="bond-page first">${doc.copyLabel ? `<div class="bond-copy">${esc(doc.copyLabel)}</div>` : ''}${doc.realStampPaper ? `<div class="bond-blank-top"><span>Printed area of the stamp paper — leave blank</span></div>` : ''}${body}${initials}</section>
         ${annexures.map(x => {
             const imgs = x.blocks.filter(b => b.image).map(b => figureHtml(b.image)).join('');
             const rest = x.blocks.filter(b => !b.image);

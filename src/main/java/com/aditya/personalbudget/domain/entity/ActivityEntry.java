@@ -60,9 +60,4 @@ public class ActivityEntry implements TenantOwned {
     @Column(nullable = false, length = 300)
     private String summary;
 
-    @Column(length = 8)
-    private String method;
-
-    @Column(length = 200)
-    private String path;
 }

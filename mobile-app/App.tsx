@@ -14,7 +14,8 @@ import { money } from './src/format';
 import { ParsedSms } from './src/sms';
 import { colors, space } from './src/theme';
 import { Button, Pill } from './src/ui';
-import { SetupScreen } from './src/screens/Setup';
+import { LoginScreen, ServerStep } from './src/screens/Setup';
+import { LockScreen, QuickSetupScreen } from './src/screens/Lock';
 import { AccountsScreen } from './src/screens/Accounts';
 import { AccountDetail } from './src/screens/AccountDetail';
 import { ExpensesScreen } from './src/screens/Expenses';
@@ -33,7 +34,7 @@ type Tab = 'accounts' | 'expenses' | 'chits' | 'more';
 export default function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} translucent={false} />
       <AppProvider>
         <Shell />
       </AppProvider>
@@ -50,6 +51,10 @@ function Shell() {
   const [prompt, setPrompt] = useState<ParsedSms | null>(null);
   const prompted = useRef(new Set<string>());
   const insets = useSafeAreaInsets();
+  // signing in: the address step only when none is saved or asked for; the password instead of the pattern on request
+  const [editServer, setEditServer] = useState(false);
+  const [usePassword, setUsePassword] = useState(false);
+  useEffect(() => { if (!app.locked && app.settings.token) setUsePassword(false); }, [app.locked, app.settings.token]);
 
   // Back: from another tab to Accounts first, then out of the app (an open account or sheet closes itself)
   useEffect(() => {
@@ -67,8 +72,21 @@ function Shell() {
     if (fresh) { prompted.current.add(fresh.sms.id); setPrompt(fresh); }
   }, [app.detected, app.settings.smsEnabled, adding, prompt]);
 
-  if (!app.ready) return <View style={st.splash}><ActivityIndicator color={colors.ocean} size="large" /></View>;
-  if (!app.settings.token) return <View style={{ flex: 1, backgroundColor: colors.bg }}><SetupScreen /></View>;
+  if (!app.ready) return <View style={[st.splash, { backgroundColor: colors.navy }]}><StatusBar barStyle="light-content" backgroundColor={colors.navy} /><ActivityIndicator color={colors.white} size="large" /></View>;
+  const auth = (child: React.ReactNode) => <View style={{ flex: 1, backgroundColor: colors.navy }}><StatusBar barStyle="light-content" backgroundColor={colors.navy} />{child}</View>;
+  if (!app.settings.serverUrl || editServer) {
+    const before = app.settings.serverUrl;
+    return auth(<ServerStep onSaved={async url => {
+      // another server: what was signed in to the old one does not apply
+      if (before && url !== before) await app.saveSettings({ token: null, quick: null });
+      setEditServer(false);
+    }} />);
+  }
+  if (app.locked && app.settings.quick && !usePassword) return auth(<LockScreen onPassword={() => setUsePassword(true)} />);
+  if (!app.settings.token || (app.locked && usePassword)) {
+    return auth(<LoginScreen onChangeServer={() => setEditServer(true)} onQuick={app.settings.quick ? () => setUsePassword(false) : undefined} />);
+  }
+  if (app.offerQuick) return auth(<QuickSetupScreen onDone={() => setUsePassword(false)} />);
 
   const record = (p: ParsedSms) => {
     setPrompt(null);
@@ -106,11 +124,11 @@ function TabBar({ tab, onTab, onAdd, smsCount }: { tab: Tab; onTab: (t: Tab) => 
     const on = tab === key;
     return (
       <Pressable key={key} onPress={() => onTab(key)} style={st.tab} hitSlop={6}>
-        <View>
-          <Icon color={on ? colors.ocean : colors.muted} size={22} strokeWidth={on ? 2.4 : 2} />
+        <View style={[st.tabPill, on && st.tabPillOn]}>
+          <Icon color={on ? colors.ocean : colors.muted} size={21} strokeWidth={on ? 2.4 : 2} />
           {badge ? <View style={st.badge}><Text style={st.badgeText}>{badge > 9 ? '9+' : badge}</Text></View> : null}
         </View>
-        <Text style={[st.tabText, on && { color: colors.ocean }]}>{label}</Text>
+        <Text style={[st.tabText, on && { color: colors.navy }]}>{label}</Text>
       </Pressable>
     );
   };
@@ -159,9 +177,12 @@ const st = StyleSheet.create({
   statusStrip: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: colors.bg },
   splash: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line, paddingTop: 8, elevation: 12, shadowColor: '#0b2038', shadowOpacity: 0.1, shadowRadius: 12 },
-  tab: { flex: 1, alignItems: 'center', gap: 3 },
-  tabText: { fontSize: 11, fontWeight: '700', color: colors.muted },
+    borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 8, elevation: 16, shadowColor: '#0b2038', shadowOpacity: 0.12, shadowRadius: 16,
+    shadowOffset: { width: 0, height: -2 } },
+  tab: { flex: 1, alignItems: 'center', gap: 2 },
+  tabPill: { width: 54, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  tabPillOn: { backgroundColor: colors.oceanSoft },
+  tabText: { fontSize: 11, fontWeight: '700', color: colors.muted, letterSpacing: 0.2 },
   fab: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.ocean, alignItems: 'center', justifyContent: 'center', marginTop: -26,
     elevation: 8, shadowColor: colors.ocean, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, borderWidth: 4, borderColor: colors.bg },
   badge: { position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },

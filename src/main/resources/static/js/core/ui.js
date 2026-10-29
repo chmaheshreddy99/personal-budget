@@ -2,7 +2,7 @@
  * Small UI toolkit: HTML escaping, panels, tables, forms, modal dialogs, toasts and CSV export.
  * Views build markup with template strings and wire events with delegate().
  */
-import { icon, hydrateIcons, accountTypeIcon } from './icons.js';
+import { icon, hydrateIcons, accountTypeIcon, CASH_ART } from './icons.js';
 import { busyWhile } from './busy.js';
 import { getPref, setPref } from './prefs.js';
 
@@ -46,6 +46,7 @@ export const loading = () => `<div class="loading"><div class="spinner"></div></
 
 /** Icon chip coloured by account type. */
 export function accountChip(type, small = false) {
+    if (type === 'CASH') return `<span class="chip-icon cash-art ${small ? 'sm' : ''}" title="Cash">${CASH_ART}</span>`;
     const { name, tone } = accountTypeIcon(type);
     return `<span class="chip-icon ${tone} ${small ? 'sm' : ''}">${icon(name)}</span>`;
 }

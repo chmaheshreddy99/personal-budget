@@ -72,6 +72,23 @@ public class Organization implements Identifiable {
      */
     @Column(length = 40)
     private String timeZone;
+
+    /**
+     * The yearly rate (percent) money paid for someone or lent without interest could have earned: what they cost
+     * in lost interest. Empty = the best rate among the bank accounts and deposits.
+     */
+    private java.math.BigDecimal benchmarkRate;
+
+    /**
+     * The mobile app by role, one entry a role: {@code MEMBER:TAP:EXPENSES+CHITS:1;VIEWER:ALWAYS:*:0}, i.e.
+     * role:mask:features:record. mask: NONE (balances shown), TAP (hidden until tapped) or ALWAYS (never shown);
+     * features: the mobile sections the role may use ({@code *}: every one); record: 1 when the role may record on the
+     * phone. A role not listed, or an empty value: balances shown, every section, recording as the role allows.
+     * See {@code MobilePolicy}.
+     */
+    @Column(length = 2000)
+    private String mobilePolicy;
+
     /** Optimistic locking: a save based on an older version is rejected. */
     @jakarta.persistence.Version
     private Long version;

@@ -127,7 +127,10 @@ public final class ClaimDtos {
             /* statement links that still work */
             int activeShares,
             /* the loan agreement, if one is made: DRAFT, ACCEPTED or SIGNED, and its number */
-            String agreementStatus, String agreementNo) {
+            String agreementStatus, String agreementNo,
+            /* given without interest: what it would have earned at the benchmark rate so far (null when it carries
+               interest, is owed by me, or no benchmark is known), the rate and where the rate comes from */
+            BigDecimal benchmarkRate, BigDecimal lostInterest, String benchmarkBasis) {
     }
 
     public record PostingView(Long id, int periodNo, LocalDate from, LocalDate to, BigDecimal amount,
@@ -155,6 +158,8 @@ public final class ClaimDtos {
     /** Totals across claims for the "to collect" summary. */
     public record ClaimSummary(BigDecimal outstanding, BigDecimal lentOutstanding, BigDecimal paidForOutstanding,
                                BigDecimal interestDue, BigDecimal overdueAmount, int openCount, int overdueCount,
-                               BigDecimal collectedThisMonth) {
+                               BigDecimal collectedThisMonth,
+                               /* interest lost so far on the open items given without interest */
+                               BigDecimal lostInterest) {
     }
 }

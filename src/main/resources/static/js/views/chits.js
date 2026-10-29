@@ -18,9 +18,10 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { showRoute } from '../core/route.js';
+import { receiptsTabHtml, bindReceiptsTab, openSendReceipt, ackBadge } from '../components/chit-receipts.js';
 
 const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
-const CHIT_TABS = ['installments', 'interest', 'payout', 'details'];
+const CHIT_TABS = ['installments', 'interest', 'payout', 'receipts', 'details'];
 
 const prefs = getPref('chits', { includeMatured: false });
 const savePrefs = () => setPref('chits', prefs);
@@ -110,7 +111,8 @@ export async function render(container, params, isCurrent) {
         if (push && id !== view.selectedId) view.tab = 'installments';   // another chit starts on its installments
         view.selectedId = id;
         container.querySelectorAll('#chit-list [data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
-        const detail = await api.get(`/chits/${id}`);
+        const [detail, acks] = await Promise.all([api.get(`/chits/${id}`), api.get(`/chits/${id}/acks`).catch(() => [])]);
+        detail.acks = acks;
         const entry = focusEntry;
         focusEntry = null;
         if (entry) view.tab = detail.payoutReceipts.some(p => p.entryId === entry) ? 'payout' : 'installments';
@@ -340,7 +342,7 @@ function chitRows(chits) {
 
 // ===================================================================== detail
 
-function drawDetail(container, { chit: c, installments, interestSchedule, payoutReceipts = [] }, reload) {
+function drawDetail(container, { chit: c, installments, interestSchedule, payoutReceipts = [], acks = [] }, reload) {
     // fresh element each time so handlers of a previously shown chit do not pile up
     const target = container.cloneNode(false);
     container.replaceWith(target);
@@ -415,17 +417,35 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
                 <button class="tab ${view.tab === 'installments' ? 'active' : ''}" data-tab="installments">${icon('list')}Installments</button>
                 <button class="tab ${view.tab === 'interest' ? 'active' : ''}" data-tab="interest">${icon('trending')}Interest by month</button>
                 ${paidOut ? `<button class="tab ${view.tab === 'payout' ? 'active' : ''}" data-tab="payout">${icon('gift')}Payout${toCome ? `<span class="count warn">${payoutReceipts.length}</span>` : ''}</button>` : ''}
+                <button class="tab ${view.tab === 'receipts' ? 'active' : ''}" data-tab="receipts" title="Receipts signed by the organizer">${icon('signature')}Receipts${acks.length
+                    ? `<span class="count ${acks.some(a => a.status === 'PENDING') ? 'warn' : ''}">${acks.length}</span>` : ''}</button>
                 <button class="tab ${view.tab === 'details' ? 'active' : ''}" data-tab="details">${icon('info')}Details</button></div>`,
             body: '<div class="scroll chit-tab-body" id="chit-tab-body"></div>',
         })}`;
 
     const tabBody = target.querySelector('#chit-tab-body');
     const drawTab = () => {
-        tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi))
+        tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi), !acks.some(a => a.kind === 'SETTLEMENT'))
+            : view.tab === 'receipts' ? receiptsTabHtml(c, acks, manage)
             : view.tab === 'interest' ? interestHtml(c, interestSchedule)
             : view.tab === 'payout' ? payoutHtml(c, payoutReceipts, manage && !closed) : detailsHtml(c, installments, interestSchedule);
     };
     drawTab();
+    bindReceiptsTab(target, c, () => acks, installments, reload);
+    // picking paid installments for a receipt: the bar above the table follows
+    const picked = () => [...tabBody.querySelectorAll('[data-ack-pick]:checked')].map(x => installments.find(i => i.id === Number(x.dataset.ackPick)));
+    tabBody.addEventListener('change', e => {
+        if (e.target.matches('[data-ack-all]')) tabBody.querySelectorAll('[data-ack-pick]').forEach(x => { x.checked = e.target.checked; });
+        if (!e.target.matches('[data-ack-pick], [data-ack-all]')) return;
+        const list = picked();
+        const bar = tabBody.querySelector('[data-ack-bar]');
+        if (!bar) return;
+        bar.hidden = !list.length;
+        bar.querySelector('[data-ack-sum]').textContent = `${list.length} selected · ${money(list.reduce((s, i) => s + Number(i.paidAmount || 0), 0))}`;
+    });
+    tabBody.addEventListener('click', e => {
+        if (e.target.closest('[data-ack-ask]')) openSendReceipt(c, picked(), () => { view.tab = 'receipts'; reload(); });
+    });
     bindExport(target.querySelector('.p-chit-tabs'), () => ({
         title: `${c.name} · chit passbook`, subtitle: [c.organizer, c.ticketNo ? `Ticket ${c.ticketNo}` : '', `${c.numberOfInstallments} × ${money(c.monthlyInstallment)}`].filter(Boolean).join(' · '),
         filename: `chit-${c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -447,6 +467,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     }));
 
     target.addEventListener('click', async e => {
+        if (e.target.closest('[data-open-ack], [data-ack-act], [data-ack-resend], [data-ack-print], [data-ack-delete], [data-ack-ask], .ack-pick')) return;
         const tab = e.target.closest('[data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
@@ -538,18 +559,25 @@ function dueText(iso, plain = false) {
 
 // ===================================================================== tabs
 
-function installmentsHtml(installments, manage, upi) {
+function installmentsHtml(installments, manage, upi, receipts = true) {
     const next = installments.find(i => i.status !== 'PAID');
     const payable = i => i.status !== 'PAID' && (i.overdue || i === next);
     const state = i => i.status === 'PAID' ? ['good', 'check-circle', 'Paid'] : i.overdue ? ['critical', 'alert', 'Overdue'] : i === next ? ['warning', 'clock', 'Next'] : ['gray', 'calendar', 'Upcoming'];
     // a chit without dividends (fixed or not yet auctioned) pays the installment as it is: one amount column then
     const withDividends = installments.some(i => Number(i.dividend) > 0);
-    return `<table class="grid compact dense chit-inst ${withDividends ? '' : 'no-dividends'}">
-        <thead><tr><th>#</th><th>Due</th><th class="r">Installment</th>${withDividends ? '<th class="r">Dividend</th><th class="r">Cash paid</th>' : ''}<th>Paid</th><th></th></tr></thead>
+    // paid installments not on a receipt yet can be picked to ask the organizer for one
+    const pickable = i => manage && receipts && i.status === 'PAID' && !i.ackNo;
+    const anyPick = installments.some(pickable);
+    const anyAck = installments.some(i => i.ackNo);
+    return `${anyPick ? `<div class="ack-bar" data-ack-bar hidden>${icon('signature')}<b data-ack-sum></b><span class="grow"></span>
+            <button type="button" class="btn sm primary" data-ack-ask>${icon('send')}Ask the organizer for a receipt</button></div>` : ''}
+        <table class="grid compact dense chit-inst ${withDividends ? '' : 'no-dividends'}">
+        <thead><tr>${anyPick ? '<th class="ack-pick"><input type="checkbox" data-ack-all title="Every paid installment without a receipt"></th>' : ''}<th>#</th><th>Due</th><th class="r">Installment</th>${withDividends ? '<th class="r">Dividend</th><th class="r">Cash paid</th>' : ''}<th>Paid</th>${anyAck ? '<th>Receipt</th>' : ''}<th></th></tr></thead>
         <tbody>${installments.map(i => {
             const [tone, ico, label] = state(i);
             return `
             <tr class="${i.overdue ? 'overdue' : ''} ${i.status === 'PAID' ? 'clickable' : payable(i) ? 'due-row' : 'future-row'}" ${i.journalEntryId ? `data-entry="${i.journalEntryId}"` : ''}>
+                ${anyPick ? `<td class="ack-pick">${pickable(i) ? `<input type="checkbox" data-ack-pick="${i.id}" title="Ask the organizer to acknowledge #${i.installmentNo}">` : ''}</td>` : ''}
                 <td><span class="inst-no ${tone}" title="${label}">${i.installmentNo}</span></td>
                 <td>${date(i.dueDate)}</td>
                 <td class="r">${i.paidAmount !== null && !withDividends ? `<b>${money(i.paidAmount)}</b>` : money(i.dueAmount)}</td>
@@ -557,6 +585,7 @@ function installmentsHtml(installments, manage, upi) {
                 <td class="r">${i.paidAmount !== null ? `<b>${money(i.paidAmount)}</b>` : ''}</td>` : ''}
                 <td>${i.paidDate ? `<span class="paid-on" title="From ${esc(i.paidFromAccountName || '')}">${icon(ico)}${shortDate(i.paidDate)}<small>${esc(i.paidFromAccountName || '')}</small></span>`
                     : `<span class="badge ${tone}">${icon(ico)}${label}</span>`}</td>
+                ${anyAck ? `<td>${ackBadge(i)}</td>` : ''}
                 <td class="r">${!manage ? '' : i.status === 'PAID'
                     ? `<button class="btn sm ghost icon" data-undo="${i.id}" title="Undo payment">${icon('undo')}</button>`
                     : payable(i) ? `${upi ? `<button class="btn sm ghost icon" data-upi="${i.id}" title="Pay by UPI QR">${icon('qr')}</button>` : ''}<button class="btn sm ${i.overdue ? 'primary' : ''}" data-pay="${i.id}">${icon('check')}Pay</button>`
@@ -580,6 +609,7 @@ function payoutHtml(c, parts, manage) {
             <div class="${toCome ? 'due' : ''}"><small>Still to come</small><b class="${toCome ? 'gold-ink' : 'muted'}">${toCome ? money(toCome) : 'Nothing'}</b>
                 <span class="muted">${toCome ? 'owed by the organizer' : 'received in full'}</span></div>
             ${manage && toCome ? `<button class="btn sm gold-btn" data-act="payout-part">${icon('plus')}Record part</button>` : ''}
+            ${manage && !toCome ? `<button class="btn sm" data-ack-act="settle" title="A full and final settlement for the organizer to sign: it cancels the receipts given before">${icon('gavel')}Settlement for the organizer</button>` : ''}
         </div>
         <i class="payout-meter wide"><em style="width:${agreed ? (received / agreed) * 100 : 0}%"></em></i>
         <table class="grid compact dense payout-parts">
@@ -704,6 +734,8 @@ function detailsHtml(c, installments = [], schedule = []) {
             ${item('Ticket / group', esc(c.ticketNo || '—'))}
             ${item('Status', statusBadge(c.status))}
             ${item('Pays from', esc(c.defaultPaymentAccountName || '—'))}
+            ${item('Organizer mobile', c.organizerPhone ? `<span class="mono">${esc(c.organizerPhone)}</span>` : '—', 'Payment receipts are sent to it on WhatsApp')}
+            ${item('Receipts', c.receiptsSigned || c.receiptsPending ? `${c.receiptsSigned} signed${c.receiptsPending ? ` · ${c.receiptsPending} waiting` : ''}` : 'none yet')}
             ${item('Organizer UPI', c.organizerUpi ? `<span class="mono">${esc(c.organizerUpi)}</span>` : '—')}
             ${item('Commission', commission ? `${percent(c.commissionPercent, 2)} · ${money(Math.round(commission))}` : '—')}
             ${c.notes ? item('Notes', esc(c.notes)) : ''}
@@ -919,6 +951,8 @@ async function openChitForm(chit, onSaved) {
             ${field({ label: 'Chit name', name: 'name', value: c.name, required: true, span: 'span-2' })}
             ${field({ label: 'Ticket / group no.', name: 'ticketNo', value: c.ticketNo })}
             ${field({ label: 'Organizer / foreman', name: 'organizer', value: c.organizer })}
+            ${field({ label: 'Organizer mobile', name: 'organizerPhone', value: c.organizerPhone, placeholder: '10 digits',
+                      attrs: 'maxlength="14" inputmode="tel" data-plain', hint: 'Payment receipts go to it on WhatsApp' })}
             ${field({ label: 'Organizer UPI ID', name: 'organizerUpi', value: c.organizerUpi, placeholder: 'name@bank',
                       attrs: 'pattern="[A-Za-z0-9._\\-]{2,}@[A-Za-z0-9.\\-]{2,}" data-plain', hint: 'Shows a QR code to pay installments' })}
             ${field({ label: 'UPI note', name: 'upiNote', value: c.upiNote, attrs: 'maxlength="40" data-plain', placeholder: 'Auto: chit name + ticket',

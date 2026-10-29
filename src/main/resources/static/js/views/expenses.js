@@ -921,7 +921,8 @@ function summaryHtml({ total, change, days, expenses, dailyAverage, today, budge
             <div class="clickable" ${top ? `data-filter-category="${top.key}"` : ''} title="Filter by this category"><span>Top category</span><b class="ellipsis">${esc(top?.label || '—')}</b>
                 <small>${top ? `${moneyShort(top.value)} · ${percent((top.value / (total || 1)) * 100, 0)}` : ''}</small></div>
             <div class="clickable ${view.type === 'collect' ? 'active' : ''}" data-summary-collect title="Show what others owe you"><span>To collect</span><b class="aqua-ink">${moneyShort(s.outstanding)}</b>
-                <small>${s.openCount} open${s.overdueCount ? ` · <span class="neg">${s.overdueCount} overdue</span>` : ''}</small></div>
+                <small>${s.openCount} open${s.overdueCount ? ` · <span class="neg">${s.overdueCount} overdue</span>` : ''}${Number(s.lostInterest) >= 1
+                    ? ` · <span class="xd-lost" title="Interest lost so far on what was given without interest">−${moneyShort(s.lostInterest)} int.</span>` : ''}</small></div>
         </div>
         ${chargesLine(expenses, total)}
     </div>`;
@@ -1223,13 +1224,20 @@ function claimRowHtml(r, withDate) {
         <td class="c-status"><div class="xd-status">${claimBadge(c)}${due}</div></td>
         <td class="c-pay">${r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
             title="${w(r)} ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button>` : '<span class="muted">—</span>'}</td>
-        <td class="r c-amt"><b class="mono claim-amt">${money(r.amount)}</b></td>
+        <td class="r c-amt"><b class="mono claim-amt">${money(r.amount)}</b>${lostHtml(c)}</td>
         <td class="r c-owed" title="${open ? `${money(c.outstanding)} principal${interest ? ` + ${money(Math.round(interest))} interest = ${money(Math.round(Number(c.settlementAmount)))} payable now` : ''}` : 'Nothing owed'}">
             ${open ? `<b class="mono neg">${money(c.outstanding)}</b>${interest >= 1 ? `<span class="xd-int">+${moneyShort(interest)}</span>` : ''}` : '<span class="muted">settled</span>'}</td>
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
     </tr>`;
 }
 const w = r => (r.type === 'BORROWED' ? 'Into' : 'Paid from');
+
+/** What an item given without interest cost so far at the benchmark rate: a small grey line under its amount. */
+function lostHtml(c) {
+    const lost = Number(c.lostInterest || 0);
+    if (lost < 1) return '';
+    return `<span class="xd-lost" title="Interest lost: ${money(lost)} so far at ${Number(c.benchmarkRate)}% a year (${esc(c.benchmarkBasis || '')}), as it carries no interest">−${moneyShort(lost)} int.</span>`;
+}
 
 /**
  * An expense, opened in place and kept short: one line of facts with the actions on the right, then three

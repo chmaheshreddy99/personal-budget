@@ -16,3 +16,6 @@
 .cs-agreement .bond-preview { margin: 8px 0; }
 #la-kyc-error:empty, #la-error:empty { display: none; }
 .la-step .cs-sign canvas { max-width: 100%; }
+.cr-sched { overflow-x: auto; margin: 10px 0; }
+.cr-sched .bond-sched { font-size: 13px; }
+.cr-cancels { font-size: 13px; margin: 6px 0 0; color: #7a2d5c; }

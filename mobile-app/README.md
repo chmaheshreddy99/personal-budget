@@ -60,6 +60,17 @@ accounts, statements and expenses on the phone, so it works without the server, 
 - **Offline copy and Work offline:** as before. The size limit (2–50 MB) covers the offline copy. Evidence waiting to
   upload and anything else waiting to sync are never dropped.
 
+## Signing in, quick unlock and hidden balances
+
+- **The server address is asked once.** After that the app only asks for the password (the address is under *Change server*).
+- **Quick unlock:** after signing in, choose a **pattern** or a **4–6 digit PIN**. The app opens with it (and locks again after
+  2 minutes in the background); it signs in automatically as soon as the pattern is drawn or the last digit typed. It is checked
+  on the phone first, so the app opens offline too, then signs in with the server for a fresh session. Five wrong tries, or a new
+  password, switch it off and the password is asked. *Use password instead* is always on the lock screen.
+- **Hidden balances:** the eye on Accounts shows or hides balances (₹ •••••). An admin sets it per role on the web
+  (*Settings → Mobile app → Mobile app by role*): balances shown, hidden until tapped, or never shown; which sections the role may
+  use on the phone; and whether it may record there. The server enforces the sections and recording.
+
 ## The server side
 
 The app talks to the server at the address you enter: an ngrok URL such as `https://name.ngrok-free.app`, or
@@ -69,6 +80,9 @@ The app talks to the server at the address you enter: an ngrok URL such as `http
 |---|---|
 | `GET /api/meta/app` | Is the server there (no sign-in needed) |
 | `POST /api/auth/login` | Sign in: the app keeps the token, never the password |
+| `POST /api/auth/quick-unlock` | Turn on quick unlock (pattern or PIN) for this phone: the server keeps a BCrypt hash of the code, the phone a random key |
+| `POST /api/auth/quick-login` | Sign in with the phone's key and its pattern / PIN; five wrong tries (or a new password) switch it off |
+| `DELETE /api/auth/quick-unlock/{id}` | Turn quick unlock off |
 | `GET /api/app/snapshot?days=` | Every account with its balance and group, the expense and income categories, the latest expenses, the chits, and (for the sections shared with the user) money paid for someone or lent with what came back, the EMIs, income and gifts |
 | `GET /api/app/accounts/{id}/statement?days=` | An account's statement |
 | `POST /api/app/expenses/sync` | `{expenses, chitPayments, claims, repayments, incomes, gifts, emiPayments}` recorded on the phone, each with the app's own id |

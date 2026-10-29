@@ -74,7 +74,10 @@ public class AppSyncService {
                            /* income received in the period */
                            List<AppIncome> incomes,
                            /* gifts given and received */
-                           List<AppGift> gifts) {
+                           List<AppGift> gifts,
+                           /* balances on the phone, as the admin set it for the user's role: NONE (shown), TAP (hidden until
+                              tapped) or ALWAYS (never shown) */
+                           String balanceMask) {
     }
 
     /** Money coming back on a claim (or written off). */
@@ -189,7 +192,9 @@ public class AppSyncService {
 
     public AppSyncService(AccountService accounts, CategoryService categories, ExpenseService expenses, ReportService reports,
                           ConstructionProjectRepository projects, HostedChitRepository chits, AppSyncWriter writer, ChitService myChits,
-                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions) {
+                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions,
+                          com.aditya.personalbudget.repository.OrganizationRepository organizations) {
+        this.organizations = organizations;
         this.claims = claims;
         this.emis = emis;
         this.gifts = gifts;
@@ -202,6 +207,14 @@ public class AppSyncService {
         this.projects = projects;
         this.chits = chits;
         this.writer = writer;
+    }
+
+    private final com.aditya.personalbudget.repository.OrganizationRepository organizations;
+
+    /** The rule the admin set for the signed-in user's role on the phone. */
+    private com.aditya.personalbudget.security.MobilePolicy.Rule rule() {
+        var me = UserContext.get();
+        return com.aditya.personalbudget.security.MobilePolicy.of(organizations.findById(me.tenantId()).orElse(null), me.role());
     }
 
     /** What the app keeps: every account, the expense and income categories and the expenses of the last {@code days} days. */
@@ -244,9 +257,10 @@ public class AppSyncService {
                             i.paidAmount(), i.paidDate(), i.status().name(), i.overdue(), i.paidFromAccountName(), i.journalEntryId())).toList(),
                     c.organizerUpi(), c.upiNote());
         }).toList();
-        boolean canPay = seesChits && com.aditya.personalbudget.security.RolePolicy.allows(me.role(), com.aditya.personalbudget.security.Permission.MANAGE_CHITS);
+        var rule = rule();
+        boolean canPay = seesChits && rule.record() && com.aditya.personalbudget.security.RolePolicy.allows(me.role(), com.aditya.personalbudget.security.Permission.MANAGE_CHITS);
         Set<com.aditya.personalbudget.domain.type.Feature> f = me.features();
-        boolean canRecord = com.aditya.personalbudget.security.RolePolicy.allows(me.role(), com.aditya.personalbudget.security.Permission.POST_TRANSACTIONS);
+        boolean canRecord = rule.record() && com.aditya.personalbudget.security.RolePolicy.allows(me.role(), com.aditya.personalbudget.security.Permission.POST_TRANSACTIONS);
         List<AppClaim> claimList = !f.contains(com.aditya.personalbudget.domain.type.Feature.EXPENSES) ? List.of() : claims.list().stream()
                 .filter(c -> c.status() != com.aditya.personalbudget.domain.type.ClaimStatus.SETTLED
                         && c.status() != com.aditya.personalbudget.domain.type.ClaimStatus.WRITTEN_OFF || !c.startDate().isBefore(from))
@@ -268,7 +282,7 @@ public class AppSyncService {
                         g.value(), g.quantity(), g.unit(), g.mode(), g.donation(), g.notes(), g.accountName(), g.entryNo()))
                 .toList();
         return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay,
-                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord, claimList, emiList, incomeList, giftList);
+                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord, claimList, emiList, incomeList, giftList, rule.mask());
     }
 
     /** The income received since {@code from}: entries that credit an income category, into the account they debit. */
@@ -312,6 +326,9 @@ public class AppSyncService {
 
     /** The phone's expenses, each on its own: one that fails does not stop the others. */
     public List<SyncResult> sync(SyncRequest r) {
+        if (UserContext.get().mobile() && !rule().record()) {
+            throw new com.aditya.personalbudget.exception.ForbiddenException("Recording on the phone is turned off for your role. Ask your admin");
+        }
         List<SyncResult> out = new ArrayList<>();
         for (SyncExpense e : r.expenses() == null ? List.<SyncExpense>of() : r.expenses()) {
             try {

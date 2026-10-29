@@ -27,11 +27,11 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/**")
-                .excludePathPatterns("/api/auth/login", "/api/auth/register", "/api/auth/link", "/api/meta/**", "/api/public/**");
+                .excludePathPatterns("/api/auth/login", "/api/auth/quick-login", "/api/auth/register", "/api/auth/link", "/api/meta/**", "/api/public/**");
         // after the authentication, so the user is still known when the change completes
         registry.addInterceptor(activityRecorder)
                 .addPathPatterns("/api/**")
-                .excludePathPatterns("/api/auth/login", "/api/auth/register", "/api/auth/link", "/api/meta/**", "/api/events", "/api/public/**");
+                .excludePathPatterns("/api/auth/login", "/api/auth/quick-login", "/api/auth/register", "/api/auth/link", "/api/meta/**", "/api/events", "/api/public/**");
     }
 
     @Override

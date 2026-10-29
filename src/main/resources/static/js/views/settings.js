@@ -93,7 +93,8 @@ async function renderOrganization(body, reload) {
                 Times are kept in ${esc(tz.serverTimeZone)} and shown in this zone, so a change moves every time shown, those saved before it too.</span></div>
                 <div class="row"><button class="btn primary" type="submit">${icon('check')}Save time zone</button></div>`
                 : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
-        </form>` });
+        </form>` }) + await benchmarkPanel(admin);
+    bindBenchmark(body, admin, reload);
     body.querySelector('#tz-form').addEventListener('submit', async e => {
         e.preventDefault();
         if (!admin) return;
@@ -105,6 +106,41 @@ async function renderOrganization(body, reload) {
             reload();
         } catch (error) { toast(error.message, 'error'); }
     });
+}
+
+/**
+ * The interest benchmark: what money paid for someone or lent without interest could have earned. Set by hand, or the
+ * best rate among the bank accounts and deposits. Each such item shows the interest it cost, greyed out.
+ */
+async function benchmarkPanel(admin) {
+    const b = await api.get('/claims/interest-benchmark').catch(() => null);
+    if (!b) return '';
+    return panel({ title: 'Interest lost on money given', iconName: 'percent', sub: b.rate !== null ? `${Number(b.rate)}% a year` : 'not set',
+        body: `<form class="form-grid one" id="bench-form" style="max-width:620px">
+            <p class="hint" style="margin:0">Money paid for someone or lent <b>without interest</b> could have earned interest in the bank. Each such item shows what it cost so far,
+                greyed out beside its amount, at this rate (simple interest on what is still out).</p>
+            <label class="field"><span>Benchmark rate, % a year</span>
+                <input name="rate" type="number" min="0" max="30" step="0.05" value="${b.configuredRate ?? ''}" placeholder="${b.candidates.length ? `best bank rate: ${Number(b.candidates[0].rate)}%` : 'e.g. 7'}" ${admin ? '' : 'readonly'} data-plain>
+                <small>Empty: the best rate among your bank accounts and deposits${b.configuredRate === null ? ` (now ${esc(b.basis)})` : ''}.</small></label>
+            ${b.candidates.length ? `<div class="bench-list">${b.candidates.slice(0, 6).map(c => `<span class="chip-sm">${esc(c.name)} · ${esc(c.type)} · <b>${Number(c.rate)}%</b></span>`).join('')}</div>`
+                : '<p class="small muted">No bank account or deposit has an interest rate yet: add one on the account, or set the rate here.</p>'}
+            ${admin ? `<div class="row"><button class="btn primary" type="submit">${icon('check')}Save</button>
+                ${b.configuredRate !== null ? `<button class="btn ghost" type="button" data-bench-auto>${icon('refresh')}Use the best bank rate</button>` : ''}</div>` : ''}
+        </form>` });
+}
+
+function bindBenchmark(body, admin, reload) {
+    const form = body.querySelector('#bench-form');
+    if (!form || !admin) return;
+    const save = async rate => {
+        try {
+            const b = await api.put('/admin/interest-benchmark', { rate });
+            toast(b.rate !== null ? `Benchmark: ${Number(b.rate)}% a year (${b.basis})` : 'No benchmark rate');
+            reload();
+        } catch (error) { toast(error.message, 'error'); }
+    };
+    form.addEventListener('submit', e => { e.preventDefault(); save(form.rate.value === '' ? null : Number(form.rate.value)); });
+    form.querySelector('[data-bench-auto]')?.addEventListener('click', () => save(null));
 }
 
 // ===================================================================== backup
@@ -224,12 +260,48 @@ async function renderMobile(body, reload) {
                         <span class="badge ${u.mobileAccess ? 'aqua' : 'gray'}">${icon('phone')}${u.mobileAccess ? 'Allowed' : 'Off'}</span></div>`).join('')}</div>
                     <p class="small muted">${icon('info')} Change a user's sections and mobile access under <a href="#/admin/users">Users</a>.</p>` : ''}
             </div>
-        </div>` });
+        </div>` }) + (admin ? await mobilePolicyPanel() : '');
+    if (admin) bindMobilePolicy(body, reload);
     body.querySelector('#mobile-path-form').addEventListener('submit', async e => {
         e.preventDefault();
         try {
             const saved = await api.put('/admin/app-settings', { mobilePath: e.target.mobilePath.value });
             toast(`The mobile version is now at /${saved.mobilePath}/`);
+            reload();
+        } catch (error) { toast(error.message, 'error'); }
+    });
+}
+
+const MASKS = [['NONE', 'Shown'], ['TAP', 'Hidden until tapped'], ['ALWAYS', 'Never shown']];
+
+/** The mobile app by role: balances shown / hidden until tapped / never shown, the sections, and recording on the phone. */
+async function mobilePolicyPanel() {
+    const p = await api.get('/admin/mobile-policy').catch(() => null);
+    if (!p) return '';
+    return panel({ title: 'Mobile app by role', iconName: 'shield', sub: 'Balances, sections and recording on the phone', bodyClass: 'flush',
+        body: `<form id="mobile-policy" onsubmit="return false"><div class="scroll"><table class="grid compact mp-table">
+            <thead><tr><th>Role</th><th>Balances</th><th>Records on the phone</th><th>Sections</th></tr></thead>
+            <tbody>${p.roles.map(r => `<tr data-role="${r.role}">
+                <td><b>${esc(r.roleLabel)}</b></td>
+                <td><select name="mask" data-plain>${MASKS.map(([v, l]) => `<option value="${v}" ${v === r.mask ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+                <td><label class="switch"><input type="checkbox" name="record" ${r.record ? 'checked' : ''}><span></span></label></td>
+                <td><div class="mp-feats">${p.mobileFeatures.map(f => `<label class="mp-feat"><input type="checkbox" name="f" value="${f.name}" ${r.features.includes(f.name) ? 'checked' : ''}>${esc(f.label)}</label>`).join('')}</div></td>
+            </tr>`).join('')}</tbody></table></div>
+            <div class="row mp-foot"><p class="small muted grow">${icon('info')} Applies at once to every phone of a user with that role: a section left out is not reachable from the phone,
+                and masked balances show as ••••• (tap to see them when allowed). Each user's own sections still apply.</p>
+                <button class="btn primary" type="submit">${icon('check')}Save</button></div></form>` });
+}
+
+function bindMobilePolicy(body, reload) {
+    const form = body.querySelector('#mobile-policy');
+    form?.addEventListener('submit', async () => {
+        const roles = [...form.querySelectorAll('[data-role]')].map(tr => ({
+            role: tr.dataset.role, mask: tr.querySelector('[name=mask]').value, record: tr.querySelector('[name=record]').checked,
+            features: [...tr.querySelectorAll('[name=f]:checked')].map(x => x.value),
+        }));
+        try {
+            await api.put('/admin/mobile-policy', { roles });
+            toast('Mobile app by role saved');
             reload();
         } catch (error) { toast(error.message, 'error'); }
     });

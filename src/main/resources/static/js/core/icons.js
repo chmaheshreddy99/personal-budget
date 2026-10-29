@@ -22,7 +22,7 @@ const PATHS = {
     wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M17 12h4v4h-4a2 2 0 0 1 0-4z"/>',
     bank: '<path d="M3 21h18"/><path d="M5 21V10"/><path d="M19 21V10"/><path d="M9 21V10"/><path d="M15 21V10"/><path d="M12 3 3 8h18z"/>',
     card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
-    cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+    cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M4.5 8.5h1.5M18 15.5h1.5"/><path d="M10 9.5h4M10 11.2h4M10.4 9.5c2.2 0 2.2 3.4 0 3.4h-.4l3.2 2.6"/>',
     coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
     receipt: '<path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 1 .67V2l-1 .67L16 2l-3 2-3-2-3 2z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     journal: '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
@@ -176,6 +176,22 @@ export function hydrateIcons(root = document) {
         el.outerHTML = icon(el.dataset.icon);
     });
 }
+
+/**
+ * Cash, drawn in colour: a fan of rupee notes with a coin, so a cash account reads as money at a glance (the line icons
+ * stay for everything else).
+ */
+export const CASH_ART = `<svg viewBox="0 0 48 48" class="cash-art-svg" aria-hidden="true">
+    <g transform="rotate(-14 24 24)"><rect x="5" y="13" width="34" height="19" rx="2.5" fill="#3fae72" stroke="#1f7a4d" stroke-width="1"/></g>
+    <rect x="7" y="15" width="34" height="19" rx="2.5" fill="#5cc48a" stroke="#1f7a4d" stroke-width="1"/>
+    <rect x="9.5" y="17.5" width="29" height="14" rx="1.5" fill="none" stroke="#e9fbf1" stroke-width="0.8" stroke-dasharray="1.6 1.2"/>
+    <circle cx="24" cy="24.5" r="5.2" fill="#e9fbf1" opacity="0.9"/>
+    <text x="24" y="28" text-anchor="middle" font-size="8.5" font-weight="800" fill="#1f7a4d" font-family="system-ui, sans-serif">₹</text>
+    <circle cx="12.5" cy="20" r="1.3" fill="#e9fbf1" opacity="0.8"/><circle cx="35.5" cy="29" r="1.3" fill="#e9fbf1" opacity="0.8"/>
+    <circle cx="36" cy="35.5" r="7" fill="#f2bf3a" stroke="#a87407" stroke-width="1"/>
+    <circle cx="36" cy="35.5" r="4.9" fill="none" stroke="#a87407" stroke-width="0.7" opacity="0.7"/>
+    <text x="36" y="38.4" text-anchor="middle" font-size="7.5" font-weight="800" fill="#8a5d00" font-family="system-ui, sans-serif">₹</text>
+</svg>`;
 
 /** The icon and color family that represents an account type. */
 export function accountTypeIcon(type) {

@@ -55,8 +55,6 @@ public class ActivityService {
             e.setAction(action);
             e.setArea(cut(area, 30));
             e.setSummary(cut(summary == null || summary.isBlank() ? action : summary, 300));
-            e.setMethod(method);
-            e.setPath(cut(path, 200));
             entries.save(e);
         } catch (RuntimeException ex) {
             log.warn("Could not write the activity log: {}", ex.getMessage());

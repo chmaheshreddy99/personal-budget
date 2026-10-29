@@ -324,3 +324,16 @@
 
 /* a tripartite deed: four signatures at the foot of each sheet */
 .bp-strip.four { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4mm; }
+
+/* ---- receipts: schedule tables, revenue stamp box, copy label */
+.bond-sched { width: 100%; border-collapse: collapse; margin: 4px 0 8px; font-size: 0.86em; }
+.bond-sched th, .bond-sched td { border: 1px solid #b9c3cf; padding: 3px 6px; text-align: left; vertical-align: top; }
+.bond-sched th { background: #f2f5f8; font-weight: 700; }
+.bond-sched .r { text-align: right; white-space: nowrap; }
+.bond-sched tfoot th { background: #eef2f6; }
+.bond-signspace { position: relative; }
+.bond-revenue { position: absolute; right: 0; top: 0; width: 22mm; height: 25mm; border: 1.2px dashed #8a96a3; border-radius: 2px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #7a8693; font-size: 8pt; line-height: 1.2; background: rgba(255,255,255,0.6); }
+.bond-revenue small { font-size: 6.5pt; margin-top: 3px; }
+.bond-copy { text-align: right; font: 700 9pt/1 sans-serif; letter-spacing: 2px; color: #7a2d5c; margin-bottom: 4px; }
+.bp-copy { font-size: 8pt; letter-spacing: 1.5px; color: #7a2d5c; }

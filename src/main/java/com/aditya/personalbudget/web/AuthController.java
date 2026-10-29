@@ -63,4 +63,24 @@ public class AuthController {
         auth.changePassword(request);
         return ResponseEntity.noContent().build();
     }
+
+    /** The mobile app: turns on quick unlock (pattern or PIN) on this phone for the signed-in user. */
+    @PostMapping("/quick-unlock")
+    @SelfService
+    public AuthService.QuickUnlockKey enableQuickUnlock(@Valid @RequestBody AuthService.QuickUnlockRequest request) {
+        return auth.enableQuickUnlock(request);
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/quick-unlock/{deviceId}")
+    @SelfService
+    public ResponseEntity<Void> disableQuickUnlock(@org.springframework.web.bind.annotation.PathVariable Long deviceId) {
+        auth.disableQuickUnlock(deviceId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** The mobile app signs in with the phone's key and its pattern / PIN (no password). */
+    @PostMapping("/quick-login")
+    public SessionView quickLogin(@Valid @RequestBody AuthService.QuickLoginRequest request, HttpServletRequest http) {
+        return auth.quickLogin(request, http.getHeader("User-Agent"));
+    }
 }

@@ -47,8 +47,6 @@ public class UserSession implements TenantOwned {
     @Column(nullable = false)
     private LocalDateTime expiresAt;
 
-    @Column(length = 200)
-    private String userAgent;
 
     /** Opened by the mobile version: only the user's mobile sections are available. */
     private Boolean mobile;

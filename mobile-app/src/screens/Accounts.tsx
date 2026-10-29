@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { Account, liveBalance } from '../data';
 import { ago, money, moneyShort } from '../format';
-import { AccountBubble, Card, Empty, GradientPanel, Pill, SectionTitle } from '../ui';
+import { AccountBubble, Card, Empty, GradientPanel, MaskToggle, Pill, SectionTitle } from '../ui';
 import { colors, space } from '../theme';
 
 const OWN_ORDER: [string, (a: Account) => boolean][] = [
@@ -57,9 +57,13 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
       <GradientPanel>
         <View style={st.headRow}>
           <View style={{ flex: 1 }}>
+            <Text style={st.greet}>{greeting()}{app.settings.userName ? `, ${app.settings.userName.split(' ')[0]}` : ''}</Text>
             <Text style={st.hello}>{app.snapshot?.household || 'Personal Budget'}</Text>
-            <Text style={st.label}>{chosen ? 'NET WORTH · CHOSEN ACCOUNTS' : 'NET WORTH · MY ACCOUNTS'}</Text>
-            <Text style={st.big}>{money(netWorth)}</Text>
+            <View style={st.labelRow}>
+              <Text style={st.label}>{chosen ? 'NET WORTH · CHOSEN ACCOUNTS' : 'NET WORTH · MY ACCOUNTS'}</Text>
+              <MaskToggle masked={app.masked} onPress={app.toggleMask} locked={app.balanceMask === 'ALWAYS'} />
+            </View>
+            <Text style={st.big}>{app.bal(netWorth)}</Text>
           </View>
           <Pressable onPress={() => app.sync()} style={({ pressed }) => [st.syncBtn, pressed && { opacity: 0.8 }]} disabled={app.syncing}>
             {app.syncing ? <ActivityIndicator color={colors.white} /> : <RefreshCw color={colors.white} size={20} />}
@@ -67,8 +71,8 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
           </Pressable>
         </View>
         <View style={st.figs}>
-          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{moneyShort(cash)}</Text></View>
-          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{moneyShort(cards)}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{app.bal(cash, { short: true })}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{app.bal(cards, { short: true })}</Text></View>
           <View style={st.fig}><Text style={st.figLabel}>To sync</Text><Text style={[st.figValue, waiting.length ? { color: '#ffd68a' } : null]}>{waiting.length}</Text></View>
         </View>
         <View style={st.statusRow}>
@@ -110,7 +114,7 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
               <Text style={st.groupTitle}>{label}</Text>
               <Text style={st.groupCount}>{list.length}</Text>
               <View style={{ flex: 1 }} />
-              <Text style={st.groupTotal}>{money(total)}</Text>
+              <Text style={st.groupTotal}>{app.bal(total)}</Text>
               {closed[label] ? <ChevronRight color={colors.muted} size={18} /> : <ChevronDown color={colors.muted} size={18} />}
             </Pressable>
             {!closed[label] ? list.map(a => <AccountRow key={a.id} a={a} onPress={() => onOpen(a)} />) : null}
@@ -144,6 +148,11 @@ export function AccountsScreen({ onOpen, onSettings }: { onOpen: (a: Account) =>
   );
 }
 
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
 function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   const app = useApp();
   const { balance, pending } = liveBalance(a, app.queue, app.chitQueue, app.records);
@@ -155,10 +164,10 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={st.name} numberOfLines={1}>{a.name}</Text>
         <Text style={st.meta} numberOfLines={1}>{[a.typeLabel, a.institution, a.last4 ? `•• ${a.last4}` : null].filter(Boolean).join(' · ')}</Text>
-        {available !== null ? <Text style={st.avail}>Available {money(available, 2)}</Text> : null}
+        {available !== null && !app.masked ? <Text style={st.avail}>Available {money(available, 2)}</Text> : null}
       </View>
       <View style={{ alignItems: 'flex-end', gap: 3 }}>
-        <Text style={[st.balance, balance < 0 && a.accountClass === 'ASSET' ? { color: colors.red } : card && balance > 0 ? { color: colors.coral } : null]}>{money(balance, card ? 2 : undefined)}</Text>
+        <Text style={[st.balance, balance < 0 && a.accountClass === 'ASSET' ? { color: colors.red } : card && balance > 0 ? { color: colors.coral } : null, app.masked && { color: colors.muted, letterSpacing: 1 }]}>{app.bal(balance, { decimals: card ? 2 : undefined })}</Text>
         {pending ? <Pill text={`${a.accountClass === 'LIABILITY' ? '+' : '−'}${moneyShort(pending)} waiting`} fg={colors.gold} bg={colors.goldSoft} /> : null}
       </View>
     </Pressable>
@@ -167,9 +176,11 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
 
 const st = StyleSheet.create({
   headRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  hello: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', marginBottom: 10 },
+  greet: { color: colors.white, fontSize: 18, fontWeight: '800' },
+  hello: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', marginBottom: 12, marginTop: 1 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   label: { color: 'rgba(255,255,255,0.6)', fontSize: 10.5, fontWeight: '800', letterSpacing: 1 },
-  big: { color: colors.white, fontSize: 30, fontWeight: '800', marginTop: 2 },
+  big: { color: colors.white, fontSize: 32, fontWeight: '800', marginTop: 2, letterSpacing: -0.5 },
   syncBtn: { alignItems: 'center', justifyContent: 'center', gap: 2, width: 64, height: 64, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.16)' },
   syncText: { color: colors.white, fontSize: 11, fontWeight: '700' },
   figs: { flexDirection: 'row', gap: 8, marginTop: space.l },

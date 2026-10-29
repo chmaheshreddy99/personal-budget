@@ -104,7 +104,9 @@ public class ClaimService {
                         JournalEntryRepository entries, LedgerService ledger, CategoryService categories,
                         ClaimInterestPostingRepository postings, BudgetProperties properties,
                         com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimShareRepository shares,
-                        ClaimAgreementRepository agreements, AttachmentService files) {
+                        ClaimAgreementRepository agreements, AttachmentService files,
+                        com.aditya.personalbudget.repository.OrganizationRepository organizations) {
+        this.organizations = organizations;
         this.agreements = agreements;
         this.files = files;
         this.shares = shares;
@@ -172,7 +174,9 @@ public class ClaimService {
                 }
             }
         }
-        return new ClaimSummary(outstanding, lent, paidFor, interestDue, overdue, open, overdueCount, collected);
+        BigDecimal lost = views.stream().filter(v -> v.lostInterest() != null && v.outstanding().signum() > 0)
+                .map(ClaimView::lostInterest).reduce(Money.ZERO, BigDecimal::add);
+        return new ClaimSummary(outstanding, lent, paidFor, interestDue, overdue, open, overdueCount, collected, lost);
     }
 
     // ================================================================== create / edit / delete
@@ -694,13 +698,17 @@ public class ClaimService {
     private record Context(Map<Long, Account> accounts, Map<Long, JournalEntry> entries,
                            Map<Long, List<ClaimRepayment>> repaymentsByClaim,
                            Map<Long, List<ClaimInterestPosting>> postingsByClaim, LocalDate today,
-                           Map<Long, Integer> evidence, Map<Long, List<ClaimShare>> shares, LocalDateTime now) {
+                           Map<Long, Integer> evidence, Map<Long, List<ClaimShare>> shares, LocalDateTime now,
+                           OrgPreferencesService.Benchmark benchmark) {
     }
+
+    private final com.aditya.personalbudget.repository.OrganizationRepository organizations;
 
     private Context context() {
         Long tenantId = UserContext.tenantId();
+        List<Account> all = accounts.findByTenantId(tenantId);
         return new Context(
-                accounts.findByTenantId(tenantId).stream().collect(Collectors.toMap(Account::getId, Function.identity())),
+                all.stream().collect(Collectors.toMap(Account::getId, Function.identity())),
                 entries.findByTenantId(tenantId).stream().collect(Collectors.toMap(JournalEntry::getId, Function.identity())),
                 repayments.findByTenantId(tenantId).stream()
                         .sorted(Comparator.comparing(ClaimRepayment::getPaidDate).thenComparing(ClaimRepayment::getId))
@@ -710,7 +718,7 @@ public class ClaimService {
                         .collect(Collectors.groupingBy(ClaimInterestPosting::getClaimId)),
                 OrgClock.today(), attachments.countsByEntry(tenantId),
                 shares.findByTenantId(tenantId).stream().collect(Collectors.groupingBy(ClaimShare::getClaimId)),
-                OrgClock.now());
+                OrgClock.now(), OrgPreferencesService.benchmark(organizations.findById(tenantId).orElse(null), all));
     }
 
     private ClaimView toView(Claim c, Context ctx) {
@@ -887,7 +895,35 @@ public class ClaimService {
                 c.getJournalEntryId() == null ? 0 : ctx.evidence().getOrDefault(c.getJournalEntryId(), 0),
                 plan, plan.getLabel(), dueNow, nextDate, nextAmount,
                 (int) ctx.shares().getOrDefault(c.getId(), List.of()).stream().filter(s -> s.isActive(ctx.now())).count(),
-                agreement == null ? null : agreement.getStatus(), agreement == null ? null : agreement.getAgreementNo());
+                agreement == null ? null : agreement.getStatus(), agreement == null ? null : agreement.getAgreementNo(),
+                ctx.benchmark().rate(), lostInterest(c, history, ctx), ctx.benchmark().basis());
+    }
+
+    /**
+     * What money given without interest (paid for someone or lent at no rate) cost: simple interest at the benchmark
+     * rate on the principal still out, from the day it was given to each repayment, and to today (or the day it was
+     * settled). Null for an item that carries interest, money owed by me, or without a benchmark.
+     */
+    static BigDecimal lostInterest(Claim c, List<ClaimRepayment> history, Context ctx) {
+        BigDecimal rate = ctx.benchmark().rate();
+        if (rate == null || rate.signum() == 0 || c.getKind().isPayable() || (c.getInterestRate() != null && c.getInterestRate().signum() > 0)) {
+            return null;
+        }
+        BigDecimal out = c.getAmount();
+        LocalDate from = c.getStartDate();
+        BigDecimal moneyDays = Money.ZERO;
+        for (ClaimRepayment r : history) {
+            LocalDate to = r.getPaidDate().isAfter(ctx.today()) ? ctx.today() : r.getPaidDate();
+            if (to.isAfter(from) && out.signum() > 0) {
+                moneyDays = moneyDays.add(out.multiply(BigDecimal.valueOf(java.time.temporal.ChronoUnit.DAYS.between(from, to))));
+            }
+            out = out.subtract(r.getPrincipal());
+            if (to.isAfter(from)) from = to;
+        }
+        if (out.signum() > 0 && ctx.today().isAfter(from)) {
+            moneyDays = moneyDays.add(out.multiply(BigDecimal.valueOf(java.time.temporal.ChronoUnit.DAYS.between(from, ctx.today()))));
+        }
+        return Money.round(moneyDays.multiply(rate).divide(BigDecimal.valueOf(36500), 6, java.math.RoundingMode.HALF_UP));
     }
 
     /**

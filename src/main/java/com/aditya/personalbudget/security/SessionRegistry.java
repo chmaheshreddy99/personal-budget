@@ -71,7 +71,6 @@ public class SessionRegistry {
         session.setTokenHash(hash(token));
         session.setCreatedAt(now);
         session.setExpiresAt(now.plusHours(sessionHours));
-        session.setUserAgent(userAgent == null ? null : userAgent.substring(0, Math.min(200, userAgent.length())));
         session.setMobile(mobile ? Boolean.TRUE : null);
         sessions.save(session);
         return token;
@@ -93,7 +92,6 @@ public class SessionRegistry {
         session.setCreatedAt(now);
         LocalDateTime end = now.plusHours(sessionHours);
         session.setExpiresAt(end.isBefore(link.getExpiresAt()) ? end : link.getExpiresAt());
-        session.setUserAgent(userAgent == null ? null : userAgent.substring(0, Math.min(200, userAgent.length())));
         session.setMobile(!link.opensDesktop());
         session.setLinkId(link.getId());
         sessions.save(session);

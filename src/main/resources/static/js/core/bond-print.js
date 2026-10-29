@@ -20,13 +20,13 @@ const MARGINS = { narrow: [12, 14, 12, 18], normal: [16, 18, 14, 24], wide: [22,
 const HEAD = 7, FOOT_STRIP = 24, FOOT_PLAIN = 6, SLACK = 2.5;
 const ID_SIZES = { large: 1, medium: 0.75, small: 0.55 };
 const PREF = 'pb.bondPrint';
-const DEFAULTS = { pt: 12, lh: 1.5, margin: 'normal', ids: 'large', strip: true };
+const DEFAULTS = { pt: 12, lh: 1.5, margin: 'normal', ids: 'large', strip: true, copies: 1, thumbs: false };
 
 function loadPrefs() {
     try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(PREF) || '{}') }; } catch { return { ...DEFAULTS }; }
 }
 function savePrefs(o) {
-    try { localStorage.setItem(PREF, JSON.stringify({ pt: o.pt, lh: o.lh, margin: o.margin, ids: o.ids, strip: o.strip })); } catch { /* not kept */ }
+    try { localStorage.setItem(PREF, JSON.stringify({ pt: o.pt, lh: o.lh, margin: o.margin, ids: o.ids, strip: o.strip, copies: o.copies, thumbs: o.thumbs })); } catch { /* not kept */ }
 }
 
 /** The sheet: its size and padding (mm); the first sheet on real stamp paper is legal size with its printed top left blank. */
@@ -137,7 +137,7 @@ function sheetsHtml(pages, doc, o, { editable = false, breaks = new Set() } = {}
         }).join('');
         return `<section class="bp-sheet ${p.legal ? 'legal' : ''} ${p.over ? 'over' : ''}" style="width:${p.g.w}mm;height:${(p.g.h - 0.4).toFixed(1)}mm;padding:${t}mm ${r}mm ${b}mm ${l}mm;--bp-pt:${o.pt}pt;--bp-lh:${o.lh}">
             ${p.legal ? `<div class="bp-blank" style="height:${t - 4}mm"><span>Printed area of the stamp paper — left blank</span></div>` : ''}
-            <header class="bp-head"><span>${esc(doc.title || 'Agreement')}${doc.number ? ` · ${esc(doc.number)}` : ''}</span><span>Page ${i + 1} of ${n}</span></header>
+            <header class="bp-head"><span>${esc(doc.title || 'Agreement')}${doc.number ? ` · ${esc(doc.number)}` : ''}</span>${doc.copyLabel ? `<b class="bp-copy">${esc(doc.copyLabel)}</b>` : ''}<span>Page ${i + 1} of ${n}</span></header>
             <div class="bp-body" style="height:${(p.cap + SLACK).toFixed(2)}mm">${blocks}</div>
             <footer class="bp-foot ${o.strip ? '' : 'plain'}">${strip}<span class="bp-pno">${esc(doc.number || '')} · page ${i + 1} of ${n}</span></footer>
         </section>`;
@@ -183,7 +183,9 @@ function printSheets(html, title) {
 export async function openPrintView(source, title) {
     const doc0 = await withRatios(source);
     const o = loadPrefs();
-    let real = !!doc0.realStampPaper;
+    // paper: style (A4 in the stamp-paper style), real (real stamp paper) or plain (plain A4, e.g. a receipt with a revenue stamp)
+    let paper = doc0.realStampPaper ? 'real' : doc0.plainPaper ? 'plain' : 'style';
+    let revenue = !!doc0.revenueStamp;
     const breaks = new Set();
     const layer = document.createElement('div');
     layer.className = 'bp-layer';
@@ -192,12 +194,15 @@ export async function openPrintView(source, title) {
     const opt = (v, label, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${label}</option>`;
     layer.innerHTML = `<div class="bp-bar">
             <div class="bp-bar-title"><b>Print view</b><small data-meta></small></div>
-            <label>Paper<select data-o="paper">${opt('style', 'A4 · stamp-paper style', real ? 'real' : 'style')}${opt('real', 'Real stamp paper (1st sheet legal)', real ? 'real' : 'style')}</select></label>
+            <label>Paper<select data-o="paper">${opt('style', 'A4 · stamp-paper style', paper)}${opt('real', 'Real stamp paper (1st sheet legal)', paper)}${opt('plain', 'Plain A4 (sign by hand)', paper)}</select></label>
+            <label>Copies<select data-o="copies">${opt(1, 'One', o.copies)}${opt(2, 'Original + duplicate', o.copies)}</select></label>
             <label>Text<select data-o="pt">${[11, 12, 13, 14].map(v => opt(v, `${v} pt`, o.pt)).join('')}</select></label>
             <label>Spacing<select data-o="lh">${[[1.15, 'Single'], [1.5, '1.5 lines'], [2, 'Double']].map(([v, l]) => opt(v, l, o.lh)).join('')}</select></label>
             <label>Margins<select data-o="margin">${[['narrow', 'Narrow'], ['normal', 'Normal'], ['wide', 'Wide']].map(([v, l]) => opt(v, l, o.margin)).join('')}</select></label>
             <label>ID proofs<select data-o="ids">${[['large', 'Large (full width)'], ['medium', 'Medium'], ['small', 'Small']].map(([v, l]) => opt(v, l, o.ids)).join('')}</select></label>
             <label class="bp-check"><input type="checkbox" data-o="strip" ${o.strip ? 'checked' : ''}>Sign & seal on every page</label>
+            <label class="bp-check" title="A box for a revenue stamp at the signature, to sign across"><input type="checkbox" data-o="revenue" ${revenue ? 'checked' : ''}>Revenue stamp box</label>
+            <label class="bp-check" title="Left thumb impression boxes under both signatures"><input type="checkbox" data-o="thumbs" ${o.thumbs ? 'checked' : ''}>Thumb boxes</label>
             <div class="bp-bar-acts">
                 <button type="button" data-act="auto" title="Undo the page breaks made by hand">Auto layout</button>
                 <button type="button" class="primary" data-act="print">Print / Save PDF</button>
@@ -213,16 +218,20 @@ export async function openPrintView(source, title) {
     const holder = layer.querySelector('.bp-pages');
     const scroller = layer.querySelector('.bp-scroll');
     let pages = [];
-    const doc = () => ({ ...doc0, realStampPaper: real });
+    const doc = (copyLabel = '') => ({ ...doc0, realStampPaper: paper === 'real', plainPaper: paper === 'plain', revenueStamp: revenue,
+        thumbBoxes: doc0.thumbBoxes || o.thumbs, copyLabel });
+    const labels = () => Number(o.copies) === 2 ? [doc0.copyLabels?.[0] || 'ORIGINAL', doc0.copyLabels?.[1] || 'DUPLICATE'] : [''];
+    const allSheets = editable => labels().map(l => sheetsHtml(paginate(doc(l), o, breaks), doc(l), o, { editable, breaks })).join('');
+    const real = () => paper === 'real';
     const fit = () => {
         const avail = scroller.clientWidth - 24;
         holder.style.zoom = String(Math.min(1, avail / (216 * MM)));
     };
     const draw = () => {
         pages = paginate(doc(), o, breaks);
-        holder.innerHTML = sheetsHtml(pages, doc(), o, { editable: true, breaks });
+        holder.innerHTML = allSheets(true);
         const over = pages.filter(p => p.over).length;
-        layer.querySelector('[data-meta]').textContent = `${pages.length} page${pages.length === 1 ? '' : 's'} · ${real ? 'legal + A4' : 'A4'}`
+        layer.querySelector('[data-meta]').textContent = `${pages.length} page${pages.length === 1 ? '' : 's'}${Number(o.copies) === 2 ? ' × 2 copies' : ''} · ${real() ? 'legal + A4' : 'A4'}`
             + (breaks.size ? ` · ${breaks.size} page break${breaks.size === 1 ? '' : 's'} by hand` : '') + (over ? ' · a block is taller than a page' : '');
         fit();
     };
@@ -238,8 +247,10 @@ export async function openPrintView(source, title) {
     layer.addEventListener('change', e => {
         const k = e.target.dataset.o;
         if (!k) return;
-        if (k === 'paper') real = e.target.value === 'real';
-        else if (k === 'strip') o.strip = e.target.checked;
+        if (k === 'paper') paper = e.target.value;
+        else if (k === 'revenue') revenue = e.target.checked;
+        else if (k === 'strip' || k === 'thumbs') o[k] = e.target.checked;
+        else if (k === 'copies') o.copies = Number(e.target.value);
         else o[k] = ['pt', 'lh'].includes(k) ? Number(e.target.value) : e.target.value;
         savePrefs(o);
         draw();
@@ -256,7 +267,7 @@ export async function openPrintView(source, title) {
         if (act === 'close') close();
         else if (act === 'auto') { breaks.clear(); draw(); }
         else if (act === 'print') {
-            const html = sheetsHtml(pages, doc(), o);
+            const html = allSheets(false);
             if (!printSheets(html, title || doc0.title || 'Agreement')) {
                 layer.querySelector('.bp-tip').innerHTML = '<b class="bp-warn">Allow pop-ups for this site to print the agreement, then press Print again.</b>';
             }

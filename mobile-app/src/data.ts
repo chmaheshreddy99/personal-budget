@@ -87,6 +87,8 @@ export type Snapshot = {
   /** missing in a snapshot kept from an older server: then every section is assumed */
   features?: string[]; canRecord?: boolean;
   claims?: Claim[]; emis?: Emi[]; incomes?: ServerIncome[]; gifts?: Gift[];
+  /** balances as the admin set it for the user's role: NONE (shown), TAP (hidden until tapped), ALWAYS (never shown) */
+  balanceMask?: 'NONE' | 'TAP' | 'ALWAYS';
 };
 
 /** Is a section shared with the user? (an older server does not say: yes) */
@@ -177,11 +179,17 @@ export type Settings = {
   /** 'chosen': only the accounts in chosenAccounts are shown (and offered to pay from) */
   accountFilter: 'all' | 'chosen';
   chosenAccounts: number[];
+  /** quick unlock on this phone (pattern or PIN): the server's key, and a salted hash to check the code offline */
+  quick: QuickKey | null;
+  /** hide balances on this phone until tapped (the admin can also require it) */
+  hideBalances: boolean;
 };
+
+export type QuickKey = { deviceId: number; secret: string; kind: 'PIN' | 'PATTERN'; length: number; salt: string; verifier: string; failed: number };
 
 export const DEFAULT_SETTINGS: Settings = {
   serverUrl: '', username: '', token: null, userName: '', offline: false, storageMb: 5, historyDays: 90, smsEnabled: false, statementAccounts: 12,
-  showGroups: [], accountFilter: 'all', chosenAccounts: [],
+  showGroups: [], accountFilter: 'all', chosenAccounts: [], quick: null, hideBalances: false,
 };
 
 export const GROUP_LABELS: Record<Group, string> = { OWN: 'My accounts', CONSTRUCTION: 'Construction', HOSTED_CHIT: 'Host a Chit', EMI: 'EMIs' };
@@ -343,6 +351,22 @@ export async function login(serverUrl: string, username: string, password: strin
   const out = await request<{ token: string; user: { fullName?: string; username: string; mustChangePassword?: boolean } }>(
     { serverUrl, token: null }, '/api/auth/login', { method: 'POST', body: { username, password }, timeoutMs: 15000 });
   return { token: out.token, name: out.user?.fullName || out.user?.username || username };
+}
+
+/** Signs in with this phone's key and its pattern / PIN. */
+export async function quickLogin(serverUrl: string, q: QuickKey, code: string): Promise<{ token: string; name: string; username: string }> {
+  const out = await request<{ token: string; user: { fullName?: string; username: string } }>(
+    { serverUrl, token: null }, '/api/auth/quick-login', { method: 'POST', body: { deviceId: q.deviceId, secret: q.secret, code }, timeoutMs: 15000 });
+  return { token: out.token, name: out.user?.fullName || out.user?.username, username: out.user?.username };
+}
+
+/** Turns on quick unlock for the signed-in user: the server keeps a hash of the code, the phone the key. */
+export async function enableQuick(settings: Settings, kind: 'PIN' | 'PATTERN', code: string, deviceName: string): Promise<{ deviceId: number; secret: string }> {
+  return request(settings, '/api/auth/quick-unlock', { method: 'POST', body: { kind, code, deviceName }, timeoutMs: 15000 });
+}
+
+export async function disableQuick(settings: Settings, deviceId: number): Promise<void> {
+  await request(settings, `/api/auth/quick-unlock/${deviceId}`, { method: 'DELETE', timeoutMs: 10000 });
 }
 
 type SyncResult = { clientId: string; status: 'CREATED' | 'DUPLICATE' | 'PENDING' | 'FAILED'; entryId: number | null; entryNo: string | null;

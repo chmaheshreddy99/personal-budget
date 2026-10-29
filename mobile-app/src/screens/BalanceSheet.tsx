@@ -9,7 +9,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, CloudOff, Scale, TrendingDown, Tr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { SheetSection } from '../data';
-import { ago, date, money, moneyShort } from '../format';
+import { ago, date, moneyShort } from '../format';
 import { Card, Empty, GradientPanel, SectionTitle } from '../ui';
 import { colors, space } from '../theme';
 
@@ -32,7 +32,7 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
     if (!s) return null;
     return (
       <View key={s.label}>
-        <SectionTitle title={s.label} right={<Text style={[st.secTotal, { color: tone }]}>{money(s.total)}</Text>} />
+        <SectionTitle title={s.label} right={<Text style={[st.secTotal, { color: tone }]}>{app.bal(s.total)}</Text>} />
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           {s.groups.filter(g => g.accounts.length || g.total).map(g => {
             const k = `${s.label}:${g.label}`;
@@ -43,13 +43,13 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
                   <Text style={st.groupName} numberOfLines={1}>{g.label}</Text>
                   <Text style={st.count}>{g.accounts.length}</Text>
                   <View style={{ flex: 1 }} />
-                  <Text style={st.groupTotal}>{money(g.total)}</Text>
+                  <Text style={st.groupTotal}>{app.bal(g.total)}</Text>
                   {open[k] ? <ChevronDown color={colors.muted} size={16} /> : <ChevronRight color={colors.muted} size={16} />}
                 </Pressable>
                 {open[k] ? g.accounts.map(a => (
                   <View key={a.accountId} style={st.acc}>
                     <Text style={st.accName} numberOfLines={1}>{a.name}</Text>
-                    <Text style={st.accAmount}>{money(a.amount)}</Text>
+                    <Text style={st.accAmount}>{app.bal(a.amount)}</Text>
                   </View>
                 )) : null}
               </View>
@@ -77,11 +77,11 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
               <Text style={st.h}>Balance sheet</Text>
             </View>
             <Text style={st.label}>NET WORTH · {date(b.asOf).toUpperCase()}</Text>
-            <Text style={st.big}>{money(b.netWorth)}</Text>
+            <Text style={st.big}>{app.bal(b.netWorth)}</Text>
             {b.netWorthChange != null && b.netWorthChange !== 0 && b.previousNetWorth ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
                 {b.netWorthChange > 0 ? <TrendingUp color="#a8e3c2" size={14} /> : <TrendingDown color="#ffb4a0" size={14} />}
-                <Text style={{ color: b.netWorthChange > 0 ? '#a8e3c2' : '#ffb4a0', fontWeight: '700', fontSize: 12.5 }}>{money(b.netWorthChange)} since the last comparison</Text>
+                <Text style={{ color: b.netWorthChange > 0 ? '#a8e3c2' : '#ffb4a0', fontWeight: '700', fontSize: 12.5 }}>{app.bal(b.netWorthChange)} since the last comparison</Text>
               </View>
             ) : null}
             <View style={st.figs}>

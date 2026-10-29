@@ -1,13 +1,13 @@
 /** The app's building blocks: cards, a gradient header, icon bubbles, chips, buttons, fields and bottom sheets. */
 import React from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleProp, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, G, LinearGradient, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import {
   Banknote, Briefcase, Building2, Car, CreditCard, Gem, HandCoins, HardHat, HeartPulse, Home, Landmark, LucideIcon, PiggyBank, Plane, Receipt,
   ShoppingBag, ShoppingCart, Smartphone, Sparkles, Ticket, TrainFront, Utensils, Wallet, Wrench, Zap, Fuel, GraduationCap, Shirt, Gift, Film, Shield,
   Coffee, CalendarClock, Layers, BookOpen, Laptop, TrendingUp, Award, BadgePercent, Undo2, Tractor, Handshake, Presentation, Tag, Coins,
   Percent, Truck, Milk, Carrot, CarTaxiFront, SquareParking, Sofa, Users, Flame, Droplets, Tv, Pill as PillIcon, Dumbbell, Repeat, Flower2, Baby, PawPrint,
-  WashingMachine, Newspaper,
+  WashingMachine, Newspaper, Eye, EyeOff,
 } from 'lucide-react-native';
 import { accountTone, colors, radius, space } from './theme';
 
@@ -19,9 +19,10 @@ export function Card({ children, style, onPress }: { children: React.ReactNode; 
 }
 
 /** A navy-to-ocean gradient panel (the top of a screen). */
-export function GradientPanel({ children, style, from = colors.navy, to = colors.ocean }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; from?: string; to?: string }) {
+export function GradientPanel({ children, style, from = colors.navy, to = colors.ocean, square }:
+  { children: React.ReactNode; style?: StyleProp<ViewStyle>; from?: string; to?: string; square?: boolean }) {
   return (
-    <View style={[s.grad, style]}>
+    <View style={[s.grad, square && { borderRadius: 0 }, style]}>
       <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
         <Defs>
           <LinearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -33,6 +34,26 @@ export function GradientPanel({ children, style, from = colors.navy, to = colors
       </Svg>
       {children}
     </View>
+  );
+}
+
+/** The app's mark: a rupee on a soft glass tile (the sign-in and lock screens). */
+export function BrandMark({ size = 56 }: { size?: number }) {
+  return (
+    <View style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: 'rgba(255,255,255,0.16)', borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.28)', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: colors.white, fontSize: size * 0.52, fontWeight: '800', marginTop: -2 }}>₹</Text>
+    </View>
+  );
+}
+
+/** The eye beside a balance: shows or hides balances (when the admin allows it). */
+export function MaskToggle({ masked, onPress, color = colors.white, locked }: { masked: boolean; onPress: () => void; color?: string; locked?: boolean }) {
+  const Icon = masked ? EyeOff : Eye;
+  return (
+    <Pressable onPress={onPress} hitSlop={12} style={{ opacity: locked ? 0.5 : 0.9, padding: 2 }} accessibilityLabel={masked ? 'Show balances' : 'Hide balances'}>
+      <Icon color={color} size={18} />
+    </Pressable>
   );
 }
 
@@ -65,7 +86,27 @@ export function accountIcon(type: string, group?: string): LucideIcon {
   }
 }
 
+/** Cash, drawn in colour: a fan of rupee notes and a coin (cash accounts read as money at a glance). */
+export function CashArt({ size = 38 }: { size?: number }) {
+  return (
+    <View style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: '#eaf8f0', alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: 'rgba(47,158,102,0.22)' }}>
+      <Svg width={size * 0.86} height={size * 0.86} viewBox="0 0 48 48">
+        <G rotation={-14} origin="24, 24"><Rect x={5} y={13} width={34} height={19} rx={2.5} fill="#3fae72" stroke="#1f7a4d" strokeWidth={1} /></G>
+        <Rect x={7} y={15} width={34} height={19} rx={2.5} fill="#5cc48a" stroke="#1f7a4d" strokeWidth={1} />
+        <Rect x={9.5} y={17.5} width={29} height={14} rx={1.5} fill="none" stroke="#e9fbf1" strokeWidth={0.8} strokeDasharray="1.6 1.2" />
+        <Circle cx={24} cy={24.5} r={5.2} fill="#e9fbf1" opacity={0.9} />
+        <SvgText x={24} y={28} textAnchor="middle" fontSize={8.5} fontWeight="800" fill="#1f7a4d">₹</SvgText>
+        <Circle cx={36} cy={35.5} r={7} fill="#f2bf3a" stroke="#a87407" strokeWidth={1} />
+        <Circle cx={36} cy={35.5} r={4.9} fill="none" stroke="#a87407" strokeWidth={0.7} opacity={0.7} />
+        <SvgText x={36} y={38.4} textAnchor="middle" fontSize={7.5} fontWeight="800" fill="#8a5d00">₹</SvgText>
+      </Svg>
+    </View>
+  );
+}
+
 export function AccountBubble({ type, group, size }: { type: string; group?: string; size?: number }) {
+  if (type === 'CASH' && (!group || group === 'OWN')) return <CashArt size={size} />;
   const t = accountTone(type, group);
   return <IconBubble Icon={accountIcon(type, group)} fg={t.fg} bg={t.bg} size={size} />;
 }

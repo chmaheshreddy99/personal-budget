@@ -162,6 +162,13 @@ export function claimEntryRole(c, entryId) {
     return null;
 }
 
+/** Money given without interest: what it would have earned at the benchmark rate so far, greyed out. */
+function lostMini(c) {
+    if (Number(c.lostInterest || 0) < 1) return '';
+    return `<div class="cc-lost" title="What it would have earned at ${Number(c.benchmarkRate)}% a year (${esc(c.benchmarkBasis || '')}) since it was given, as it carries no interest">
+        ${mini('Interest lost', '−' + money(c.lostInterest), 'muted')}</div>`;
+}
+
 /** Where the item stands now, as small figures. */
 export function claimFiguresHtml(c) {
     const meta = KIND_META[c.kind] || KIND_META.LENT;
@@ -173,6 +180,7 @@ export function claimFiguresHtml(c) {
         ${c.interestRate ? mini('Interest due', money(c.interestDue), Number(c.interestDue) ? 'warn-text' : '') : ''}
         ${c.interestRate && c.postings.length ? mini('Interest posted', money(c.interestPosted)) : ''}
         ${open ? mini('Net payable', money(c.settlementAmount), 'strong') : mini('Closed', c.lastPaymentDate ? date(c.lastPaymentDate) : '—')}
+        ${lostMini(c)}
     </div>`;
 }
 

@@ -9,8 +9,10 @@ import { AppState, PermissionsAndroid, Platform, ToastAndroid } from 'react-nati
 import {
   Account, BalanceSheet, Budgets, Chit, DEFAULT_SETTINGS, Installment, LocalChitPayment, LocalExpense, LocalRecord, Meta, Settings, Snapshot, Statement, Upload,
   enforceLimit, fetchBalanceSheet, fetchBudgets, fetchStatement, liveBalance, login, normalizeUrl, store, syncNow, thisMonth, usage, visibleAccounts,
+  ApiError, QuickKey, disableQuick, enableQuick, quickLogin,
 } from './data';
-import { uuid } from './format';
+import { money, moneyShort, uuid } from './format';
+import { sha256 } from './sha256';
 import { PickedFile, RawSms, SmsPermissions, nativeFiles, nativeSettings, nativeSms, smsSupported } from './native';
 import { ParsedSms, parseSms } from './sms';
 
@@ -68,6 +70,33 @@ type AppContext = {
   readSms(body: string, sender?: string): ParsedSms | null;
   clearCache(): Promise<void>;
   notify(msg: string): void;
+  // ---- quick unlock (pattern / PIN) and the app lock
+  /** the app waits for the pattern / PIN (on opening, after a while in the background, or when the session ended) */
+  locked: boolean;
+  /** just signed in with the password and no quick unlock yet: offer to set one up */
+  offerQuick: boolean;
+  unlock(code: string): Promise<void>;
+  setupQuick(kind: 'PIN' | 'PATTERN', code: string): Promise<void>;
+  turnOffQuick(): Promise<void>;
+  skipQuick(): void;
+  /** forget the saved server address (sign in again from scratch) */
+  changeServer(): Promise<void>;
+  // ---- balances hidden on the phone
+  /** the admin's rule for the user's role */
+  balanceMask: 'NONE' | 'TAP' | 'ALWAYS';
+  masked: boolean;
+  toggleMask(): void;
+  /** a balance as shown: ₹ ••••• while masked */
+  bal(v: number | null | undefined, opts?: { short?: boolean; decimals?: number }): string;
+};
+
+/** After this long in the background the app locks again (when quick unlock is on). */
+const RELOCK_MS = 2 * 60 * 1000;
+const MAX_LOCAL_TRIES = 5;
+const randomSalt = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+const deviceName = () => {
+  const c: any = (Platform as any).constants || {};
+  return [c.Brand, c.Model].filter(Boolean).join(' ') || `${Platform.OS} phone`;
 };
 
 const Ctx = createContext<AppContext | null>(null);
@@ -97,6 +126,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [raw, setRaw] = useState<RawSms[]>([]);
   const [used, setUsed] = useState<Used>({ total: 0, cache: 0, statements: 0, evidence: 0 });
   const [perms, setPerms] = useState<SmsPermissions | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [offerQuick, setOfferQuick] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const backgroundAt = useRef<number | null>(null);
   // the latest values for callbacks that outlive a render (timers, events)
   const ref = useRef({ settings, queue, chitQueue, uploads, syncing, snapshot, records });
   ref.current = { settings, queue, chitQueue, uploads, syncing, snapshot, records };
@@ -147,9 +180,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await store.saveMeta(m);
       if (!quiet || out.sent || out.failed || out.uploaded || (!out.ok && out.message.startsWith('Please sign in'))) notify(out.message);
       if (out.message.startsWith('Please sign in')) {
-        const next = { ...s, token: null };
+        const next = { ...ref.current.settings, token: null };
         setSettings(next);
+        ref.current.settings = next;
         await store.saveSettings(next);
+        if (next.quick) setLocked(true);   // the pattern / PIN signs in again
       }
     } finally {
       setSyncing(false);
@@ -166,13 +201,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         store.balanceSheet(), store.budgets(), store.meta(), store.records()]);
       setSettings(s); setSnapshot(snap); setQueue(q); setChitQueue(cq); setUploads(ups); setSheet(bs); setBudgets(bg); setMeta(m); setRecords(rs);
       ref.current = { settings: s, queue: q, chitQueue: cq, uploads: ups, syncing: false, snapshot: snap, records: rs };
+      // with quick unlock on, the app opens locked
+      if (s.quick && s.serverUrl) setLocked(true);
       setReady(true);
       // the receiver's own switch follows the app's setting (it is what decides whether an SMS is caught)
       if (smsSupported && s.smsEnabled) nativeSms.setEnabled(true).catch(() => undefined);
       await loadSms();
       checkPerms();
       refreshUsage();
-      if (s.token && !s.offline) sync(true);
+      if (s.token && !s.offline && !(s.quick && s.serverUrl)) sync(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -180,7 +217,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- back to the front: sync and pick up SMS caught meanwhile; every minute while something waits
   useEffect(() => {
     const sub = AppState.addEventListener('change', st => {
+      if (st === 'background') { backgroundAt.current = Date.now(); setRevealed(false); return; }
       if (st !== 'active') return;
+      // back after a while: locked again
+      if (ref.current.settings.quick && backgroundAt.current && Date.now() - backgroundAt.current > RELOCK_MS) {
+        backgroundAt.current = null;
+        setLocked(true);
+        return;
+      }
+      backgroundAt.current = null;
       loadSms();
       checkPerms();
       if (ref.current.settings.token && !ref.current.settings.offline) sync(true);
@@ -210,11 +255,81 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const out = await login(url, username.trim(), password);
     await saveSettings({ serverUrl: url, username: username.trim(), token: out.token, userName: out.name });
     setOnline(true);
+    setLocked(false);
+    if (!ref.current.settings.quick) setOfferQuick(true);
     await sync(true);
   }, [saveSettings, sync]);
 
   const signOut = useCallback(async () => {
     await saveSettings({ token: null });
+    if (ref.current.settings.quick) setLocked(true);
+  }, [saveSettings]);
+
+  /**
+   * The pattern / PIN: checked on the phone first (so the app opens offline too), then, when the server answers, it
+   * signs in with the phone's key for a fresh session. Five wrong tries in a row on the phone, or a key the server
+   * switched off (a new password, too many wrong tries), turn quick unlock off: the password is needed.
+   */
+  const unlock = useCallback(async (code: string) => {
+    const s = ref.current.settings;
+    const q = s.quick;
+    if (!q) { setLocked(false); return; }
+    if (sha256(`${q.salt}|${code}`) !== q.verifier) {
+      const failed = (q.failed || 0) + 1;
+      if (failed >= MAX_LOCAL_TRIES) {
+        await saveSettings({ quick: null, token: null });
+        setLocked(false);
+        throw new Error('Too many wrong tries: sign in with your password');
+      }
+      await saveSettings({ quick: { ...q, failed } });
+      throw new Error(`Wrong ${q.kind === 'PIN' ? 'PIN' : 'pattern'} · ${MAX_LOCAL_TRIES - failed} ${MAX_LOCAL_TRIES - failed === 1 ? 'try' : 'tries'} left`);
+    }
+    if (!s.offline) {
+      try {
+        const out = await quickLogin(s.serverUrl, q, code);
+        await saveSettings({ token: out.token, userName: out.name || s.userName, username: out.username || s.username, quick: { ...q, failed: 0 } });
+        setOnline(true);
+      } catch (e: any) {
+        if (e instanceof ApiError && e.status === 401) {
+          // the server switched this key off: the password is needed again
+          await saveSettings({ quick: null, token: null });
+          setLocked(false);
+          throw new Error(e.message);
+        }
+        // the server is out of reach: open with what is on the phone
+        if (!s.token) throw new Error(`${e.message}. Connect to the internet to sign in.`);
+        if (q.failed) await saveSettings({ quick: { ...q, failed: 0 } });
+      }
+    } else if (q.failed) {
+      await saveSettings({ quick: { ...q, failed: 0 } });
+    }
+    setLocked(false);
+    setTimeout(() => sync(true), 200);
+  }, [saveSettings, sync]);
+
+  const setupQuick = useCallback(async (kind: 'PIN' | 'PATTERN', code: string) => {
+    const s = ref.current.settings;
+    if (s.quick) await disableQuick(s, s.quick.deviceId).catch(() => undefined);
+    const key = await enableQuick(s, kind, code, deviceName());
+    const salt = randomSalt();
+    const quick: QuickKey = { deviceId: key.deviceId, secret: key.secret, kind, length: code.length, salt, verifier: sha256(`${salt}|${code}`), failed: 0 };
+    await saveSettings({ quick });
+    setOfferQuick(false);
+  }, [saveSettings]);
+
+  const turnOffQuick = useCallback(async () => {
+    const s = ref.current.settings;
+    if (s.quick && s.token) await disableQuick(s, s.quick.deviceId).catch(() => undefined);
+    await saveSettings({ quick: null });
+  }, [saveSettings]);
+
+  const skipQuick = useCallback(() => setOfferQuick(false), []);
+
+  const changeServer = useCallback(async () => {
+    const s = ref.current.settings;
+    if (s.quick && s.token) await disableQuick(s, s.quick.deviceId).catch(() => undefined);
+    await saveSettings({ serverUrl: '', token: null, quick: null });
+    setLocked(false);
   }, [saveSettings]);
 
   const addEvidence = useCallback(async (target: EvidenceTarget, files: PickedFile[]) => {
@@ -401,11 +516,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).filter((x): x is ParsedSms => !!x).sort((a, b) => b.sms.at - a.sms.at);
   }, [raw, snapshot, queue, accounts]);
 
+  // ---- balances: the admin's rule for the role, then the phone's own choice; tapping shows them for this visit
+  const balanceMask = snapshot?.balanceMask || 'NONE';
+  const masked = balanceMask === 'ALWAYS' || ((balanceMask === 'TAP' || settings.hideBalances) && !revealed);
+  const toggleMask = useCallback(() => {
+    if (balanceMask === 'ALWAYS') { notify('Your admin keeps balances hidden on the phone'); return; }
+    setRevealed(r => !r);
+  }, [balanceMask]);
+  const bal = useCallback((v: number | null | undefined, opts: { short?: boolean; decimals?: number } = {}) =>
+    masked ? '₹ •••••' : opts.short ? moneyShort(v) : money(v, opts.decimals), [masked]);
+
   const value: AppContext = {
     ready, settings, snapshot, accounts, queue, chitQueue, records, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
     saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment,
     addRecord, removeRecord, balanceOf, loadSheet, loadBudgets,
     statement, dismissSms, scanInbox, enableSms, checkPerms, readSms, clearCache, notify,
+    locked, offerQuick, unlock, setupQuick, turnOffQuick, skipQuick, changeServer, balanceMask, masked, toggleMask, bal,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -1,6 +1,6 @@
 /** Colours, sizes and type, in the same family as the web app (ocean blues, navy, gold for gains). */
 export const colors = {
-  navy: '#0b2038',
+  navy: '#0a1d36',
   navy2: '#123a5e',
   ocean: '#0b7cbd',
   ocean2: '#3aa0dc',
@@ -17,17 +17,17 @@ export const colors = {
   redSoft: '#fdecec',
   green: '#11803e',
   greenSoft: '#e3f6ec',
-  bg: '#eef3f8',
+  bg: '#f2f5fa',
   card: '#ffffff',
-  sunken: '#f3f6fa',
-  line: '#dfe7ef',
+  sunken: '#f4f7fb',
+  line: '#e2e8f0',
   text: '#0f2233',
   text2: '#4b5d70',
   muted: '#8193a5',
   white: '#ffffff',
 };
 
-export const radius = { s: 8, m: 12, l: 16, xl: 22 };
+export const radius = { s: 8, m: 12, l: 18, xl: 24 };
 export const space = { xs: 4, s: 8, m: 12, l: 16, xl: 24 };
 
 /** The tone of an account by what it is. */
