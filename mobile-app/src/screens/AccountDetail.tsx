@@ -62,11 +62,12 @@ export function AccountDetail({ account, onBack, onAdd }: { account: Account; on
                 </View>
               </View>
               <Text style={st.label}>{card ? 'OUTSTANDING' : account.accountClass === 'LIABILITY' ? 'OWED' : 'BALANCE'}</Text>
-              <Text style={st.big}>{money(balance, card ? 2 : undefined)}</Text>
+              <Text style={st.big}>{app.bal(balance, account.id, card ? 2 : undefined)}</Text>
+              {app.isPrivate(account.id) ? <Text style={st.privateNote}>Kept private: long-press it on Accounts to show it once</Text> : null}
               <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                {card && account.creditLimit ? <Pill text={`Available ${money(account.creditLimit - balance, 2)}`} fg={colors.white} bg="rgba(255,255,255,0.16)" /> : null}
+                {card && account.creditLimit ? <Pill text={`Available ${app.bal(account.creditLimit - balance, account.id, 2)}`} fg={colors.white} bg="rgba(255,255,255,0.16)" /> : null}
                 {pending ? <Pill text={`${money(pending)} spent on the phone, waiting to sync`} fg="#ffd68a" bg="rgba(255,255,255,0.12)" Icon={Clock} /> : null}
-                <Pill text={`This month +${money(account.monthIn)} −${money(account.monthOut)}`} fg="rgba(255,255,255,0.85)" bg="rgba(255,255,255,0.12)" />
+                {app.isPrivate(account.id) || !app.balancesVisible ? null : <Pill text={`This month +${money(account.monthIn)} −${money(account.monthOut)}`} fg="rgba(255,255,255,0.85)" bg="rgba(255,255,255,0.12)" />}
               </View>
             </GradientPanel>
             {account.payFrom ? <Button title="Record an expense from it" Icon={Plus} kind="soft" onPress={() => onAdd(account)} /> : null}
@@ -138,6 +139,7 @@ export function AccountDetail({ account, onBack, onAdd }: { account: Account; on
 }
 
 const st = StyleSheet.create({
+  privateNote: { color: 'rgba(255,255,255,0.7)', fontSize: 11.5, marginTop: 2 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backText: { fontSize: 15, fontWeight: '700', color: colors.text },
   name: { color: colors.white, fontSize: 18, fontWeight: '800' },

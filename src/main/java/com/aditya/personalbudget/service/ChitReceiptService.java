@@ -118,7 +118,13 @@ public class ChitReceiptService {
     // ================================================================== views
 
     /** One paid installment of an acknowledgement. */
-    public record Line(int no, LocalDate dueDate, LocalDate paidDate, BigDecimal dueAmount, BigDecimal dividend, BigDecimal cash) {
+    public record Line(int no, LocalDate dueDate, LocalDate paidDate, BigDecimal dueAmount, BigDecimal dividend, BigDecimal cash,
+                       /* the account it was paid from, the payment's reference (UTR, cheque no.) and the journal entry: on requests made from now on */
+                       String paidFrom, String reference, String entryNo) {
+
+        public Line(int no, LocalDate dueDate, LocalDate paidDate, BigDecimal dueAmount, BigDecimal dividend, BigDecimal cash) {
+            this(no, dueDate, paidDate, dueAmount, dividend, cash, null, null, null);
+        }
     }
 
     /** What the payer sees: the request, its link, and the evidence once answered. */
@@ -169,9 +175,15 @@ public class ChitReceiptService {
     private final ActivityService activity;
     private final SecureRandom random = new SecureRandom();
 
+    private final com.aditya.personalbudget.repository.JournalEntryRepository entries;
+    private final com.aditya.personalbudget.repository.AccountRepository accounts;
+
     public ChitReceiptService(ChitReceiptAckRepository acks, ChitRepository chits, ChitInstallmentRepository installments,
                               ChitService chitService, EvidenceVault vault, AttachmentService files, AppSettingsService settings, OrganizationRepository tenants,
-                              ActivityService activity) {
+                              ActivityService activity, com.aditya.personalbudget.repository.JournalEntryRepository entries,
+                              com.aditya.personalbudget.repository.AccountRepository accounts) {
+        this.entries = entries;
+        this.accounts = accounts;
         this.acks = acks;
         this.chits = chits;
         this.installments = installments;
@@ -240,8 +252,13 @@ public class ChitReceiptService {
             chit.setOrganizerPhone(phone);
             chits.save(chit);
         }
-        List<Line> lines = picked.stream().map(i -> new Line(i.getInstallmentNo(), i.getDueDate(), i.getPaidDate(), i.getDueAmount(),
-                i.getDividend() == null ? BigDecimal.ZERO : i.getDividend(), i.getPaidAmount())).toList();
+        // each payment carries its own reference (a UTR or cheque no. typed with the payment), nothing of this app's books: the names of
+        // our accounts and our entry numbers mean nothing to the organizer and have no standing in the receipt
+        List<Line> lines = picked.stream().map(i -> {
+            var entry = i.getJournalEntryId() == null ? null : entries.findById(i.getJournalEntryId()).orElse(null);
+            return new Line(i.getInstallmentNo(), i.getDueDate(), i.getPaidDate(), i.getDueAmount(), i.getDividend() == null ? BigDecimal.ZERO : i.getDividend(), i.getPaidAmount(),
+                    null, plain(entry == null ? null : entry.getReference()), null);
+        }).toList();
         BigDecimal total = lines.stream().map(Line::cash).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         ChitReceiptAck a = new ChitReceiptAck();
@@ -846,7 +863,21 @@ public class ChitReceiptService {
 
     private static String encode(List<Line> lines) {
         return lines.stream().map(l -> l.no() + "|" + l.dueDate() + "|" + l.paidDate() + "|" + l.dueAmount().toPlainString() + "|"
-                + l.dividend().toPlainString() + "|" + l.cash().toPlainString()).collect(Collectors.joining("\n"));
+                + l.dividend().toPlainString() + "|" + l.cash().toPlainString()
+                + (l.paidFrom() == null && l.reference() == null && l.entryNo() == null ? ""
+                : "|" + java.util.Objects.toString(l.paidFrom(), "") + "|" + java.util.Objects.toString(l.reference(), "") + "|" + java.util.Objects.toString(l.entryNo(), "")))
+                .collect(Collectors.joining("\n"));
+    }
+
+    /** Text safe inside a line (no separator, no line break); null when empty. */
+    private static String plain(String v) {
+        if (v == null) return null;
+        String t = v.replace('|', '/').replace('\n', ' ').replace('\r', ' ').trim();
+        return t.isEmpty() ? null : t.length() > 80 ? t.substring(0, 80) : t;
+    }
+
+    private static String part(String[] p, int i) {
+        return p.length > i && !p[i].isBlank() ? p[i] : null;
     }
 
     static List<Line> decode(String lines) {
@@ -855,7 +886,7 @@ public class ChitReceiptService {
             String[] p = row.split("\\|");
             if (p.length < 6) continue;
             out.add(new Line(Integer.parseInt(p[0]), LocalDate.parse(p[1]), LocalDate.parse(p[2]), new BigDecimal(p[3]), new BigDecimal(p[4]),
-                    new BigDecimal(p[5])));
+                    new BigDecimal(p[5]), part(p, 6), part(p, 7), part(p, 8)));
         }
         return out;
     }

@@ -26,10 +26,10 @@ import { ChitsScreen } from './src/screens/Chits';
 import { BalanceSheetScreen } from './src/screens/BalanceSheet';
 import { BudgetScreen } from './src/screens/Budget';
 import { CategoriesScreen } from './src/screens/Categories';
-import { MorePage, MoreScreen } from './src/screens/More';
+import { MorePage, MoreScreen, morePageOn } from './src/screens/More';
 import { GiftsScreen } from './src/screens/Gifts';
 import { TransferSheet } from './src/screens/Transfer';
-import { mobileOn } from './src/data';
+import { hasFeature, mobileOn } from './src/data';
 
 type Tab = 'accounts' | 'expenses' | 'chits' | 'more';
 
@@ -66,10 +66,21 @@ function Shell() {
 
   // a new bank SMS: ask whether to record it (once per SMS)
   useEffect(() => {
-    if (!app.settings.smsEnabled || adding || prompt) return;
+    if (!app.settings.smsEnabled || !mobileOn(app.snapshot, 'SMS') || adding || prompt) return;
     const fresh = app.detected.find(p => !prompted.current.has(p.sms.id));
     if (fresh) { prompted.current.add(fresh.sms.id); setPrompt(fresh); }
   }, [app.detected, app.settings.smsEnabled, adding, prompt]);
+
+  // the tabs the household's settings leave on (Accounts, Expenses, Chits); More is always there
+  const tabsOn: Tab[] = [
+    ...(hasFeature(app.snapshot, 'ACCOUNTS') ? ['accounts' as Tab] : []),
+    ...(hasFeature(app.snapshot, 'EXPENSES') || hasFeature(app.snapshot, 'INCOME') ? ['expenses' as Tab] : []),
+    ...(mobileOn(app.snapshot, 'CHITS') ? ['chits' as Tab] : []),
+    'more' as Tab,
+  ];
+  const shownTab: Tab = tabsOn.includes(tab) ? tab : tabsOn[0];
+  const shownPage: MorePage | null = page && morePageOn(app.snapshot, page) ? page : null;
+  const smsOn = mobileOn(app.snapshot, 'SMS');
 
   if (!app.ready) return <View style={st.splash}><ActivityIndicator color={colors.ocean} size="large" /></View>;
   if (!app.settings.token) return <View style={{ flex: 1, backgroundColor: colors.bg }}><SetupScreen /></View>;
@@ -85,23 +96,24 @@ function Shell() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ flex: 1 }}>
         {account ? <AccountDetail account={account} onBack={() => setAccount(null)} onAdd={a => setAdding({ prefill: { paidFromId: a.id } })} />
-          : tab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }}
+          : shownTab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }}
               onTransfer={mobileOn(app.snapshot, 'TRANSFERS') && app.snapshot?.canRecord !== false ? () => setTransfer(true) : undefined}
               onRecord={app.snapshot?.canRecord !== false && (mobileOn(app.snapshot, 'EXPENSES') || mobileOn(app.snapshot, 'INCOME')) ? (mode: RecordMode) => setAdding({ prefill: { mode } }) : undefined}
               onChits={mobileOn(app.snapshot, 'CHITS') && app.snapshot?.canPayChits !== false && app.snapshot?.canRecord !== false ? () => setTab('chits') : undefined} />
-          : tab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
-          : tab === 'chits' ? <ChitsScreen />
-          : page === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />
-          : page === 'categories' ? <CategoriesScreen onBack={() => setPage(null)} />
-          : page === 'sheet' ? <BalanceSheetScreen onBack={() => setPage(null)} />
-          : page === 'gifts' ? <GiftsScreen onBack={() => setPage(null)} />
-          : page === 'sms' ? <DetectedScreen onRecord={record} onBack={() => setPage(null)} />
-          : page === 'settings' ? <SettingsScreen onBack={() => setPage(null)} />
+          : shownTab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
+          : shownTab === 'chits' ? <ChitsScreen />
+          : shownPage === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />
+          : shownPage === 'categories' ? <CategoriesScreen onBack={() => setPage(null)} />
+          : shownPage === 'sheet' ? <BalanceSheetScreen onBack={() => setPage(null)} />
+          : shownPage === 'gifts' ? <GiftsScreen onBack={() => setPage(null)} />
+          : shownPage === 'sms' ? <DetectedScreen onRecord={record} onBack={() => setPage(null)} />
+          : shownPage === 'settings' ? <SettingsScreen onBack={() => setPage(null)} />
           : <MoreScreen onOpen={setPage} />}
       </View>
       {/* the status bar keeps a solid background while the page scrolls under it */}
       <View pointerEvents="none" style={[st.statusStrip, { height: insets.top }]} />
-      <TabBar tab={tab} onTab={t => { setAccount(null); if (t === tab && t === 'more') setPage(null); setTab(t); }} onAdd={() => setAdding({})} smsCount={app.detected.length} chits={mobileOn(app.snapshot, 'CHITS')} />
+      <TabBar tab={shownTab} tabs={tabsOn} onTab={t => { setAccount(null); if (t === shownTab && t === 'more') setPage(null); setTab(t); }} onAdd={() => setAdding({})} smsCount={smsOn ? app.detected.length : 0}
+        canAdd={app.snapshot?.canRecord !== false && (hasFeature(app.snapshot, 'EXPENSES') || hasFeature(app.snapshot, 'INCOME'))} />
       <TransferSheet visible={transfer} onClose={() => setTransfer(false)} />
       <AddExpense visible={!!adding} onClose={() => setAdding(null)} prefill={adding?.prefill} editing={adding?.editing} />
       <SmsPrompt p={prompt} onLater={() => setPrompt(null)} onRecord={record} onDismiss={id => { app.dismissSms([id]); setPrompt(null); }} />
@@ -109,7 +121,7 @@ function Shell() {
   );
 }
 
-function TabBar({ tab, onTab, onAdd, smsCount, chits }: { tab: Tab; onTab: (t: Tab) => void; onAdd: () => void; smsCount: number; chits: boolean }) {
+function TabBar({ tab, tabs, onTab, onAdd, smsCount, canAdd }: { tab: Tab; tabs: Tab[]; onTab: (t: Tab) => void; onAdd: () => void; smsCount: number; canAdd: boolean }) {
   const insets = useSafeAreaInsets();
   const item = (key: Tab, label: string, Icon: any, badge = 0) => {
     const on = tab === key;
@@ -125,12 +137,12 @@ function TabBar({ tab, onTab, onAdd, smsCount, chits }: { tab: Tab; onTab: (t: T
   };
   return (
     <View style={[st.bar, { bottom: Math.max(insets.bottom, 10) }]}>
-      {item('accounts', 'Accounts', Landmark)}
-      {item('expenses', 'Expenses', Receipt)}
-      <Pressable onPress={onAdd} style={({ pressed }) => [st.fab, pressed && { transform: [{ scale: 0.95 }] }]}>
+      {tabs.includes('accounts') ? item('accounts', 'Accounts', Landmark) : null}
+      {tabs.includes('expenses') ? item('expenses', 'Expenses', Receipt) : null}
+      {canAdd ? <Pressable onPress={onAdd} style={({ pressed }) => [st.fab, pressed && { transform: [{ scale: 0.95 }] }]}>
         <Plus color={colors.white} size={28} strokeWidth={2.6} />
-      </Pressable>
-      {chits ? item('chits', 'Chits', HandCoins) : null}
+      </Pressable> : null}
+      {tabs.includes('chits') ? item('chits', 'Chits', HandCoins) : null}
       {item('more', 'More', LayoutGrid, smsCount)}
     </View>
   );

@@ -120,7 +120,14 @@ function linesHtml() {
     if (isSimple()) {
         return `<div class="cr-chips">${r.lines.map(l => `<span><b>#${l.no}</b>${day(l.paidDate)}<i>${money(l.cash)}</i></span>`).join('')}</div>`;
     }
-    const note = r.paymentNote ? `<p class="cr-note"><b>${isPayout() ? 'Payout' : 'Payment'} details given by ${esc(r.payerName)}:</b> ${esc(r.paymentNote)}</p>` : '';
+    // "UPI · ref 4411 · from HDFC Savings · note": how it was paid, laid out so it can be checked against the bank before signing
+    const parts = String(r.paymentNote || '').split(' · ').map(x => x.trim()).filter(Boolean);
+    const mode = parts.find(x => ['UPI', 'Bank transfer', 'Cash', 'Cheque', 'Card'].includes(x));
+    const ref = parts.find(x => /^ref /i.test(x))?.slice(4), from = parts.find(x => /^from /i.test(x))?.slice(5);
+    const rest = parts.filter(x => x !== mode && !/^ref /i.test(x) && !/^from /i.test(x));
+    const note = r.paymentNote ? `<div class="cr-paid"><b>${isPayout() ? 'How the payout was paid' : 'How it was paid'}, as ${esc(r.payerName)} says</b>
+        <dl>${mode ? `<dt>Paid by</dt><dd>${esc(mode)}</dd>` : ''}${ref ? `<dt>Reference</dt><dd>${esc(ref)}</dd>` : ''}${rest.length ? `<dt>Note</dt><dd>${esc(rest.join(' · '))}</dd>` : ''}</dl>
+        ${ref ? '<small>Check the reference against your bank statement or UPI app before you sign.</small>' : ''}</div>` : '';
     if (!isPayout()) return linesTable(r.lines, { first: 'Paid on', last: 'You received', installments: true }) + note;
     return `<h3 class="cr-h">The payout you paid</h3>${linesTable(r.lines, { first: 'Paid on', last: 'Paid by you', installments: false })}${note}
         <h3 class="cr-h">Installments received by you (restated)</h3>${linesTable(r.installLines, { first: 'Paid on', last: 'You received', installments: true })}

@@ -13,6 +13,8 @@ public enum AccountType {
     CASH(AccountClass.ASSET, "Cash", true),
     BANK(AccountClass.ASSET, "Bank Account", true),
     WALLET(AccountClass.ASSET, "Digital Wallet", true),
+    /** A meal / food card loaded by the employer (Pluxee, Sodexo, Zeta, Edenred): spent like a wallet, at restaurants and on groceries. */
+    MEAL_CARD(AccountClass.ASSET, "Meal Card", true),
     FIXED_DEPOSIT(AccountClass.ASSET, "Fixed Deposit", false),
     RECURRING_DEPOSIT(AccountClass.ASSET, "Recurring Deposit", false),
     SAVINGS_SCHEME(AccountClass.ASSET, "PPF / EPF / NPS", false),

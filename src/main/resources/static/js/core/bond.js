@@ -312,7 +312,7 @@ export function bondBlocks(doc) {
     const add = (id, html, extra = {}) => front.push({ id, html, ...extra });
     const stamp = stampHtml(doc);
     if (stamp) add('stamp', stamp, { keep: true });
-    add('title', `<h1 class="bond-title">${esc(doc.title)}</h1><p class="bond-no">${esc(doc.number || '')}</p>`, { keep: true });
+    add('title', `${doc.copyLabel ? `<p class="bond-copy">${esc(doc.copyLabel)}</p>` : ''}<h1 class="bond-title">${esc(doc.title)}</h1><p class="bond-no">${esc(doc.number || '')}</p>`, { keep: true });
     if (doc.kind) {
         add('pre-1', `<p class="bond-pre">This <b>${esc(String(doc.title || 'Agreement').toUpperCase())}</b> (the “Agreement”) is made and executed at
             <b>${esc(doc.place || '____________________')}</b> on this <b>${esc(DAY(doc.date) || '____________')}</b>,</p>`, { keep: true });
@@ -341,6 +341,15 @@ export function bondBlocks(doc) {
     if (doc.particulars?.length) {
         add('facts-h', `<p class="bond-sub">Particulars of this Agreement</p>`, { keep: true });
         add('facts', `<table class="bond-facts"><tbody>${doc.particulars.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`);
+    }
+    // a table of payments: one block a row (same columns), so a long one runs onto the next sheet between rows, never through one
+    if (doc.payments?.rows?.length) {
+        const p = doc.payments;
+        const cols = `<colgroup>${p.widths.map(w => `<col style="width:${w}%">`).join('')}</colgroup>`;
+        const cell = (v, i) => `<td class="${p.right?.includes(i) ? 'r' : ''}">${v ?? ''}</td>`;
+        add('pay-h', `<p class="bond-sub">${esc(p.title)}</p><table class="bond-pay">${cols}<thead><tr>${p.head.map((h, i) => `<th class="${p.right?.includes(i) ? 'r' : ''}">${esc(h)}</th>`).join('')}</tr></thead></table>`, { keep: true });
+        p.rows.forEach((r, i) => add(`pay-${i}`, `<table class="bond-pay cont">${cols}<tbody><tr>${r.map(cell).join('')}</tr></tbody></table>`));
+        if (p.foot) add('pay-f', `<table class="bond-pay cont foot">${cols}<tbody><tr>${p.foot.map(cell).join('')}</tr></tbody></table>${p.note ? `<p class="bond-pay-note">${p.note}</p>` : ''}`);
     }
     add('witnesseth', doc.kind
         ? `<p class="bond-pre"><b>NOW, THEREFORE, THIS AGREEMENT WITNESSETH</b> and it is hereby agreed by and between the Parties as follows:</p>`

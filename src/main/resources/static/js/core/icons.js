@@ -93,6 +93,18 @@ const PATHS = {
     stack: '<rect x="3" y="3" width="18" height="6" rx="1.5"/><rect x="3" y="15" width="18" height="6" rx="1.5"/><path d="M7 12h10"/>',
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
     cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.5L22 8H6"/>',
+    /** A meal card: a card with a fork and spoon on it. */
+    'meal-card': '<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 9.5h20"/><path d="M8 12.5v4M6.8 12.5v1.6a1.2 1.2 0 0 0 2.4 0v-1.6"/><path d="M12.5 16.5v-4m0 0c1.2 0 1.6.9 1.6 1.6s-.4 1.4-1.6 1.4"/><path d="M16.5 13h2.5M16.5 15.5h1.6"/>',
+    /** Meat, fish & eggs: a drumstick, with a small fish. */
+    meat: '<path d="M15.4 3.2a5 5 0 0 1 2.9 8.7l-2.2 2.2a4 4 0 0 1-3.3 1.1l-2.3 2.3a1.6 1.6 0 1 1-1.9 2.6 1.6 1.6 0 1 1-2.6-1.9 1.6 1.6 0 1 1 2.6-1.9l2.3-2.3a4 4 0 0 1 1.1-3.3l2.2-2.2a5 5 0 0 1 1.2-5.3z"/><path d="M14 6.5c.8-.8 2-.8 2.8 0"/>',
+    /** Music & dance classes: two beamed notes and a small dancing figure. */
+    'music-dance': '<path d="M9 17V5l9-2v12"/><circle cx="6.5" cy="17" r="2.5"/><circle cx="15.5" cy="15" r="2.5"/><path d="M9 9l9-2"/>',
+    /** Office travel: a cabin bag with its handle and a small plane over it. */
+    'office-travel': '<rect x="5" y="9" width="14" height="12" rx="2"/><path d="M9 9V6.5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6.5V9"/><path d="M5 14h14"/><path d="M10.5 14v2M13.5 14v2"/><path d="M8 21v1M16 21v1"/>',
+    /** Electricity bill: a light bulb with a bolt in it. */
+    electricity: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/><path d="m12.8 6.5-2.3 3.6h3l-2.3 3.4"/>',
+    /** Fuel: a pump with its hose and nozzle, and a drop. */
+    'fuel-pump': '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><rect x="6.5" y="6" width="5" height="4" rx=".8"/><path d="M14 9h1.5a2 2 0 0 1 2 2v5.5a1.5 1.5 0 0 0 3 0V9.5L18 7"/><path d="M20.5 9.5V7.6L19 6"/><path d="M9 13.5c0 1-.7 1.7-1.5 1.7S6 14.5 6 13.5c0-.9 1.5-2.5 1.5-2.5s1.5 1.6 1.5 2.5z"/>',
     bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
     fuel: '<path d="M3 22V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v17"/><path d="M2 22h13"/><path d="M14 10h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/><path d="M6 8h5"/>',
@@ -137,8 +149,12 @@ const PATHS = {
 export function categoryIcon(name = '') {
     const rules = [
         // the specific ones first: "Food Delivery" is not groceries, "Commission & Brokerage" is not a chit
+        [/music|dance|danc|singing|guitar|keyboard class|veena|bharatanatyam|kuchipudi/i, 'music-dance', 'violet'],
+        [/office travel|business travel|work trip|official travel/i, 'office-travel', 'aqua'],
+        [/electricity|power bill|current bill/i, 'electricity', 'gold'], [/^fuel$|^fuel\b(?! &)|petrol|diesel|\bcng\b/i, 'fuel-pump', 'coral'],
+        [/meat|fish|chicken|mutton|non.?veg|seafood|\beggs?\b|prawn/i, 'meat', 'red'],
         [/chit/i, 'chit', 'gold'], [/\btips?\b|gratuity/i, 'heart', 'coral'], [/milk|dairy/i, 'milk', 'aqua'], [/maid|household help|cook|driver/i, 'users', 'violet'],
-        [/gym|fitness|yoga|sport/i, 'dumbbell', 'coral'], [/gadget|electronic|laptop|computer/i, 'monitor', 'violet'],
+        [/gym|fitness|yoga|\bsports?\b/i, 'dumbbell', 'coral'], [/gadget|electronic|laptop|computer/i, 'monitor', 'violet'],
         [/vegetable|fruit/i, 'leaf', 'aqua'], [/agricult|farm|crop/i, 'leaf', 'gold'], [/food deliver|swiggy|zomato|takeaway/i, 'utensils', 'coral'],
         [/snack|beverage|tea|coffee|bakery/i, 'utensils', 'gold'], [/subscription|ott/i, 'repeat', 'violet'],
         [/lpg|cylinder/i, 'fuel', 'gold'], [/water can|drinking water/i, 'droplet', 'aqua'], [/dth|cable/i, 'film', 'violet'],
@@ -235,7 +251,7 @@ export function hydrateIcons(root = document) {
 /** The icon and color family that represents an account type. */
 export function accountTypeIcon(type) {
     const map = {
-        CASH: ['cash-note', 'art'], BANK: ['bank', ''], WALLET: ['wallet-cash', 'art'],
+        CASH: ['cash-note', 'art'], BANK: ['bank', ''], WALLET: ['wallet-cash', 'art'], MEAL_CARD: ['meal-card', 'aqua'],
         FIXED_DEPOSIT: ['lock', 'violet'], RECURRING_DEPOSIT: ['repeat', 'violet'], SAVINGS_SCHEME: ['piggy', 'violet'],
         MUTUAL_FUND: ['trending', 'violet'], STOCKS: ['trending', 'violet'], BONDS: ['report', 'violet'],
         GOLD: ['gem', 'gold'], SILVER: ['gem', 'gray'], REAL_ESTATE: ['home', ''], VEHICLE: ['car', 'gray'],

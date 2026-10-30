@@ -22,7 +22,7 @@ import java.util.Set;
 @Service
 public class ExpenseFormService {
 
-    private static final Set<String> PAYERS = Set.of("BANK", "CASH", "WALLET", "CREDIT_CARD");
+    private static final Set<String> PAYERS = Set.of("BANK", "CASH", "WALLET", "MEAL_CARD", "CREDIT_CARD");
 
     public record Option(Long id, String name, String type, String typeLabel, boolean system) {
     }

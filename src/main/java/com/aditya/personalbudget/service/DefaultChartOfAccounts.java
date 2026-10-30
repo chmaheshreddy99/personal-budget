@@ -130,6 +130,11 @@ public final class DefaultChartOfAccounts {
             new CategoryTemplate("5420", "Newspaper & Magazines", CategoryKind.EXPENSE, null, null),
             new CategoryTemplate("5430", "Tips & Gratuity", CategoryKind.EXPENSE, null,
                     "Tips to delivery partners, waiters, drivers, salon and hotel staff"),
+            new CategoryTemplate("5440", "Music & Dance Classes", CategoryKind.EXPENSE, null, "Music, dance, singing and instrument classes, recitals"),
+            new CategoryTemplate("5450", "Office Travel", CategoryKind.EXPENSE, null, "Work trips: tickets, hotels, local travel and meals to claim back"),
+            new CategoryTemplate("5460", "Electricity Bill", CategoryKind.EXPENSE, null, "The monthly power bill, prepaid meter recharges"),
+            new CategoryTemplate("5470", "Fuel", CategoryKind.EXPENSE, null, "Petrol, diesel and CNG for your vehicles"),
+            new CategoryTemplate("5480", "Meat, Fish & Eggs", CategoryKind.EXPENSE, null, "Chicken, mutton, fish, prawns and eggs: Licious, FreshToHome, the butcher, the fish market"),
             new CategoryTemplate("5990", "Miscellaneous", CategoryKind.EXPENSE, MISC_EXPENSE, null)
     );
 

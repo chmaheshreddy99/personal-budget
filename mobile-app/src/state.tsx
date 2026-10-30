@@ -74,6 +74,8 @@ type AppContext = {
   /** the household made it private: the phone cannot undo that */
   privateByHousehold(accountId: number): boolean;
   togglePrivate(accountId: number): Promise<void>;
+  /** a total over these accounts: dots when balances are hidden or any of them is private (the total would give it away) */
+  balAll(amount: number, accountIds: (number | null | undefined)[], short?: boolean): string;
   /** an amount as text, or dots when it is hidden; id is the account it is the balance of (for the above-the-limit rule) */
   bal(amount: number, accountId?: number, decimals?: number): string;
   balShort(amount: number, accountId?: number): string;
@@ -436,6 +438,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     || (hideAbove != null && Math.abs(amount) > hideAbove && (id == null || !revealed.includes(id)));
   const bal = (amount: number, id?: number, decimals?: number) => (masked(amount, id) ? '••••••' : money(amount, decimals));
   const balShort = (amount: number, id?: number) => (masked(amount, id) ? '••••' : moneyShort(amount));
+  const balAll = (amount: number, ids: (number | null | undefined)[], short = false) =>
+    (!balancesVisible || ids.some(id => id != null && isPrivate(id)) ? (short ? '••••' : '••••••') : short ? moneyShort(amount) : money(amount));
   const net = (amount: number) => (mobile?.maskNetWorth ? 'Hidden' : masked(amount) ? '••••••' : money(amount));
 
   // an SMS is matched to the accounts shown first, then to any of my own
@@ -469,7 +473,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppContext = {
     ready, settings, snapshot, accounts, queue, chitQueue, records, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
     saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment,
-    addRecord, removeRecord, balanceOf, locked: locked && !!settings.token && settings.deviceLock !== false, unlock, lockNow, loadSheet, loadBudgets, balancesVisible, showBalances, hideBalances, reveal, isPrivate, privateByHousehold: byHousehold, togglePrivate, bal, balShort, net,
+    addRecord, removeRecord, balanceOf, locked: locked && !!settings.token && settings.deviceLock !== false, unlock, lockNow, loadSheet, loadBudgets, balancesVisible, showBalances, hideBalances, reveal, isPrivate, privateByHousehold: byHousehold, togglePrivate, balAll, bal, balShort, net,
     statement, dismissSms, scanInbox, enableSms, checkPerms, readSms, clearCache, notify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -955,7 +955,7 @@ function quickActions(a) {
     // what is owed on an EMI is paid, undone or paid off only with its plan
     if (a.emiAccount) return [['emi', 'calendar', 'Manage the EMI', 'Pay, undo or pay off in Expenses › EMIs']];
     const t = a.accountType;
-    if (['BANK', 'CASH', 'WALLET'].includes(t)) return [['spend', 'arrow-out', 'Spend', 'Expense paid from this account'],
+    if (['BANK', 'CASH', 'WALLET', 'MEAL_CARD'].includes(t)) return [['spend', 'arrow-out', 'Spend', 'Expense paid from this account'],
         ['receive', 'arrow-in', 'Receive', 'Income into this account'], ['out', 'transfer', 'Transfer', 'Move money to another account']];
     if (t === 'CREDIT_CARD') return [['spend', 'arrow-out', 'Spend', 'Expense on this card'], ['in', 'check', 'Pay bill', 'Pay the card from a bank account']];
     if (t === 'RECEIVABLE' || t === 'LOAN_GIVEN') return [['lend', 'hand', 'Lend', 'Lent or paid for someone']];

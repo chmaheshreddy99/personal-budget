@@ -175,7 +175,7 @@ function suggestionsCard(bs, accounts) {
     const add = (rank, tone, iconName, html, href) => items.push({ rank, html: `<a class="insight ${tone} clickable" href="${href}">${icon(iconName)}<div>${html}</div></a>` });
     const spend = Number(bs.averageMonthlyExpense || 0);
     const months = bs.emergencyFundMonths === null ? null : Number(bs.emergencyFundMonths);
-    const liquid = accounts.filter(a => ['CASH', 'BANK', 'WALLET'].includes(a.accountType)).reduce((s, a) => s + Number(a.balance), 0);
+    const liquid = accounts.filter(a => ['CASH', 'BANK', 'WALLET', 'MEAL_CARD'].includes(a.accountType)).reduce((s, a) => s + Number(a.balance), 0);
     accounts.filter(a => ['BANK', 'WALLET', 'CASH'].includes(a.accountType) && Number(a.balance) < 0).forEach(a =>
         add(0, 'bad', 'alert-circle', `<b>${esc(a.name)}</b> is overdrawn by ${money(-Number(a.balance))}. Move money in or check for a missing entry.`, '#/accounts'));
     if (months !== null && months < 6 && spend) add(1, months < 3 ? 'bad' : 'warn', 'droplet',

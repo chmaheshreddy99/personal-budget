@@ -59,6 +59,10 @@ budget:
       read-cache-seconds: -1
       # on the first start against an empty spreadsheet, copy the tables in data-dir into it
       import-local-data: false
+  statements:
+    # When the monthly statements (Settings > Statements) are checked and sent: every morning at 7 by default; each
+    # subscription goes out on its own day of the month, for the month before. A day the server was off is caught up.
+    cron: "0 0 7 * * *"
   security:
     # Roles are always enforced: see RolePolicy for who may do what. A viewer can only read.
     session-hours: 12

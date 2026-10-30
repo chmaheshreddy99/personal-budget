@@ -336,3 +336,24 @@
 .bond-sig-ok { display: block; margin-top: 3px; color: #0b7a3b; font-size: 10.5px; }
 .bond-sig-note { display: block; margin-top: 3px; color: #5f6b77; font-size: 10px; line-height: 1.3; }
 .bond-facts.ev td { overflow-wrap: anywhere; min-width: 0; }
+
+/* the payments table of an acknowledgement, and the copy label */
+.bond-copy { margin: 0 0 4px; text-align: right; font: 700 10px/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #8a6d1d; }
+.bond-copy::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #c99a3b; margin-right: 6px; vertical-align: 1px; }
+.bond-pay { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; font-family: system-ui, sans-serif; margin: 0; }
+.bond-pay th, .bond-pay td { border: 1px solid var(--line, #d9d2bd); padding: 4px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.bond-pay th { background: #f6f3e8; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.bond-pay .r { text-align: right; font-variant-numeric: tabular-nums; }
+.bond-pay.cont { margin-top: -1px; } .bond-pay.foot td { font-weight: 700; background: #f6f3e8; }
+.bond-pay small { display: block; color: #6b6450; font-size: 9.5px; }
+.bond-pay-note { margin: 4px 0 10px; font: 10.5px/1.4 system-ui, sans-serif; color: #5f5a48; }
+
+/* the payments table, tighter: one line a row, dates kept whole, a clean ruled look */
+.bond-pay { font-size: 11px; line-height: 1.25; }
+.bond-pay th, .bond-pay td { padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-color: #ddd5bf; }
+.bond-pay th { font-size: 9px; letter-spacing: .05em; padding-top: 4px; padding-bottom: 4px; color: #4a4434; }
+.bond-pay td:first-child, .bond-pay th:first-child { text-align: center; }
+.bond-pay.cont tbody tr td { border-top-color: #ece6d6; }
+.bond-pay.foot td { border-top: 1.5px solid #8a7d58; }
+.bp-body .bond-pay { font-size: 10pt; } .bp-body .bond-pay th { font-size: 8pt; }
+.bp-blk:has(> table.bond-pay:last-child) { padding-bottom: 0; } .bp-blk:has(> .bond-pay-note) { padding-bottom: 0.45em; }

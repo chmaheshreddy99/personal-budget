@@ -38,6 +38,7 @@ export function accountTone(type: string, group?: string): { fg: string; bg: str
   switch (type) {
     case 'CREDIT_CARD': return { fg: colors.coral, bg: colors.coralSoft };
     case 'CASH': case 'WALLET': return { fg: colors.aqua, bg: colors.aquaSoft };
+    case 'MEAL_CARD': return { fg: colors.coral, bg: colors.coralSoft };
     case 'BANK': return { fg: colors.ocean, bg: colors.oceanSoft };
     case 'PAYABLE': case 'LOAN': case 'HOME_LOAN': case 'VEHICLE_LOAN': case 'PERSONAL_LOAN': case 'GOLD_LOAN': case 'EDUCATION_LOAN':
       return { fg: colors.red, bg: colors.redSoft };

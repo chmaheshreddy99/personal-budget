@@ -28,6 +28,28 @@ const STATUS = {
 };
 const LINK = { NONE: 'No link', ACTIVE: 'Link active', EXPIRED: 'Link expired', REVOKED: 'Link stopped', LOCKED: 'Link locked' };
 const DURATIONS = [[24, '1 day'], [72, '3 days'], [168, '1 week'], [720, '30 days']];
+/** How a payment can be made, with its icon; the payment note reads "UPI · ref 4411 · from HDFC Savings · note". */
+const MODES = [['UPI', 'phone'], ['Bank transfer', 'bank'], ['Cash', 'wallet'], ['Cheque', 'journal'], ['Card', 'card']];
+const modeIcon = m => MODES.find(([k]) => k === m)?.[1] || 'receipt';
+
+/** The payment note split into its parts: mode, reference, the account it came from, anything else. */
+export function paymentParts(note) {
+    const parts = { mode: null, ref: null, from: null, rest: [] };
+    String(note || '').split(' · ').map(x => x.trim()).filter(Boolean).forEach(x => {
+        if (!parts.mode && MODES.some(([k]) => k === x)) parts.mode = x;
+        else if (!parts.ref && /^ref /i.test(x)) parts.ref = x.slice(4);
+        else if (!parts.from && /^from /i.test(x)) parts.from = x.slice(5);
+        else parts.rest.push(x);
+    });
+    return parts;
+}
+
+/** The payment note as chips (empty when there is none). */
+export function paymentChips(note) {
+    if (!note) return '';
+    const p = paymentParts(note);
+    return `<span class="rc-pay">${p.mode ? `<span class="rc-pchip mode">${icon(modeIcon(p.mode))}${esc(p.mode)}</span>` : ''}${p.ref ? `<span class="rc-pchip">${icon('tag')}Ref ${esc(p.ref)}</span>` : ''}${p.rest.map(r => `<span class="rc-pchip plain">${esc(r)}</span>`).join('')}</span>`;
+}
 const tenDigits = v => String(v || '').replace(/\D/g, '').slice(-10);
 export const isFinal = a => a?.status === 'ACKNOWLEDGED' || a?.status === 'SIGNED';
 const isPayout = a => a.kind === 'PAYOUT';
@@ -73,8 +95,14 @@ function recipientHtml(chit, { noteLabel = 'How it was paid', notePlaceholder = 
                 ${contacts ? `<button type="button" class="btn sm" data-rc-contact title="Choose from your phone's contacts">${icon('users')}Contacts</button>` : ''}</span>
                 ${contacts ? '' : '<small class="hint muted">Type it, or open this page on your phone to pick from your contacts.</small>'}</label>
             <label class="field"><span>Your name <small class="muted">as the one who paid</small></span><input name="payerName" maxlength="100" value="${esc(state.user?.fullName || '')}" data-plain></label>
-            <label class="field"><span>${noteLabel} <small class="muted">optional</small></span><input name="paymentNote" maxlength="200" data-plain placeholder="${esc(notePlaceholder)}"></label>
         </div>
+        <div class="rc-paybox"><div class="rc-paybox-head"><b>${icon('receipt')}${noteLabel}</b><small class="muted">shown to the organizer before signing · optional</small></div>
+            <div class="seg-chips sm rc-modes" data-rc-mode>${MODES.map(([k, ic]) => `<button type="button" class="seg-chip" data-value="${k}">${icon(ic)}${k}</button>`).join('')}</div>
+            <div class="form-grid two">
+                <label class="field"><span>Reference <small class="muted">UTR, txn id, cheque no.</small></span><input name="payRef" maxlength="40" data-plain placeholder="${esc(notePlaceholder)}"></label>
+                <label class="field"><span>Anything else</span><input name="payExtra" maxlength="80" data-plain placeholder="e.g. paid at the office"></label>
+            </div>
+            <p class="rc-paypreview small muted" data-rc-paypreview></p></div>
         <div class="rc-opts">
             <div><b>The link works for</b><div class="seg-chips sm" data-rc-hours>${DURATIONS.map(([h, l]) => `<button type="button" class="seg-chip ${h === 72 ? 'active' : ''}" data-value="${h}">${l}</button>`).join('')}</div></div>
             <label class="cs-check"><input type="checkbox" name="rememberPhone" ${hasPhone ? '' : 'checked'}> Save this number on the chit</label>
@@ -84,8 +112,31 @@ function recipientHtml(chit, { noteLabel = 'How it was paid', notePlaceholder = 
 }
 
 /** Hours chips and the phone's contact chooser inside a dialog's form. */
+/** The payment note from the structured fields: "UPI · ref 4411 · from HDFC Savings · paid at the office". */
+function paymentNoteOf(form) {
+    const mode = form.querySelector('[data-rc-mode] .active')?.dataset.value;
+    return [mode, form.payRef.value.trim() && `ref ${form.payRef.value.trim()}`, form.payExtra.value.trim()]
+        .filter(Boolean).join(' · ').slice(0, 200);
+}
+
 function bindRecipient(form) {
+    form.rcPreview = () => {
+        const note = paymentNoteOf(form);
+        form.querySelector('[data-rc-paypreview]').innerHTML = note ? `The organizer sees: ${paymentChips(note)}` : 'Pick how it was paid and add the reference: the organizer sees it before signing.';
+    };
+    form.addEventListener('input', e => {
+        if (!['payRef', 'payExtra'].includes(e.target.name)) return;
+        form.rcPreview();
+    });
+    form.rcPreview();
     form.addEventListener('click', async e => {
+        const mode = e.target.closest('[data-rc-mode] [data-value]');
+        if (mode) {
+            const on = !mode.classList.contains('active');
+            form.querySelectorAll('[data-rc-mode] [data-value]').forEach(x => x.classList.toggle('active', on && x === mode));
+            form.rcPreview();
+            return;
+        }
         const chip = e.target.closest('[data-rc-hours] [data-value]');
         if (chip) { form.querySelectorAll('[data-rc-hours] [data-value]').forEach(x => x.classList.toggle('active', x === chip)); return; }
         if (e.target.closest('[data-rc-contact]')) {
@@ -108,7 +159,7 @@ function readRecipient(form) {
     if (!/^[6-9]\d{9}$/.test(phone)) throw new Error('Enter the organizer’s 10-digit mobile number');
     if (!form.payerName.value.trim()) throw new Error('Enter your name');
     return { organizerName: form.organizerName.value.trim(), organizerPhone: phone, rememberPhone: form.rememberPhone.checked,
-        payerName: form.payerName.value.trim(), paymentNote: form.paymentNote.value.trim(),
+        payerName: form.payerName.value.trim(), paymentNote: paymentNoteOf(form),
         hours: Number(form.querySelector('[data-rc-hours] .active')?.dataset.value || 72),
         requireSelfie: form.requireSelfie.checked, requireLocation: form.requireLocation.checked };
 }
@@ -158,11 +209,17 @@ export function openReceiptSend(chit, installments, acks, preselect, onDone) {
     const form = modal.el.querySelector('[data-rc-form]');
     const recount = () => {
         const on = [...form.querySelectorAll('[data-rc-i]:checked')].map(x => open.find(i => i.id === Number(x.dataset.rcI)));
+        // all paid from cash: the mode is Cash (the account's name itself stays out of what the organizer sees)
+        const froms = [...new Set(on.map(i => i.paidFromAccountName).filter(f => f && !/opening balance/i.test(f)))];
+        if (froms.length && froms.every(f => /cash/i.test(f)) && !form.querySelector('[data-rc-mode] .active')) {
+            form.querySelector('[data-rc-mode] [data-value="Cash"]')?.classList.add('active');
+            form.rcPreview?.();
+        }
         form.querySelector('[data-rc-count]').textContent = `${on.length} payment${on.length === 1 ? '' : 's'} selected`;
         form.querySelector('[data-rc-sum]').textContent = money(on.reduce((s, i) => s + Number(i.paidAmount || 0), 0));
     };
-    recount();
     bindRecipient(form);
+    recount();
     form.addEventListener('change', e => { if (e.target.matches('[data-rc-i]')) recount(); });
     form.addEventListener('click', e => {
         if (e.target.closest('[data-rc-all]')) { form.querySelectorAll('[data-rc-i]').forEach(x => { x.checked = true; }); recount(); }
@@ -247,6 +304,26 @@ function showLink(chit, made) {
 // ===================================================================== the list
 
 /** The "Acknowledgements" tab: each request with its state and what can be done with it. */
+/** The phone in a few words: its model and system from the recorded details, else the browser's own line. */
+function deviceText(device, userAgent) {
+    let d = {};
+    try { d = JSON.parse(device || '{}'); } catch { d = {}; }
+    const words = [d.model, d.platform || d.os, d.browser].filter(Boolean);
+    return words.length ? words.join(' · ') : (userAgent || device || '—').slice(0, 90);
+}
+
+/** Small marks for what an acknowledgement holds: the signature, a selfie, the location, scans of a paper copy. */
+function evidenceIcons(a) {
+    if (!isFinal(a)) return '';
+    const marks = [];
+    if (a.status === 'ACKNOWLEDGED') marks.push(['signature', 'Signed with a finger, digitally sealed']);
+    if (a.requireSelfie && a.status === 'ACKNOWLEDGED') marks.push(['camera', 'A live selfie']);
+    if (a.acknowledgedLocation) marks.push(['flag', 'Location recorded']);
+    const scans = (a.files || []).filter(f => f.docType === 'SIGNED_COPY').length;
+    if (scans) marks.push(['paperclip', `${scans} scan${scans === 1 ? '' : 's'} of the paper copy`]);
+    return marks.length ? `<span class="rc-ev-marks">${marks.map(([ic, t]) => `<i title="${esc(t)}">${icon(ic)}</i>`).join('')}</span>` : '';
+}
+
 export function receiptsTabHtml(acks, manage, { payoutReady = false, payoutDone = false } = {}) {
     const withdrawn = acks.filter(a => a.status === 'CANCELLED');
     const shown = acks.filter(a => ui.withdrawn || a.status !== 'CANCELLED');
@@ -263,27 +340,33 @@ export function receiptsTabHtml(acks, manage, { payoutReady = false, payoutDone 
         <div class="rc-kpi good">${icon('check-circle')}<div><small>Signed</small><b>${done.length}</b><em>${money(sum(done))} acknowledged</em></div></div>
         <div class="rc-kpi wait">${icon('clock')}<div><small>Waiting</small><b>${waiting.length}</b><em>${waiting.length ? `${money(sum(waiting))} out for signing` : 'nothing pending'}</em></div></div>
         <div class="rc-kpi ${disputed.length ? 'bad' : ''}">${icon('alert')}<div><small>Disputed</small><b>${disputed.length}</b><em>${disputed.length ? 'see the reason, then send again' : 'none'}</em></div></div></div>`;
-    return `${bar}${strip}<table class="grid compact dense rc-table"><thead><tr><th>Sent</th><th>For</th><th class="r">Amount</th><th>Organizer</th><th>State</th><th></th></tr></thead>
-        <tbody>${shown.map(a => {
+    return `${bar}${strip}<div class="rc-cards-list">${shown.map(a => {
             const [tone, ico, label] = STATUS[a.status] || ['gray', 'info', a.status];
             const nos = a.lines.map(l => l.no);
-            const span = isPayout(a) ? 'Payout received in full'
-                : nos.length > 2 && nos[nos.length - 1] - nos[0] === nos.length - 1 ? `#${nos[0]}–#${nos[nos.length - 1]}` : nos.map(n => `#${n}`).join(', ');
-            const stateText = a.status === 'ACKNOWLEDGED' || a.status === 'SIGNED' ? `${esc(a.acknowledgedName)} · ${a.status === 'SIGNED' ? date(String(a.acknowledgedAt).slice(0, 10)) : dateTime(a.acknowledgedAt)}`
-                : a.status === 'DISPUTED' ? esc(a.disputeReason || '') : a.status === 'CANCELLED' ? esc(a.cancelReason || '')
-                : a.status === 'PENDING' ? `${LINK[a.link]}${a.link === 'ACTIVE' ? ` until ${dateTime(a.linkExpiresAt)}` : ''}${a.views ? ` · opened ${a.views}×` : ''}` : '';
+            const stateText = a.status === 'ACKNOWLEDGED' || a.status === 'SIGNED' ? `${a.status === 'SIGNED' ? 'signed on paper by' : 'signed by'} <b>${esc(a.acknowledgedName)}</b> · ${a.status === 'SIGNED' ? date(String(a.acknowledgedAt).slice(0, 10)) : dateTime(a.acknowledgedAt)}`
+                : a.status === 'DISPUTED' ? `“${esc(a.disputeReason || '')}”` : a.status === 'CANCELLED' ? esc(a.cancelReason || '')
+                : a.status === 'PENDING' ? `${LINK[a.link]}${a.link === 'ACTIVE' ? ` until ${dateTime(a.linkExpiresAt)}` : ''}${a.views ? ` · opened ${a.views}×` : ' · not opened yet'}` : '';
             const again = ['DISPUTED', 'REVOKED', 'CANCELLED'].includes(a.status) || (a.status === 'PENDING' && a.link !== 'ACTIVE');
-            return `<tr class="clickable ${a.status === 'CANCELLED' ? 'withdrawn' : ''}" data-ack-open="${a.id}"><td>${dateTime(a.createdAt)}<small class="muted block">${esc(a.ackNo)}</small></td>
-                <td>${isPayout(a) ? `${icon('gift')} ` : ''}${span}<small class="muted block">${isPayout(a) ? `${a.installCount} installments restated` : `${a.lines.length} payment${a.lines.length === 1 ? '' : 's'}`}${a.kind === 'SIMPLE' ? ' · <span class="rc-kind">simple</span>' : ''}</small></td>
-                <td class="r"><b>${money(a.totalAmount)}</b></td><td>${esc(a.organizerName)}<small class="muted block">••••••${esc(String(a.organizerPhone).slice(6))}</small></td>
-                <td><span class="badge ${tone}">${icon(ico)}${label}</span><small class="muted block">${stateText}</small></td>
-                <td class="r nowrap"><button class="btn sm ghost icon" data-ack-print="${a.id}" title="Print: stamp paper, plain paper for a revenue stamp, or PDF">${icon('printer')}</button>${manage ? `
+            const initials = String(a.organizerName || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+            return `<article class="rc-card2 ${tone} ${a.status === 'CANCELLED' ? 'withdrawn' : ''}" data-ack-open="${a.id}" tabindex="0">
+                <header><span class="rc-no">${esc(a.ackNo)}</span>${isPayout(a) ? `<span class="rc-kind gold">${icon('gift')}payout</span>` : a.kind === 'SIMPLE' ? '<span class="rc-kind">simple</span>' : ''}
+                    <span class="grow"></span><span class="badge ${tone}">${icon(ico)}${label}</span></header>
+                <div class="rc-card2-main">
+                    <div class="rc-amt"><b>${money(a.totalAmount)}</b><small>${isPayout(a) ? `payout · ${a.installCount} installments restated` : `${nos.length} installment${nos.length === 1 ? '' : 's'}`}</small></div>
+                    <div class="rc-nos">${isPayout(a) ? `<span class="rc-noch gold">${icon('gift')}Payout in full</span>` : nos.map(n => `<span class="rc-noch">#${n}</span>`).join('')}</div>
+                </div>
+                ${a.paymentNote ? `<div class="rc-card2-pay">${paymentChips(a.paymentNote)}</div>` : ''}
+                <div class="rc-card2-who"><span class="rc-av">${esc(initials)}</span><div class="min-0 grow"><b>${esc(a.organizerName)}</b><small>••••••${esc(String(a.organizerPhone).slice(6))} · sent ${dateTime(a.createdAt)}</small></div>${evidenceIcons(a)}</div>
+                <footer><small class="rc-state">${stateText}</small><span class="grow"></span>
+                    <button class="btn sm ghost icon" data-ack-print="${a.id}" title="Print: stamp paper, plain paper for a revenue stamp, or PDF">${icon('printer')}</button>${manage ? `
                     ${a.status === 'PENDING' || a.status === 'REVOKED' ? `<button class="btn sm ghost icon" data-ack-renew="${a.id}" title="New link">${icon('refresh')}</button>` : ''}
                     ${again ? `<button class="btn sm ghost icon" data-ack-again="${a.id}" title="Send again for signing">${icon('send')}</button>` : ''}
                     ${a.status === 'PENDING' && a.link === 'ACTIVE' ? `<button class="btn sm ghost icon" data-ack-stop="${a.id}" title="Stop the link">${icon('x')}</button>` : ''}
                     ${isFinal(a) ? `<button class="btn sm ghost icon" data-ack-cancel="${a.id}" title="Withdraw and send again">${icon('undo')}</button>` : ''}
-                    ${['PENDING', 'REVOKED', 'DISPUTED'].includes(a.status) ? `<button class="btn sm ghost icon" data-ack-delete="${a.id}" title="Remove">${icon('trash')}</button>` : ''}` : ''}</td></tr>`;
-        }).join('')}</tbody></table>`;
+                    ${['PENDING', 'REVOKED', 'DISPUTED'].includes(a.status) ? `<button class="btn sm ghost icon" data-ack-delete="${a.id}" title="Remove">${icon('trash')}</button>` : ''}` : ''}
+                    <button class="btn sm" data-ack-open="${a.id}">${icon('eye')}View</button></footer>
+            </article>`;
+        }).join('')}</div>`;
 }
 
 /**
@@ -409,7 +492,15 @@ export function openPrintSetup(chit, a) {
             ${w(1, { name: o.w1name, phone: o.w1phone, address: o.w1address })}${w(2, { name: o.w2name, phone: o.w2phone, address: o.w2address })}
             <div class="rc-opts"><label class="cs-check"><input type="checkbox" name="thumb" ${o.thumb ? 'checked' : ''}> Thumb-impression boxes for both parties</label>
                 <label class="cs-check"><input type="checkbox" name="revenue" ${o.revenue === false ? '' : 'checked'}> Box for a revenue stamp beside the organizer's signature</label>
-                ${signed ? `<label class="cs-check"><input type="checkbox" name="evidence" checked> Include the evidence of the online acknowledgement (annexure)</label>` : ''}</div>
+                <label class="cs-check"><input type="checkbox" name="payFrom" ${o.payFrom === false ? '' : 'checked'}> In the payments table, show each payment's reference (UTR, cheque no.) when there is one</label></div>
+            <div class="form-grid two">
+                <label class="field"><span>Mark the copy as <small class="muted">printed above the title</small></span><select name="copy">${['', 'Original', 'Duplicate', "Subscriber's copy", "Organizer's copy", 'Office copy']
+                    .map(c => `<option value="${esc(c)}" ${(o.copy || '') === c ? 'selected' : ''}>${c || 'No label'}</option>`).join('')}</select></label>
+            </div>
+            ${signed ? `<fieldset class="rc-evopts"><legend>${icon('shield')}Evidence annexure</legend>
+                <label class="cs-check"><input type="checkbox" name="evidence" ${o.evidence === false ? '' : 'checked'}> Add the evidence of the online acknowledgement: time, phone, IP address, device, location, seal</label>
+                ${(a.files || []).some(f => f.docType === 'SELFIE') || a.requireSelfie ? `<label class="cs-check"><input type="checkbox" name="selfie" ${o.selfie === false ? '' : 'checked'}> With the live selfie taken while signing</label>` : ''}
+                <label class="cs-check"><input type="checkbox" name="technical" ${o.technical === false ? '' : 'checked'}> With the digital signature, its public key and the exact signed text (lets anyone check it; adds a page)</label></fieldset>` : ''}
         </form>`,
         actions: [{ label: 'Open the print view', kind: 'primary', iconName: 'printer', onClick: async m => {
             const f = m.el.querySelector('[data-rc-print]');
@@ -417,11 +508,19 @@ export function openPrintSetup(chit, a) {
             const person = n => ({ name: f[`w${n}name`].value.trim(), phone: f[`w${n}phone`].value.trim(), address: f[`w${n}address`].value.trim() });
             const opts = { place: f.place.value.trim(), stampDuty: Number(f.stampDuty.value || 0) || null, stampSerial: f.stampSerial.value.trim(),
                 witness: person(1), witness2: person(2), thumbBoxes: f.thumb.checked, revenueStamp: paper === 'plain' || f.revenue.checked,
-                plain: paper === 'plain', real: paper === 'real', evidence: f.evidence ? f.evidence.checked : false, twoWitnesses: Boolean(person(2).name) };
-            savePrint({ paper, stampDuty: f.stampDuty.value, place: opts.place, thumb: f.thumb.checked, revenue: f.revenue.checked,
+                plain: paper === 'plain', real: paper === 'real', evidence: f.evidence ? f.evidence.checked : false, twoWitnesses: Boolean(person(2).name),
+                copy: f.copy.value, payFrom: f.payFrom.checked, technical: f.technical ? f.technical.checked : false };
+            savePrint({ paper, stampDuty: f.stampDuty.value, place: opts.place, thumb: f.thumb.checked, revenue: f.revenue.checked, copy: f.copy.value, payFrom: f.payFrom.checked,
+                evidence: f.evidence ? f.evidence.checked : o.evidence, selfie: f.selfie ? f.selfie.checked : o.selfie, technical: f.technical ? f.technical.checked : o.technical,
                 w1name: opts.witness.name, w1phone: opts.witness.phone, w1address: opts.witness.address,
                 w2name: opts.witness2.name, w2phone: opts.witness2.phone, w2address: opts.witness2.address });
             const full = a.terms ? a : await api.get(`/chits/${chit.id}/receipts/${a.id}`);
+            // the selfie goes into the annexure as an image (read now, from the server's disk)
+            const photo = f.selfie?.checked && opts.evidence ? (full.files || []).find(x => x.docType === 'SELFIE' && x.image) : null;
+            if (photo) {
+                const src = await api.blob(`/chits/${chit.id}/receipts/${a.id}/files/${photo.id}`, {}).then(dataUrl).catch(() => null);
+                if (src) opts.selfie = { src, hash: photo.sha256 };
+            }
             printBond(receiptDeed(full, opts), `Acknowledgement ${a.ackNo}`);
         } }],
         onOpen: m => {
@@ -474,36 +573,71 @@ export async function openReceiptDetail(ctx, listed) {
     const selfie = (a.files || []).find(f => f.docType === 'SELFIE' && f.image);
     const shot = selfie ? await api.blob(`/chits/${chit.id}/receipts/${a.id}/files/${selfie.id}`, {}).then(dataUrl).catch(() => null) : null;
     const scans = (a.files || []).filter(f => f.docType === 'SIGNED_COPY');
-    const table = (ls, head) => `<table class="grid compact dense"><thead><tr><th>#</th><th>${head}</th><th class="r">Installment</th><th class="r">Dividend</th><th class="r">Received</th></tr></thead>
-        <tbody>${ls.map(l => `<tr><td>${l.no}</td><td>${date(l.paidDate)}</td><td class="r">${isPayout(a) && ls === a.lines ? '—' : money(l.dueAmount)}</td><td class="r">${Number(l.dividend) ? money(l.dividend) : '—'}</td><td class="r"><b>${money(l.cash)}</b></td></tr>`).join('')}</tbody>
-        <tfoot><tr><th colspan="4">Total</th><th class="r">${money(ls.reduce((s, l) => s + Number(l.cash), 0))}</th></tr></tfoot></table>`;
+    const table = (ls, head, withFrom) => `<table class="grid compact dense rc-lines"><thead><tr><th>#</th><th>${head}</th><th class="r">Installment</th><th class="r">Dividend</th><th class="r">Received</th>${withFrom ? '<th>Reference</th>' : ''}</tr></thead>
+        <tbody>${ls.map(l => {
+            const ref = l.reference || (ls.length === 1 ? paymentParts(a.paymentNote).ref : '');
+            return `<tr><td><b>${l.no}</b></td><td>${date(l.paidDate)}</td><td class="r">${isPayout(a) && ls === a.lines ? '—' : money(l.dueAmount)}</td><td class="r">${Number(l.dividend) ? money(l.dividend) : '—'}</td><td class="r"><b>${money(l.cash)}</b></td>
+            ${withFrom ? `<td class="small">${ref ? `<span class="rc-ref">${esc(ref)}</span>` : '—'}</td>` : ''}</tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr><th colspan="4">Total</th><th class="r">${money(ls.reduce((x, l) => x + Number(l.cash), 0))}</th>${withFrom ? '<th></th>' : ''}</tr></tfoot></table>`;
     const lines = isPayout(a)
-        ? `<h4 class="rc-h">Payout received in parts</h4>${table(a.lines, 'Received on')}<h4 class="rc-h">Installments restated (${a.installLines.length})</h4>${table(a.installLines, 'Paid on')}
+        ? `<h4 class="rc-h">Payout received in parts</h4>${table(a.lines, 'Received on', false)}<h4 class="rc-h">Installments restated (${a.installLines.length})</h4>${table(a.installLines, 'Paid on', true)}
             ${a.supersedes.length ? `<p class="small"><b>Cancels when signed:</b> ${a.supersedes.map(esc).join(', ')}</p>` : ''}`
-        : table(a.lines, 'Paid on');
-    const evidence = a.status === 'ACKNOWLEDGED' ? `
-        <div class="cs-sig-status ${verified === false ? 'bad' : verified ? 'ok' : 'wait'}"><b>${verified ? '✓ Digital signature verified' : verified === false ? '✗ The signature does not match' : 'The signature could not be checked here'}</b>
-            <small>ECDSA P-256 · key ${esc(a.keyFingerprint)}</small></div>
-        <div class="rc-sign">${signatureSvg(a.signature)}${shot ? `<img src="${shot}" alt="Selfie" class="rc-selfie">` : ''}</div>
-        <table class="bond-facts ev"><tbody>${evidenceRows({ name: a.acknowledgedName, at: a.acknowledgedAt, phone: a.acknowledgedPhone, phoneMatches: true, ip: a.acknowledgedIp,
+        : table(a.lines, 'Paid on', true);
+    const pay = paymentParts(a.paymentNote);
+
+    // ---- the timeline: made, opened, and how it ended
+    const steps = [[icon('send'), 'Requested', `${dateTime(a.createdAt)} by ${esc(a.createdBy)}`, 'done']];
+    if (a.views) steps.push([icon('eye'), `Opened ${a.views} time${a.views === 1 ? '' : 's'}`, a.lastViewedAt ? `last ${dateTime(a.lastViewedAt)}` : '', 'done']);
+    else if (a.status === 'PENDING') steps.push([icon('clock'), 'Not opened yet', `${LINK[a.link]}${a.link === 'ACTIVE' ? ` until ${dateTime(a.linkExpiresAt)}` : ''}`, 'wait']);
+    if (a.failedAttempts) steps.push([icon('alert'), `${a.failedAttempts} wrong number${a.failedAttempts === 1 ? '' : 's'} typed`, a.lockedAt ? `locked ${dateTime(a.lockedAt)}` : '', 'warn']);
+    if (a.status === 'ACKNOWLEDGED') steps.push([icon('check-circle'), `Signed by ${esc(a.acknowledgedName)}`, dateTime(a.acknowledgedAt), 'good']);
+    if (a.status === 'SIGNED') steps.push([icon('edit'), `Signed on paper by ${esc(a.acknowledgedName)}`, date(String(a.acknowledgedAt).slice(0, 10)), 'good']);
+    if (a.status === 'DISPUTED') steps.push([icon('alert'), 'Organizer says it is wrong', `${dateTime(a.disputedAt)}: “${esc(a.disputeReason)}”`, 'bad']);
+    if (a.status === 'CANCELLED') steps.push([icon('undo'), 'Withdrawn', `${dateTime(a.cancelledAt)} by ${esc(a.cancelledBy)}: “${esc(a.cancelReason)}”`, 'muted']);
+    if (a.status === 'REVOKED') steps.push([icon('x'), 'Link stopped', '', 'muted']);
+    const timeline = `<ol class="rc-tl">${steps.map(([ic, t, sub, tone]) => `<li class="${tone}"><span>${ic}</span><div><b>${t}</b>${sub ? `<small>${sub}</small>` : ''}</div></li>`).join('')}</ol>`;
+
+    // ---- the evidence, as cards
+    const where = a.acknowledgedLocation ? a.acknowledgedLocation.split(',') : null;
+    const sealCard = a.digitalSignature ? `<div class="rc-seal ${verified === false ? 'bad' : verified ? 'ok' : 'wait'}">${icon(verified === false ? 'alert' : 'shield')}
+        <div><b>${verified ? (a.status === 'SIGNED' ? 'Record sealed by this installation' : 'Digital signature verified') : verified === false ? 'The signature does not match' : 'Signature not checked here'}</b>
+            <small>ECDSA P-256 · key ${esc(a.keyFingerprint || '')}${a.status === 'SIGNED' ? ' · attests your record of the paper copy' : ''}</small></div></div>` : '';
+    const cards = [];
+    if (a.status === 'ACKNOWLEDGED' && a.signature) cards.push(`<figure class="rc-card sig"><div class="rc-paper">${signatureSvg(a.signature)}</div><figcaption>${icon('signature')}Signature of <b>${esc(a.acknowledgedName)}</b></figcaption></figure>`);
+    if (shot) cards.push(`<figure class="rc-card photo"><img src="${shot}" alt="Selfie" data-rc-zoom="${selfie.id}"><figcaption>${icon('camera')}Live selfie · ${dateTime(a.acknowledgedAt)}</figcaption></figure>`);
+    if (where) cards.push(`<figure class="rc-card place"><div class="rc-map">${icon('flag')}<b>${esc(Number(where[0]).toFixed(5))}, ${esc(Number(where[1]).toFixed(5))}</b>${where[2] ? `<small>within ${Math.round(Number(where[2]))} m</small>` : ''}
+            <a class="btn sm" target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(where.slice(0, 2).join(','))}">${icon('link')}Open map</a></div><figcaption>${icon('flag')}Where it was signed</figcaption></figure>`);
+    if (a.status === 'ACKNOWLEDGED') cards.push(`<figure class="rc-card device"><dl><dt>Phone</dt><dd>${esc(a.acknowledgedPhone ? `••••••${String(a.acknowledgedPhone).slice(-4)}` : '—')}</dd>
+            <dt>IP address</dt><dd>${esc(a.acknowledgedIp || '—')}</dd><dt>Device</dt><dd>${esc(deviceText(a.acknowledgedDevice, a.acknowledgedUserAgent))}</dd></dl><figcaption>${icon('phone')}The phone it came from</figcaption></figure>`);
+    if (scans.length) cards.push(`<figure class="rc-card scans"><div class="rc-scans">${scans.map(f => `<button type="button" class="rc-scan" data-rc-file="${f.id}" title="${esc(f.fileName)}">${f.image ? `<img data-rc-thumb="${f.id}" alt="">` : `<span>${icon('file-text')}PDF</span>`}</button>`).join('')}</div>
+            <figcaption>${icon('paperclip')}${scans.length} scan${scans.length === 1 ? '' : 's'} of the paper copy</figcaption></figure>`);
+    const evidence = cards.length || sealCard ? `${sealCard}<div class="rc-cards">${cards.join('')}</div>
+        ${a.status === 'ACKNOWLEDGED' ? `<details class="rc-tech"><summary>${icon('info')}Technical details: the sealed record</summary><table class="bond-facts ev"><tbody>${evidenceRows({ name: a.acknowledgedName, at: a.acknowledgedAt, phone: a.acknowledgedPhone, phoneMatches: true, ip: a.acknowledgedIp,
             device: a.acknowledgedDevice, userAgent: a.acknowledgedUserAgent, location: a.acknowledgedLocation, deviceHash: a.deviceHash, seal: a.acknowledgementSeal,
-            digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified }).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</tbody></table>
-        ${a.acknowledgedLocation ? `<a class="btn sm ghost" target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(a.acknowledgedLocation.split(',').slice(0, 2).join(','))}">${icon('flag')}Open the location on a map</a>` : ''}`
-        : a.status === 'SIGNED' ? `<p>${icon('edit')} Signed on paper by <b>${esc(a.acknowledgedName)}</b> on ${date(String(a.acknowledgedAt).slice(0, 10))}, recorded by ${esc(a.createdBy)}.
-            ${scans.length ? `${scans.length} scan${scans.length === 1 ? '' : 's'} attached (SHA-256 ${scans.map(s => `<code>${esc(s.sha256.slice(0, 16))}…</code>`).join(' ')}).` : '<b>No scan attached.</b>'}</p>
-            <div class="cs-sig-status ${verified === false ? 'bad' : verified ? 'ok' : 'wait'}"><b>${verified ? '✓ Record signed by this installation' : verified === false ? '✗ The signature does not match' : 'The signature could not be checked here'}</b>
-            <small>This attests your record of the paper copy, not the organizer's own signature · key ${esc(a.keyFingerprint)}</small></div>`
-        : a.status === 'DISPUTED' ? `<p class="cr-note">${esc(a.organizerName)} said on ${dateTime(a.disputedAt)}: “${esc(a.disputeReason)}”. Check the payment, then send it again.</p>`
-        : a.status === 'CANCELLED' ? `<p class="cr-note">Withdrawn on ${dateTime(a.cancelledAt)} by ${esc(a.cancelledBy)}${a.supersededBy ? ` (replaced by ${esc(a.supersededBy)})` : ''}: “${esc(a.cancelReason)}”. Kept for the record${a.acknowledgedName ? `; it had been signed by ${esc(a.acknowledgedName)} on ${dateTime(a.acknowledgedAt)}` : ''}.</p>`
-        : `<p class="muted">Nothing signed yet. ${LINK[a.link]}${a.link === 'ACTIVE' ? ` until ${dateTime(a.linkExpiresAt)}` : ''}${a.views ? ` · opened ${a.views} time${a.views === 1 ? '' : 's'}, last ${dateTime(a.lastViewedAt)}` : ' · not opened yet'}${a.failedAttempts ? ` · ${a.failedAttempts} wrong number${a.failedAttempts === 1 ? '' : 's'} typed` : ''}.</p>`;
+            digitalSignature: a.digitalSignature, keyFingerprint: a.keyFingerprint, publicKey: a.publicKey, evidencePayload: a.evidencePayload, verified }).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</tbody></table></details>` : ''}`
+        : `<div class="rc-noev">${icon('shield')}<p>${a.status === 'PENDING' ? 'The evidence appears here once the organizer signs: their signature, the time, the phone and, if asked, a selfie and the location.' : 'No evidence: it was not signed.'}</p></div>`;
     const canSign = manage && ['PENDING', 'REVOKED', 'DISPUTED'].includes(a.status);
     const modal = openModal({
-        title: `${a.ackNo} · ${a.chitName}`, sub: `${a.organizerName} · ${money(a.totalAmount)}${isPayout(a) ? ' · payout receipt' : ''}`, iconName: 'shield', size: 'lg',
-        body: `<div class="rc-detail"><div class="ag-status"><span class="badge ${tone}">${icon(ico)}${label}</span><small class="muted">made ${dateTime(a.createdAt)} by ${esc(a.createdBy)}</small></div>
-            ${lines}${a.paymentNote ? `<p class="small"><b>Payment details:</b> ${esc(a.paymentNote)}</p>` : ''}
-            <div class="cs-terms">${esc(a.terms)}</div>
-            <p class="cs-hash">Fingerprint (SHA-256) <code>${esc(a.contentHash)}</code></p>
-            ${evidence}<div data-rc-deed class="bond-preview" hidden></div></div>`,
+        title: `${a.ackNo} · ${a.chitName}`, sub: `${a.organizerName} · ${money(a.totalAmount)}${isPayout(a) ? ' · payout receipt' : a.kind === 'SIMPLE' ? ' · simple receipt' : ''}`, iconName: 'shield', size: 'xl',
+        body: `<div class="rc-detail2">
+            <div class="rc-left">
+                <div class="rc-hero ${tone}"><div class="min-0"><small>${isPayout(a) ? 'Payout paid to you' : 'Paid to the organizer'}</small><b>${money(a.totalAmount)}</b><em>${esc(a.amountInWords || '')}</em></div>
+                    <div class="rc-hero-side"><span class="badge ${tone}">${icon(ico)}${label}</span><small>${esc(a.payerName)} → ${esc(a.organizerName)}</small><small>${esc(a.chitName)}${a.ticketNo ? ` · ${esc(a.ticketNo)}` : ''}</small></div></div>
+                <section class="rc-block"><h4>${icon('receipt')}Payment details</h4>
+                    ${a.paymentNote ? `<div class="rc-paygrid">
+                        <div><small>Paid by</small><b>${pay.mode ? `${icon(modeIcon(pay.mode))}${esc(pay.mode)}` : '—'}</b></div>
+                        <div><small>Reference</small><b>${esc(pay.ref || '—')}</b></div>
+                        ${pay.rest.length ? `<div class="wide"><small>Note</small><b>${esc(pay.rest.join(' · '))}</b></div>` : ''}</div>` : '<p class="small muted">No payment details were given with the request.</p>'}
+                    ${lines}</section>
+                <details class="rc-block rc-terms"><summary>${icon('file-text')}What the organizer ${isFinal(a) ? 'signed' : 'is asked to sign'}</summary><div class="cs-terms">${esc(a.terms)}</div>
+                    <p class="cs-hash">Fingerprint (SHA-256) <code>${esc(a.contentHash)}</code></p></details>
+            </div>
+            <div class="rc-right">
+                <section class="rc-block"><h4>${icon('clock')}What happened</h4>${timeline}</section>
+                <section class="rc-block"><h4>${icon('shield')}Evidence</h4>${evidence}</section>
+            </div>
+            <div data-rc-deed class="bond-preview rc-deed" hidden></div></div>`,
         actions: [
             { label: 'Print…', iconName: 'printer', left: true, onClick: () => { openPrintSetup(chit, a); return true; } },
             ...(a.digitalSignature && a.evidencePayload ? [{ label: 'Download the evidence', iconName: 'download', left: true, onClick: () => { downloadEvidence(isPayout(a) ? 'CHIT-PAYOUT-RECEIPT' : 'CHIT-RECEIPT', a.ackNo, a); return true; } }] : []),
@@ -517,6 +651,28 @@ export async function openReceiptDetail(ctx, listed) {
             ...(manage && isFinal(a) ? [{ label: 'Withdraw…', iconName: 'undo', left: true, onClick: m => { m.close(); withdraw(ctx, a); return true; } }] : []),
             ...(manage && ['DISPUTED', 'REVOKED', 'CANCELLED'].includes(a.status) ? [{ label: 'Send again', iconName: 'send', kind: 'primary', onClick: m => { m.close(); sendAgain(ctx, a); return true; } }] : [{ label: 'Close', kind: 'primary' }]),
         ],
+    });
+    // scans and the selfie: thumbnails, and a click shows them large
+    const fileUrl = (id, thumb) => api.blob(`/chits/${chit.id}/receipts/${a.id}/files/${id}`, thumb ? { thumb: true } : {}).then(b => URL.createObjectURL(b));
+    modal.el.querySelectorAll('[data-rc-thumb]').forEach(img => fileUrl(img.dataset.rcThumb, true).then(u => { img.src = u; }).catch(() => {}));
+    modal.el.addEventListener('click', async e => {
+        const f = e.target.closest('[data-rc-file],[data-rc-zoom]');
+        if (!f) return;
+        const id = f.dataset.rcFile || f.dataset.rcZoom;
+        const file = (a.files || []).find(x => String(x.id) === String(id));
+        try {
+            const url = await fileUrl(id, false);
+            const layer = document.createElement('div');
+            layer.className = 'rc-lightbox';
+            layer.innerHTML = `<div class="rc-lb-top"><b>${esc(file?.fileName || 'File')}</b><small>${file?.sha256 ? `SHA-256 ${esc(file.sha256.slice(0, 24))}…` : ''}</small><span class="spacer"></span>
+                <a class="btn sm" href="${url}" download="${esc(file?.fileName || 'file')}">${icon('download')}Download</a><button type="button" class="btn sm" data-lb-close>${icon('x')}Close</button></div>
+                <div class="rc-lb-stage">${file?.image === false ? `<iframe src="${url}" title="scan"></iframe>` : `<img src="${url}" alt="">`}</div>`;
+            const close = () => { layer.remove(); URL.revokeObjectURL(url); document.removeEventListener('keydown', esc_); };
+            const esc_ = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+            layer.addEventListener('click', ev => { if (ev.target === layer || ev.target.closest('[data-lb-close]')) close(); });
+            document.addEventListener('keydown', esc_, true);
+            document.body.appendChild(layer);
+        } catch (error) { toast(error.message, 'error'); }
     });
     return modal;
 }

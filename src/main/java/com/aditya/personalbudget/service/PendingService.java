@@ -41,7 +41,7 @@ import java.util.Set;
 @Service
 public class PendingService {
 
-    private static final Set<String> PAYERS = Set.of("BANK", "CASH", "WALLET", "CREDIT_CARD");
+    private static final Set<String> PAYERS = Set.of("BANK", "CASH", "WALLET", "MEAL_CARD", "CREDIT_CARD");
     private static final int HISTORY_MAX = 4000;
 
     public record PendingView(Long id, String kind, String summary, BigDecimal amount, LocalDate entryDate,

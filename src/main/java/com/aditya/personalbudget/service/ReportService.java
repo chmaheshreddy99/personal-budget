@@ -231,7 +231,7 @@ public class ReportService {
     /** Groups an account type into a broad bucket used for the asset / liability mix. */
     public static String bucket(AccountType type) {
         return switch (type) {
-            case CASH, BANK, WALLET -> "Liquid money";
+            case CASH, BANK, WALLET, MEAL_CARD -> "Liquid money";
             case FIXED_DEPOSIT, RECURRING_DEPOSIT, SAVINGS_SCHEME, MUTUAL_FUND, STOCKS, BONDS, INSURANCE_POLICY ->
                     "Investments";
             case CHIT_FUND -> "Chits";

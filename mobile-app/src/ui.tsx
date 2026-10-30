@@ -5,6 +5,7 @@ import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text a
 import {
   Banknote, Briefcase, Building2, Car, CreditCard, Gem, HandCoins, HardHat, HeartPulse, Home, Landmark, LucideIcon, PiggyBank, Plane, Receipt,
   ShoppingBag, ShoppingCart, Smartphone, Sparkles, Ticket, TrainFront, Utensils, Wallet, Wrench, Zap, Fuel, GraduationCap, Shirt, Gift, Film, Shield,
+  Music2, BriefcaseBusiness, PlugZap, Drumstick,
   Coffee, CalendarClock, Layers, BookOpen, Laptop, TrendingUp, Award, BadgePercent, Undo2, Tractor, Handshake, Presentation, Tag, Coins,
   Percent, Truck, Milk, Carrot, CarTaxiFront, SquareParking, Sofa, Users, Flame, Droplets, Tv, Pill as PillIcon, Dumbbell, Repeat, Flower2, Baby, PawPrint,
   WashingMachine, Newspaper,
@@ -53,6 +54,7 @@ export function accountIcon(type: string, group?: string): LucideIcon {
     case 'CREDIT_CARD': return CreditCard;
     case 'CASH': return Banknote;
     case 'WALLET': return Wallet;
+    case 'MEAL_CARD': return Utensils;
     case 'FIXED_DEPOSIT': case 'RECURRING_DEPOSIT': case 'SAVINGS_SCHEME': return PiggyBank;
     case 'GOLD': case 'SILVER': return Gem;
     case 'REAL_ESTATE': case 'HOME_LOAN': return Home;
@@ -176,6 +178,11 @@ const CATEGORY_ICONS: [RegExp, LucideIcon, string, string][] = [
   [/allowance/i, Wallet, colors.green, colors.greenSoft],
   [/other income/i, Coins, colors.green, colors.greenSoft],
   // ---- expense
+  [/meat|fish|chicken|mutton|non.?veg|seafood|\beggs?\b|prawn/i, Drumstick, colors.red, colors.redSoft],
+  [/music|dance|singing|guitar/i, Music2, colors.violet, colors.violetSoft],
+  [/office travel|business travel|work trip/i, BriefcaseBusiness, colors.ocean, colors.oceanSoft],
+  [/electricity|power bill/i, PlugZap, colors.gold, colors.goldSoft],
+  [/^fuel$|petrol|diesel|\bcng\b/i, Fuel, colors.coral, colors.coralSoft],
   [/food deliver|takeaway/i, Truck, colors.coral, colors.coralSoft],
   [/milk|dairy/i, Milk, colors.ocean, colors.oceanSoft],
   [/vegetable|fruit/i, Carrot, colors.green, colors.greenSoft],

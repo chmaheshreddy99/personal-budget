@@ -226,7 +226,7 @@ public class AppSyncService {
         Map<Long, String> projectName = projects.findByTenantId(tenant).stream().collect(Collectors.toMap(ConstructionProject::getId, ConstructionProject::getName));
         Map<Long, String> chitName = chits.findByTenantId(tenant).stream().collect(Collectors.toMap(HostedChit::getId, HostedChit::getName));
         Set<AccountClass> shown = Set.of(AccountClass.ASSET, AccountClass.LIABILITY);
-        Set<String> payTypes = Set.of("BANK", "CREDIT_CARD", "CASH", "WALLET", "PAYABLE");
+        Set<String> payTypes = Set.of("BANK", "CREDIT_CARD", "CASH", "WALLET", "MEAL_CARD", "PAYABLE");
         List<AppAccount> list = new ArrayList<>();
         for (AccountView a : accounts.list()) {
             if (!a.active() || !shown.contains(a.accountClass())) continue;

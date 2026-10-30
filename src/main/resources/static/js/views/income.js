@@ -318,9 +318,15 @@ function chitGainsCard(chits, rows, from, to) {
             <span class="r"><b class="${gain >= 0 ? 'pos' : 'neg'}">${gain >= 0 ? '+' : '−'}${moneyShort(Math.abs(gain))}</b>
                 <small><span class="cg-tag ${paidOut ? 'realised' : 'expected'}">${paidOut ? 'realised' : 'expected'}</span>${percent((gain / base) * 100, 1)}</small></span></a>`;
     };
+    const total = realised + expected, realisedPct = total > 0 ? Math.max(0, Math.min(100, realised / total * 100)) : 0;
     return `
-    <section class="side-card chit-gains">
-        <div class="side-head">${icon('chit')}<b>Chit gains</b><span class="spacer"></span><span class="cg-pill" title="Booked to Income as passive income">passive income</span></div>
+    <section class="side-card chit-gains cg2">
+        <div class="cg-head">
+            <div class="cg-head-top"><span class="cg-mark">${icon('chit-book')}</span><div class="min-0"><small>Chit gains</small><b>${moneyShort(Math.round(total))}</b><em>realised and still to come, ${done.length + running.length} chit${done.length + running.length === 1 ? '' : 's'}</em></div>
+                <span class="cg-pill" title="Booked to Income as passive income">passive income</span></div>
+            <div class="cg-split" title="Realised ${moneyShort(realised)} · still to come ${moneyShort(expected)}"><i style="width:${realisedPct}%"></i></div>
+            <div class="cg-split-key"><span><i class="r"></i>Realised ${moneyShort(Math.round(realised))}</span><span><i class="e"></i>To come ${moneyShort(Math.round(expected))}</span></div>
+        </div>
         <div class="cg-figs">
             <div class="cg-fig booked"><span>Booked · 12 mo</span><b>${moneyShort(Math.round(booked))}</b><small>${moneyShort(bookedPeriod)} this period</small></div>
             <div class="cg-fig realised"><span>Realised</span><b>${moneyShort(Math.round(realised))}</b><small>${done.length} paid out</small></div>

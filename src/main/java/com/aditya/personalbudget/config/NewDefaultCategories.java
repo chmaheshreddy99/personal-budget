@@ -41,7 +41,9 @@ public class NewDefaultCategories implements ApplicationRunner {
 
     /** Later rounds: each adds only the default categories (by code) it names, once. */
     private static final Map<String, Set<String>> LATER = new LinkedHashMap<>(Map.of(
-            "default-categories-2026-10-tips", Set.of("5430")));
+            "default-categories-2026-10-tips", Set.of("5430"),
+            "default-categories-2026-10-classes-travel-power-fuel", Set.of("5440", "5450", "5460", "5470"),
+            "default-categories-2026-10-non-veg", Set.of("5480")));
 
     private final TsvDataStore store;
 

@@ -108,6 +108,12 @@ class ChitReceiptAckTests {
         CreatedLink made = receipts.create(chitId, ask(List.of(c, a, b)));
         assertThat(made.receipt().lines()).extracting(l -> l.no()).containsExactly(1, 2, 3);
         assertThat(made.receipt().totalAmount()).isEqualByComparingTo("14600");   // the second installment had a 400 dividend
+        // nothing of this app's own books goes into what the organizer signs: no account names, no entry numbers
+        assertThat(made.receipt().lines()).allSatisfy(l -> {
+            assertThat(l.paidFrom()).isNull();
+            assertThat(l.entryNo()).isNull();
+        });
+        assertThat(made.receipt().terms()).doesNotContain("Receipt bank");
         assertThat(made.receipt().terms()).contains("Sri Ram Chits").contains("T9").contains("UPI 4411").contains("Information Technology Act");
         assertThat(made.receipt().link()).isEqualTo("ACTIVE");
         assertThat(chits.list().stream().filter(x -> x.id().equals(chitId)).findFirst().orElseThrow().organizerPhone()).isEqualTo("9876543210");

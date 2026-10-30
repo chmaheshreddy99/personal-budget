@@ -87,7 +87,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         + everydayBoost(c) + dueBill(c);
     const categories = [...expenseCategories].sort((a, b) => Number(!!a.systemKey) - Number(!!b.systemKey) || score(b) - score(a)
         || a.name.localeCompare(b.name));
-    const payers = accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET', 'PAYABLE'].includes(a.accountType))
+    const payers = accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET', 'MEAL_CARD', 'PAYABLE'].includes(a.accountType))
         .sort((a, b) => (usage.credit[b.id] || 0) - (usage.credit[a.id] || 0) || typeRank(a) - typeRank(b));
     const lastPayer = history.narration?.find(s => s.voucherType === 'EXPENSE' && s.creditAccountId)?.creditAccountId;
 
@@ -332,7 +332,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
     });
 
     bind(modal.el.querySelector('form'), { categories, budgets, payers, claimList, history, setMode: m => { current = m; },
-        allPayers: accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET'].includes(a.accountType))
+        allPayers: accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.accountType))
             .sort((a, b) => (usage.credit[b.id] || 0) - (usage.credit[a.id] || 0) || typeRank(a) - typeRank(b)) });
     const evidence = bindEvidenceField(modal.el);
     setTimeout(() => modal.el.querySelector('[name=amount]').focus(), 40);

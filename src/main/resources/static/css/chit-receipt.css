@@ -21,3 +21,9 @@
 .cr-chips span { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 10px; background: #f2f7fb; border: 1px solid #dbe7f1; font-size: 13px; }
 .cr-chips b { color: #0b5d8e; } .cr-chips i { font-style: normal; font-weight: 700; }
 .cs-terms.cr-short { white-space: pre-line; font-size: 14px; line-height: 1.55; background: #fbfdf7; border-left: 4px solid #12a150; }
+
+/* how it was paid, on the signing page */
+.cr-paid { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: #f2f7fb; border: 1px solid #dbe7f1; }
+.cr-paid b { display: block; font-size: 13px; margin-bottom: 6px; }
+.cr-paid dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; } .cr-paid dt { color: #5f6b77; } .cr-paid dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.cr-paid small { display: block; margin-top: 6px; color: #5f6b77; font-size: 12px; }

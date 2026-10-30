@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ChartPie, ChevronRight, Gift, MessageSquareText, Scale, Settings as Cog, Tags } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
-import { hasFeature, isExpense } from '../data';
+import { hasFeature, isExpense, mobileOn } from '../data';
 import { ago, money } from '../format';
 import { Card, IconBubble } from '../ui';
 import { colors, space } from '../theme';
@@ -17,16 +17,18 @@ export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
   const cats = app.snapshot?.categories || [];
   const expense = cats.filter(isExpense).length;
   const b = app.budgets;
-  const items: [MorePage, any, string, string, string, string, number][] = [
-    ['budget', ChartPie, colors.coral, colors.coralSoft, 'Budget',
-      b && b.totalLimit ? `${money(b.totalSpent)} of ${money(b.totalLimit)} spent · ${money(b.totalRemaining)} left` : 'This month’s budgets and what is spent', 0],
-    ['categories', Tags, colors.aqua, colors.aquaSoft, 'Categories',
-      cats.length ? `${expense} expense · ${cats.length - expense} income` : 'Expense and income categories', 0],
-    ...(hasFeature(app.snapshot, 'GIFTS') ? [['gifts', Gift, colors.coral, colors.coralSoft, 'Gifts', giftLine(app), 0] as [MorePage, any, string, string, string, string, number]] : []),
-    ['sheet', Scale, colors.green, colors.greenSoft, 'Balance sheet',
-      app.sheet ? `Net worth ${app.net(app.sheet.netWorth)} · updated ${ago(app.sheet.fetchedAt)}` : 'What you own and owe, by group', 0],
-    ['sms', MessageSquareText, colors.violet, colors.violetSoft, 'Bank SMS',
-      app.settings.smsEnabled ? (app.detected.length ? `${app.detected.length} to record` : 'Detection on · nothing to record') : 'Detection off', app.detected.length],
+  type Item = [MorePage, any, string, string, string, string, number];
+  // each item only when the household's settings for the phone app (Settings › Phone app on the web) allow it; Settings always
+  const items: Item[] = [
+    ...(morePageOn(app.snapshot, 'budget') ? [['budget', ChartPie, colors.coral, colors.coralSoft, 'Budget',
+      b && b.totalLimit ? `${app.balAll(b.totalSpent, [])} of ${app.balAll(b.totalLimit, [])} spent` : 'This month’s budgets and what is spent', 0] as Item] : []),
+    ...(morePageOn(app.snapshot, 'categories') ? [['categories', Tags, colors.aqua, colors.aquaSoft, 'Categories',
+      cats.length ? `${expense} expense · ${cats.length - expense} income` : 'Expense and income categories', 0] as Item] : []),
+    ...(morePageOn(app.snapshot, 'gifts') ? [['gifts', Gift, colors.coral, colors.coralSoft, 'Gifts', giftLine(app), 0] as Item] : []),
+    ...(morePageOn(app.snapshot, 'sheet') ? [['sheet', Scale, colors.green, colors.greenSoft, 'Balance sheet',
+      app.sheet ? `Net worth ${app.balancesVisible ? app.net(app.sheet.netWorth) : '••••••'} · updated ${ago(app.sheet.fetchedAt)}` : 'What you own and owe, by group', 0] as Item] : []),
+    ...(morePageOn(app.snapshot, 'sms') ? [['sms', MessageSquareText, colors.violet, colors.violetSoft, 'Bank SMS',
+      app.settings.smsEnabled ? (app.detected.length ? `${app.detected.length} to record` : 'Detection on · nothing to record') : 'Detection off', app.detected.length] as Item] : []),
     ['settings', Cog, colors.ocean, colors.oceanSoft, 'Settings', 'Server, accounts shown, offline, storage, SMS', 0],
   ];
   return (
@@ -46,6 +48,18 @@ export function MoreScreen({ onOpen }: { onOpen: (p: MorePage) => void }) {
       ))}
     </ScrollView>
   );
+}
+
+/** Is an item under More switched on for this person (the household's phone-app settings, and the sections shared with them)? */
+export function morePageOn(snap: Parameters<typeof mobileOn>[0], page: MorePage): boolean {
+  switch (page) {
+    case 'budget': return hasFeature(snap, 'BUDGETS');
+    case 'sheet': return hasFeature(snap, 'BALANCE_SHEET');
+    case 'gifts': return hasFeature(snap, 'GIFTS');
+    case 'categories': return mobileOn(snap, 'CATEGORIES');
+    case 'sms': return mobileOn(snap, 'SMS');
+    default: return true;
+  }
 }
 
 /** "3 given · 2 received this year", counting those waiting on the phone. */

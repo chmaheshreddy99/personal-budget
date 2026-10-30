@@ -83,7 +83,8 @@ export function AddExpense({ visible, onClose, prefill, editing }: { visible: bo
   useEffect(() => {
     if (!visible) return;
     const src = editing || prefill || {};
-    setMode(editing ? 'EXPENSE' : prefill?.mode || 'EXPENSE');
+    const wanted = prefill?.mode && modes.some(m => m.key === prefill.mode) ? prefill.mode : modes[0]?.key || 'EXPENSE';
+    setMode(editing ? 'EXPENSE' : wanted);
     setAmount(src.amount ? String(src.amount) : '');
     setDay(src.date || isoDate());
     setCategoryId(src.categoryId ?? null);

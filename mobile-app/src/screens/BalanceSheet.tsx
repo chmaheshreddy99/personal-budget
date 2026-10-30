@@ -28,11 +28,15 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
     return () => sub.remove();
   }, [onBack]);
 
+  // the accounts behind a figure: a total that includes a private account stays hidden
+  const idsOf = (s: SheetSection | null | undefined) => (s ? s.groups.flatMap(g => g.accounts.map(a => a.accountId)) : []);
+  const allIds = [...idsOf(b?.assets), ...idsOf(b?.liabilities), ...idsOf(b?.equity)];
+  const sealed = !app.balancesVisible || allIds.some(id => id != null && app.isPrivate(id));
   const section = (s: SheetSection | null | undefined, tone: string, soft: string) => {
     if (!s) return null;
     return (
       <View key={s.label}>
-        <SectionTitle title={s.label} right={<Text style={[st.secTotal, { color: tone }]}>{money(s.total)}</Text>} />
+        <SectionTitle title={s.label} right={<Text style={[st.secTotal, { color: tone }]}>{app.balAll(s.total, idsOf(s))}</Text>} />
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           {s.groups.filter(g => g.accounts.length || g.total).map(g => {
             const k = `${s.label}:${g.label}`;
@@ -43,13 +47,13 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
                   <Text style={st.groupName} numberOfLines={1}>{g.label}</Text>
                   <Text style={st.count}>{g.accounts.length}</Text>
                   <View style={{ flex: 1 }} />
-                  <Text style={st.groupTotal}>{money(g.total)}</Text>
+                  <Text style={st.groupTotal}>{app.balAll(g.total, g.accounts.map(a => a.accountId))}</Text>
                   {open[k] ? <ChevronDown color={colors.muted} size={16} /> : <ChevronRight color={colors.muted} size={16} />}
                 </Pressable>
                 {open[k] ? g.accounts.map(a => (
                   <View key={a.accountId} style={st.acc}>
                     <Text style={st.accName} numberOfLines={1}>{a.name}</Text>
-                    <Text style={st.accAmount}>{money(a.amount)}</Text>
+                    <Text style={st.accAmount}>{a.accountId != null ? app.bal(a.amount, a.accountId) : app.balAll(a.amount, [])}</Text>
                   </View>
                 )) : null}
               </View>
@@ -77,17 +81,17 @@ export function BalanceSheetScreen({ onBack }: { onBack: () => void }) {
               <Text style={st.h}>Balance sheet</Text>
             </View>
             <Text style={st.label}>NET WORTH · {date(b.asOf).toUpperCase()}</Text>
-            <Text style={st.big}>{app.net(b.netWorth)}</Text>
+            <Text style={st.big}>{sealed && !app.snapshot?.mobile?.maskNetWorth ? '••••••' : app.net(b.netWorth)}</Text>
             {b.netWorthChange != null && b.netWorthChange !== 0 && b.previousNetWorth ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
                 {b.netWorthChange > 0 ? <TrendingUp color="#a8e3c2" size={14} /> : <TrendingDown color="#ffb4a0" size={14} />}
-                <Text style={{ color: b.netWorthChange > 0 ? '#a8e3c2' : '#ffb4a0', fontWeight: '700', fontSize: 12.5 }}>{money(b.netWorthChange)} since the last comparison</Text>
+                <Text style={{ color: b.netWorthChange > 0 ? '#a8e3c2' : '#ffb4a0', fontWeight: '700', fontSize: 12.5 }}>{sealed ? '••••' : money(b.netWorthChange)} since the last comparison</Text>
               </View>
             ) : null}
             <View style={st.figs}>
-              <View style={st.fig}><Text style={st.figLabel}>Assets</Text><Text style={st.figValue}>{moneyShort(b.assets?.total)}</Text></View>
-              <View style={st.fig}><Text style={st.figLabel}>Liabilities</Text><Text style={st.figValue}>{moneyShort(b.liabilities?.total)}</Text></View>
-              <View style={st.fig}><Text style={st.figLabel}>Liquid</Text><Text style={st.figValue}>{moneyShort(b.liquidAssets)}</Text></View>
+              <View style={st.fig}><Text style={st.figLabel}>Assets</Text><Text style={st.figValue}>{app.balAll(b.assets?.total || 0, idsOf(b.assets), true)}</Text></View>
+              <View style={st.fig}><Text style={st.figLabel}>Liabilities</Text><Text style={st.figValue}>{app.balAll(b.liabilities?.total || 0, idsOf(b.liabilities), true)}</Text></View>
+              <View style={st.fig}><Text style={st.figLabel}>Liquid</Text><Text style={st.figValue}>{app.balAll(b.liquidAssets || 0, idsOf(b.assets), true)}</Text></View>
             </View>
             <Text style={st.fetched}>Updated {ago(b.fetchedAt)}{b.balanced ? ' · balanced' : ''}</Text>
           </GradientPanel>

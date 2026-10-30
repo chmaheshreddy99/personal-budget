@@ -80,7 +80,7 @@ export function TransferSheet({ visible, onClose, from: start }: { visible: bool
         })}
       </View>
       {a && b && value > 0 && app.balancesVisible ? (
-        <Text style={st.after}>{a.name} will have <Text style={{ fontWeight: '800' }}>{money(app.balanceOf(a) + (a.accountClass === 'LIABILITY' ? 1 : -1) * value)}</Text>, {b.name} <Text style={{ fontWeight: '800' }}>{money(app.balanceOf(b) + (b.accountClass === 'LIABILITY' ? -1 : 1) * value)}</Text></Text>
+        <Text style={st.after}>{a.name} will have <Text style={{ fontWeight: '800' }}>{app.bal(app.balanceOf(a) + (a.accountClass === 'LIABILITY' ? 1 : -1) * value, a.id)}</Text>, {b.name} <Text style={{ fontWeight: '800' }}>{app.bal(app.balanceOf(b) + (b.accountClass === 'LIABILITY' ? -1 : 1) * value, b.id)}</Text></Text>
       ) : null}
       {error ? <Text style={st.error}>{error}</Text> : null}
     </Sheet>

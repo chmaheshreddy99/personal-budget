@@ -6,12 +6,12 @@
  * Sync button.
  */
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ChevronDown, ChevronRight, CloudOff, HandCoins, HardHat, RefreshCw, User, WifiOff, CalendarClock, AlertTriangle, EyeOff, Eye, ArrowLeftRight, Lock, Receipt, ArrowDownLeft, BookOpen } from 'lucide-react-native';
 import type { RecordMode } from './AddExpense';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
-import { Account, liveBalance } from '../data';
+import { Account, hasFeature, liveBalance } from '../data';
 import { ago, money, moneyShort } from '../format';
 import { AccountBubble, Card, Empty, GradientPanel, Pill, SectionTitle } from '../ui';
 import { colors, space } from '../theme';
@@ -19,8 +19,8 @@ import { colors, space } from '../theme';
 const OWN_ORDER: [string, (a: Account) => boolean][] = [
   ['Banks', a => a.type === 'BANK'],
   ['Cards', a => a.type === 'CREDIT_CARD'],
-  ['Cash & wallets', a => a.type === 'CASH' || a.type === 'WALLET'],
-  ['Savings & investments', a => a.accountClass === 'ASSET' && !['BANK', 'CASH', 'WALLET'].includes(a.type)],
+  ['Cash, wallets & meal cards', a => a.type === 'CASH' || a.type === 'WALLET' || a.type === 'MEAL_CARD'],
+  ['Savings & investments', a => a.accountClass === 'ASSET' && !['BANK', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.type)],
   ['Loans & dues', a => a.accountClass === 'LIABILITY' && a.type !== 'CREDIT_CARD'],
 ];
 
@@ -32,20 +32,22 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer, onRecord, onChi
   const accounts = app.accounts;
   const hidden = (app.snapshot?.accounts.length || 0) - accounts.length;
   const chosen = app.settings.accountFilter === 'chosen';
-  const waiting = [...app.queue, ...app.chitQueue].filter(e => e.status === 'QUEUED' || e.status === 'FAILED');
-  const failed = [...app.queue, ...app.chitQueue].filter(e => e.status === 'FAILED').length;
+  const [showWaiting, setShowWaiting] = useState(false);
+  const waitingItems = waitingList(app);
+  const waiting = waitingItems;
+  const failed = waitingItems.filter(w => w.failed).length;
 
   const own = accounts.filter(a => a.group === 'OWN');
   const signed = (a: Account) => (a.accountClass === 'ASSET' ? 1 : -1) * liveBalance(a, app.queue, app.chitQueue, app.records).balance;
   const netWorth = own.reduce((s, a) => s + signed(a), 0);
-  const cash = own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)).reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
+  const cash = own.filter(a => ['BANK', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.type)).reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
   const cards = own.filter(a => a.type === 'CREDIT_CARD').reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
 
   const sealed = (list: Account[]) => list.some(a => app.isPrivate(a.id));
   const sum = (list: Account[], text: string) => (sealed(list) ? '••••' : text);
   const actions = [
-    onRecord ? { key: 'exp', label: 'Expense', Icon: Receipt, fg: colors.coral, onPress: () => onRecord('EXPENSE') } : null,
-    onRecord ? { key: 'inc', label: 'Income', Icon: ArrowDownLeft, fg: colors.green, onPress: () => onRecord('INCOME') } : null,
+    onRecord && hasFeature(app.snapshot, 'EXPENSES') ? { key: 'exp', label: 'Expense', Icon: Receipt, fg: colors.coral, onPress: () => onRecord('EXPENSE') } : null,
+    onRecord && hasFeature(app.snapshot, 'INCOME') ? { key: 'inc', label: 'Income', Icon: ArrowDownLeft, fg: colors.green, onPress: () => onRecord('INCOME') } : null,
     onTransfer ? { key: 'tr', label: 'Transfer', Icon: ArrowLeftRight, fg: colors.ocean, onPress: onTransfer } : null,
     onChits ? { key: 'chit', label: 'Pay chit', Icon: BookOpen, fg: colors.gold, onPress: onChits } : null,
   ].filter(Boolean) as { key: string; label: string; Icon: typeof Receipt; fg: string; onPress: () => void }[];
@@ -84,9 +86,9 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer, onRecord, onChi
           </Pressable>
         </View>
         <View style={st.figs}>
-          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{sum(own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)), app.balShort(cash))}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{sum(own.filter(a => ['BANK', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.type)), app.balShort(cash))}</Text></View>
           <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{sum(own.filter(a => a.type === 'CREDIT_CARD'), app.balShort(cards))}</Text></View>
-          <View style={st.fig}><Text style={st.figLabel}>To sync</Text><Text style={[st.figValue, waiting.length ? { color: '#ffd68a' } : null]}>{waiting.length}</Text></View>
+          <Pressable style={st.fig} onPress={() => waiting.length && setShowWaiting(true)}><Text style={st.figLabel}>To sync</Text><Text style={[st.figValue, waiting.length ? { color: '#ffd68a' } : null]}>{waiting.length}</Text></Pressable>
         </View>
         <View style={st.statusRow}>
           <status.Icon color={status.fg} size={13} />
@@ -107,11 +109,12 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer, onRecord, onChi
       ) : null}
 
       {failed ? (
-        <Card style={[st.banner, { borderColor: colors.redSoft }]}>
+        <Card style={[st.banner, { borderColor: colors.redSoft }]} onPress={() => setShowWaiting(true)}>
           <AlertTriangle color={colors.red} size={18} />
-          <Text style={[st.bannerText, { color: colors.red }]}>{failed} expense{failed === 1 ? ' was' : 's were'} not accepted by the server: open Expenses to fix {failed === 1 ? 'it' : 'them'}.</Text>
+          <Text style={[st.bannerText, { color: colors.red }]}>{failed} {failed === 1 ? 'entry was' : 'entries were'} not accepted by the server. Tap to see why and remove {failed === 1 ? 'it' : 'them'}.</Text>
         </Card>
       ) : null}
+      <WaitingSheet visible={showWaiting} onClose={() => setShowWaiting(false)} />
 
       {hidden > 0 && accounts.length ? (
         <Pressable onPress={onSettings} style={st.hidden}>
@@ -193,6 +196,56 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   );
 }
 
+type WaitingItem = { id: string; kind: string; title: string; sub: string; amount: number; date: string; failed: boolean; message?: string; remove: () => Promise<void> };
+
+/** Everything recorded on the phone that the server does not have yet (expenses, chit payments, income, transfers ...), and why if it refused. */
+function waitingList(app: ReturnType<typeof useApp>): WaitingItem[] {
+  const waits = (s: string) => s === 'QUEUED' || s === 'FAILED';
+  return [
+    ...app.queue.filter(e => waits(e.status)).map(e => ({ id: e.clientId, kind: 'Expense', title: e.narration || e.categoryName, sub: `${e.categoryName} · ${e.paidFromName}`,
+      amount: e.amount, date: e.date, failed: e.status === 'FAILED', message: e.message, remove: () => app.removeExpense(e.clientId) })),
+    ...app.chitQueue.filter(c => waits(c.status)).map(c => ({ id: c.clientId, kind: 'Chit payment', title: `${c.chitName} · installment ${c.installmentNo}`, sub: c.fromAccountName,
+      amount: c.amount, date: c.paidDate, failed: c.status === 'FAILED', message: c.message, remove: () => app.removeChitPayment(c.clientId) })),
+    ...app.records.filter(r => waits(r.status)).map(r => ({ id: r.clientId, kind: ({ CLAIM: 'Money owed', REPAYMENT: 'Repayment', INCOME: 'Income', GIFT: 'Gift', EMI_PAY: 'EMI', TRANSFER: 'Transfer' } as Record<string, string>)[r.kind] || r.kind,
+      title: r.title, sub: r.sub, amount: r.amount, date: r.date, failed: r.status === 'FAILED', message: r.message, remove: () => app.removeRecord(r.clientId) })),
+  ].sort((a, b) => Number(b.failed) - Number(a.failed) || b.date.localeCompare(a.date));
+}
+
+/** The list behind "To sync": each item, what the server said, and a way to remove one it will not take. */
+function WaitingSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const app = useApp();
+  const items = waitingList(app);
+  const ask = (w: WaitingItem) => Alert.alert(`Remove this ${w.kind.toLowerCase()}?`, `${w.title}, ${money(w.amount)}. It is only on this phone: removing it cannot be undone.`, [
+    { text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { w.remove(); } }]);
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={st.sheetBack} onPress={onClose} />
+      <View style={st.sheet}>
+        <View style={st.sheetHandle} />
+        <Text style={st.sheetTitle}>Waiting on this phone</Text>
+        <Text style={st.sheetSub}>{items.length ? 'Sent with the next sync. Those the server refused say why; remove them, or fix them in their own section.' : 'Everything is on the server.'}</Text>
+        <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
+          {items.map(w => (
+            <View key={w.id} style={[st.wItem, w.failed && { borderColor: colors.redSoft, backgroundColor: '#fff8f7' }]}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={st.wKind}>{w.kind} · {w.date}</Text>
+                <Text style={st.wTitle} numberOfLines={1}>{w.title}</Text>
+                {w.sub ? <Text style={st.wSub} numberOfLines={1}>{w.sub}</Text> : null}
+                {w.failed ? <Text style={st.wErr}>Not accepted: {w.message || 'refused by the server'}</Text> : <Text style={st.wWait}>Waiting to sync</Text>}
+              </View>
+              <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                <Text style={st.wAmt}>{money(w.amount)}</Text>
+                <Pressable onPress={() => ask(w)} style={st.wRemove} hitSlop={8}><Text style={st.wRemoveText}>Remove</Text></Pressable>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+        <Pressable onPress={() => { onClose(); app.sync(); }} style={st.wSync}><RefreshCw color={colors.white} size={16} /><Text style={st.wSyncText}>Sync now</Text></Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 /** Long press on an account: show its balance this once, or keep it private on this phone (the household's own choice cannot be undone here). */
 function privacyMenu(app: ReturnType<typeof useApp>, a: Account) {
   const mine = (app.settings.privateAccounts || []).includes(a.id);
@@ -205,6 +258,22 @@ function privacyMenu(app: ReturnType<typeof useApp>, a: Account) {
 }
 
 const st = StyleSheet.create({
+  sheetBack: { flex: 1, backgroundColor: 'rgba(11,32,56,0.35)' },
+  sheet: { backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: space.l, paddingBottom: 28, gap: 6 },
+  sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.line, marginBottom: 6 },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: colors.text },
+  sheetSub: { fontSize: 12.5, color: colors.muted, marginBottom: 6 },
+  wItem: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 14, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line },
+  wKind: { fontSize: 11, fontWeight: '800', color: colors.muted, letterSpacing: 0.3 },
+  wTitle: { fontSize: 14.5, fontWeight: '700', color: colors.text, marginTop: 1 },
+  wSub: { fontSize: 12, color: colors.muted },
+  wErr: { fontSize: 12, color: colors.red, fontWeight: '600', marginTop: 4 },
+  wWait: { fontSize: 12, color: colors.gold, fontWeight: '600', marginTop: 4 },
+  wAmt: { fontSize: 15, fontWeight: '800', color: colors.text },
+  wRemove: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.redSoft },
+  wRemoveText: { color: colors.red, fontSize: 12, fontWeight: '800' },
+  wSync: { marginTop: 8, height: 46, borderRadius: 14, backgroundColor: colors.ocean, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  wSyncText: { color: colors.white, fontWeight: '800', fontSize: 14.5 },
   actions: { flexDirection: 'row', gap: 8, marginTop: space.m },
   action: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 16, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
   actionIco: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },

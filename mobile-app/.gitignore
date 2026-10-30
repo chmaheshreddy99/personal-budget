@@ -76,3 +76,4 @@ yarn-error.log
 
 # built APKs copied out for installing
 apk/
+keystore.properties

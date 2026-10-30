@@ -38,7 +38,19 @@ public class AppSettingsService {
     }
 
     /** What the phone app may do and show, set per household from Settings › Mobile app on the web. */
-    public static final java.util.List<String> MOBILE_FEATURES = java.util.List.of("EXPENSES", "INCOME", "TRANSFERS", "ACCOUNTS", "CHITS", "CLAIMS", "EMIS", "GIFTS");
+    public static final java.util.List<String> MOBILE_FEATURES = java.util.List.of("ACCOUNTS", "EXPENSES", "INCOME", "TRANSFERS", "CHITS", "CLAIMS", "EMIS", "GIFTS",
+            "BUDGETS", "BALANCE_SHEET", "CATEGORIES", "SMS");
+    /** The sections the phone app had before Budget, Balance sheet, Categories and Bank SMS could be switched: those stay on where a choice was saved before. */
+    private static final java.util.List<String> FIRST_FEATURES = java.util.List.of("EXPENSES", "INCOME", "TRANSFERS", "ACCOUNTS", "CHITS", "CLAIMS", "EMIS", "GIFTS");
+
+    /** A saved list, with the sections added since it was saved switched on (they did not exist to be switched off). */
+    private static java.util.Set<String> withNewer(java.util.Set<String> saved, java.util.Set<String> known) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String f : MOBILE_FEATURES) {
+            if (saved.contains(f) || !known.contains(f)) out.add(f);
+        }
+        return out;
+    }
 
     /**
      * What the phone app (the Android app) may do for a household, set in Settings › Mobile app on the web.
@@ -75,7 +87,8 @@ public class AppSettingsService {
         Properties p = read();
         String key = "mobile." + tenantId + ".";
         String stored = p.getProperty(key + "features");
-        java.util.Set<String> on = stored == null ? new java.util.LinkedHashSet<>(MOBILE_FEATURES) : csv(stored, MOBILE_FEATURES);
+        java.util.Set<String> known = csv(p.getProperty(key + "known", String.join(",", FIRST_FEATURES)), MOBILE_FEATURES);
+        java.util.Set<String> on = stored == null ? new java.util.LinkedHashSet<>(MOBILE_FEATURES) : withNewer(csv(stored, MOBILE_FEATURES), known);
         java.math.BigDecimal above = null;
         try {
             String a = p.getProperty(key + "hide-above");
@@ -87,7 +100,7 @@ public class AppSettingsService {
         java.util.Map<String, java.util.Set<String>> byRole = new java.util.LinkedHashMap<>();
         for (String role : APP_ROLES) {
             String rf = p.getProperty(key + "role." + role + ".features");
-            byRole.put(role, rf == null ? new java.util.LinkedHashSet<>(on) : csv(rf, MOBILE_FEATURES));
+            byRole.put(role, rf == null ? new java.util.LinkedHashSet<>(on) : withNewer(csv(rf, MOBILE_FEATURES), known));
         }
         String readOnly = p.getProperty(key + "readonly-roles");
         java.util.Set<Long> hidden = new java.util.LinkedHashSet<>();
@@ -117,6 +130,7 @@ public class AppSettingsService {
             }
         }
         p.setProperty(key + "features", String.join(",", features));
+        p.setProperty(key + "known", String.join(",", MOBILE_FEATURES));   // every section existed at this save: one left out is off
         p.setProperty(key + "hide-balances", String.valueOf(c.hideBalances()));
         p.setProperty(key + "mask-net-worth", String.valueOf(c.maskNetWorth()));
         if (c.hideAbove() != null && c.hideAbove().signum() > 0) p.setProperty(key + "hide-above", c.hideAbove().toPlainString());

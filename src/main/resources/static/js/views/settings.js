@@ -19,6 +19,7 @@ const SECTIONS = [
     { id: 'shortcuts', label: 'Keyboard', iconName: 'keyboard', hint: 'Every shortcut' },
     { id: 'mobile', label: 'Phone app', iconName: 'phone', hint: 'The Android app: who, what, privacy' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },
+    { id: 'statements', label: 'Statements', iconName: 'report', hint: 'Monthly PDFs by e-mail', permission: 'MANAGE_USERS' },
     { id: 'chits', label: 'Host a Chit', iconName: 'hand-coins', hint: 'Company name for new chits' },
     { id: 'organization', label: 'Organization', iconName: 'clock', hint: 'Time zone for dates and times' },
     { id: 'backup', label: 'Backup', iconName: 'database', hint: 'Save and restore all data', permission: 'MANAGE_TENANTS' },
@@ -58,6 +59,7 @@ export async function render(container, params, isCurrent) {
     if (section === 'preferences') renderPreferences(body);
     if (section === 'mobile') await renderMobile(body, () => render(container, params, isCurrent));
     if (section === 'email') await renderMail(body, () => render(container, params, isCurrent));
+    if (section === 'statements') await renderStatements(body, () => render(container, params, isCurrent));
     if (section === 'chits') await renderChitSettings(body, () => render(container, params, isCurrent));
     if (section === 'organization') await renderOrganization(body, () => render(container, params, isCurrent));
     if (section === 'backup') await renderBackup(body, () => render(container, params, isCurrent));
@@ -214,10 +216,146 @@ async function renderBackup(body, reload) {
     });
 }
 
+// ===================================================================== monthly statements by e-mail
+
+/** Opens a statement's PDF (never locked) in a new tab. */
+async function previewStatement(kind, month, accountIds = []) {
+    const tab = window.open('', '_blank');
+    try {
+        const blob = await api.blob('/statements/preview', { kind, month, accounts: accountIds.length ? accountIds.join(',') : undefined });
+        const url = URL.createObjectURL(blob);
+        if (tab) tab.location.href = url; else window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (error) { tab?.close(); toast(error.message, 'error'); }
+}
+
+/**
+ * The organization's subscriptions to monthly statements: each goes out by e-mail as a PDF laid out like a bank
+ * statement, on the chosen day for the month before, locked with a password when asked. A catalogue of the statements
+ * with a preview of each, and the subscriptions with when they last went out.
+ */
+async function renderStatements(body, reload) {
+    const o = await api.get('/statements');
+    const kindOf = k => o.kinds.find(x => x.key === k) || { label: k, iconName: 'report' };
+    const subsOf = k => o.subscriptions.filter(x => x.kind === k).length;
+    body.innerHTML = `<div class="st-page">
+        <section class="panel st-hero"><span class="st-hero-ico">${icon('mail')}</span>
+            <div class="grow min-0"><b>Monthly statements by e-mail</b>
+                <p>Bank-style PDF statements of your books, sent on the day you pick for the month before. Lock them with a password if you like.</p></div>
+            <div class="st-hero-side"><label class="small">Preview month <input type="month" id="st-month" value="${o.lastMonth}" max="${o.lastMonth}"></label></div></section>
+        ${o.mailReady ? '' : `<div class="st-warn">${icon('alert')}<span><b>E-mail is not set up.</b> Statements cannot go out until you add your e-mail account in <a href="#/settings/email">Settings › E-mail</a>. You can still preview them.</span></div>`}
+        <div class="st-kinds">${o.kinds.map(k => `<div class="st-kind">
+            <span class="st-kind-ico">${icon(k.iconName)}</span>
+            <div class="min-0 grow"><b>${esc(k.label)}</b><p>${esc(k.description)}</p></div>
+            <div class="st-kind-acts">
+                <button type="button" class="btn sm" data-st-preview="${k.key}">${icon('eye')}Preview</button>
+                <button type="button" class="btn sm primary" data-st-add="${k.key}">${icon('plus')}${subsOf(k.key) ? 'Add another' : 'Subscribe'}</button></div>
+            ${subsOf(k.key) ? `<span class="st-kind-count">${subsOf(k.key)} subscribed</span>` : ''}</div>`).join('')}</div>
+        ${panel({ title: 'Subscriptions', iconName: 'repeat', bodyClass: 'flush', sub: o.subscriptions.length ? `${o.subscriptions.filter(x => x.active).length} active${o.mailFrom ? ` · sent from ${esc(o.mailFrom)}` : ''}` : '',
+            body: o.subscriptions.length ? `<div class="st-subs">${o.subscriptions.map(x => {
+                const k = kindOf(x.kind);
+                const ok = x.lastResult && x.lastResult.startsWith('Sent');
+                return `<div class="st-sub ${x.active ? '' : 'paused'}">
+                    <span class="st-kind-ico sm">${icon(k.iconName)}</span>
+                    <div class="min-0 grow"><b>${esc(x.kindLabel)}</b>
+                        <div class="st-chips">${x.recipients.map(r => `<span class="st-chip">${icon('mail')}${esc(r)}</span>`).join('')}</div>
+                        <small class="muted">Day ${x.dayOfMonth} of every month${x.kind === 'ACCOUNTS' ? ` · ${x.accountIds.length ? `${x.accountIds.length} account${x.accountIds.length === 1 ? '' : 's'}` : 'every account'}` : ''}
+                            ${x.protect ? ` · <span class="st-lock">${icon('lock')}password protected</span>` : ''}${x.active ? '' : ' · <b>paused</b>'}</small>
+                        ${x.lastResult ? `<small class="st-last ${ok ? 'ok' : 'bad'}">${icon(ok ? 'check-circle' : 'alert')}${esc(x.lastResult)}${x.lastSentAt && ok ? ` · ${dateTime(x.lastSentAt)}` : ''}</small>`
+                            : '<small class="muted">Not sent yet</small>'}</div>
+                    <div class="st-sub-acts">
+                        <button type="button" class="btn sm" data-st-send="${x.id}" ${o.mailReady ? '' : 'disabled title="Set up e-mail first"'}>${icon('send')}Send now</button>
+                        <button type="button" class="btn sm ghost icon" data-st-view="${x.id}" title="Preview the PDF">${icon('eye')}</button>
+                        <button type="button" class="btn sm ghost icon" data-st-edit="${x.id}" title="Edit">${icon('edit')}</button>
+                        <button type="button" class="btn sm ghost icon" data-st-toggle="${x.id}" title="${x.active ? 'Pause' : 'Resume'}">${icon(x.active ? 'clock' : 'play')}</button>
+                        <button type="button" class="btn sm ghost icon" data-st-delete="${x.id}" title="Stop and remove">${icon('trash')}</button></div></div>`;
+            }).join('')}</div>` : `<p class="small muted ms-pad">${icon('info')} No subscription yet: pick a statement above and subscribe the addresses that should get it every month.</p>` })}
+    </div>`;
+
+    const month = () => body.querySelector('#st-month').value || o.lastMonth;
+    const sub = id => o.subscriptions.find(x => x.id === Number(id));
+    const payload = (x, changes = {}) => ({ kind: x.kind, recipients: x.recipients.join(', '), accountIds: x.accountIds, dayOfMonth: x.dayOfMonth, protect: x.protect, active: x.active, ...changes });
+    body.addEventListener('click', async e => {
+        const t = e.target.closest('button');
+        if (!t) return;
+        try {
+            if (t.dataset.stPreview) await previewStatement(t.dataset.stPreview, month());
+            else if (t.dataset.stAdd) editStatement(o, null, t.dataset.stAdd, reload);
+            else if (t.dataset.stEdit) editStatement(o, sub(t.dataset.stEdit), null, reload);
+            else if (t.dataset.stView) { const x = sub(t.dataset.stView); await previewStatement(x.kind, month(), x.accountIds); }
+            else if (t.dataset.stToggle) {
+                const x = sub(t.dataset.stToggle);
+                await api.put(`/statements/subscriptions/${x.id}`, payload(x, { active: !x.active }));
+                toast(x.active ? 'Paused' : 'Resumed');
+                reload();
+            } else if (t.dataset.stDelete) {
+                const x = sub(t.dataset.stDelete);
+                if (!await confirmDialog(`Stop sending the ${x.kindLabel.toLowerCase()} to ${x.recipients.join(', ')}?`, { title: 'Stop this statement?', confirmLabel: 'Stop and remove' })) return;
+                await api.del(`/statements/subscriptions/${x.id}`);
+                toast('Removed');
+                reload();
+            } else if (t.dataset.stSend) {
+                const x = sub(t.dataset.stSend);
+                t.disabled = true;
+                const r = await api.post(`/statements/subscriptions/${x.id}/send?month=${encodeURIComponent(month())}`, {});
+                toast(r.result, r.sent ? 'success' : 'error');
+                reload();
+            }
+        } catch (error) { toast(error.message, 'error'); t.disabled = false; }
+    });
+}
+
+/** Add or change a subscription: the statement, who gets it, the day, the accounts (account statement) and the password. */
+async function editStatement(o, x, kind, reload) {
+    const k = x ? x.kind : kind;
+    const own = k === 'ACCOUNTS' ? (await loadAccounts().catch(() => [])).filter(a => (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY') && a.active !== false)
+        .sort((a, b) => a.name.localeCompare(b.name)) : [];
+    const chosen = new Set(x?.accountIds || []);
+    const meta = o.kinds.find(y => y.key === k);
+    const m = openModal({
+        title: x ? 'Change the subscription' : `Subscribe: ${meta.label}`, sub: meta.label, iconName: meta.iconName, size: 'lg',
+        body: `<form class="st-form" onsubmit="return false">
+            <label class="field"><span>Send it to <small class="muted">e-mail addresses, separated by commas (up to 10)</small></span>
+                <input name="recipients" value="${esc(x ? x.recipients.join(', ') : '')}" placeholder="me@example.com, spouse@example.com" data-plain autofocus></label>
+            <div class="form-grid two">
+                <label class="field"><span>On day <small class="muted">of every month, for the month before</small></span>
+                    <select name="day">${Array.from({ length: 28 }, (_, i) => i + 1).map(d => `<option value="${d}" ${(x?.dayOfMonth || 1) === d ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+                <label class="cs-check st-active"><input type="checkbox" name="active" ${!x || x.active ? 'checked' : ''}> <span><b>Active</b><small>Paused ones are kept but not sent</small></span></label>
+            </div>
+            ${k === 'ACCOUNTS' ? `<div class="field"><span>Accounts <small class="muted">none ticked = every account of your own</small></span>
+                <div class="st-accts">${own.map(a => `<label class="st-acct"><input type="checkbox" name="acct" value="${a.id}" ${chosen.has(a.id) ? 'checked' : ''}><span class="ellipsis">${esc(a.name)}</span><small>${esc(a.typeLabel || '')}</small></label>`).join('')}</div></div>` : ''}
+            <div class="st-protect">
+                <label class="cs-check"><input type="checkbox" name="protect" ${x?.protect ? 'checked' : ''}> <span><b>Lock the PDF with a password</b><small>The reader types it to open the file (AES-256). Share it separately, not in the same e-mail.</small></span></label>
+                <label class="field st-pw"><span>Password <small class="muted">${x?.hasPassword ? 'leave empty to keep the one set' : '4 to 64 characters'}</small></span>
+                    <span class="st-pw-row"><input name="password" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="${x?.hasPassword ? '•••••••• (unchanged)' : 'e.g. your PAN in capitals'}" data-plain>
+                    <button type="button" class="btn sm ghost icon" data-st-eye title="Show">${icon('eye')}</button></span></label>
+            </div>
+        </form>`,
+        actions: [
+            { label: 'Preview', iconName: 'eye', left: true, onClick: m2 => { previewStatement(k, o.lastMonth, [...m2.el.querySelectorAll('[name="acct"]:checked')].map(c => Number(c.value))); return true; } },
+            { label: x ? 'Save' : 'Subscribe', kind: 'primary', iconName: 'check', onClick: async m2 => {
+                const f = m2.el.querySelector('.st-form');
+                const body = { kind: k, recipients: f.recipients.value, dayOfMonth: Number(f.day.value), protect: f.protect.checked, active: f.active.checked,
+                    accountIds: [...f.querySelectorAll('[name="acct"]:checked')].map(c => Number(c.value)) };
+                if (f.password.value) body.password = f.password.value;
+                if (x) await api.put(`/statements/subscriptions/${x.id}`, body); else await api.post('/statements/subscriptions', body);
+                toast(x ? 'Saved' : `Subscribed: the ${meta.label.toLowerCase()} goes out on day ${body.dayOfMonth}`);
+                reload();
+            } }],
+    });
+    const f = m.el.querySelector('.st-form');
+    const sync = () => f.querySelector('.st-pw').classList.toggle('off', !f.protect.checked);
+    f.protect.addEventListener('change', sync);
+    sync();
+    m.el.querySelector('[data-st-eye]').addEventListener('click', () => { f.password.type = f.password.type === 'password' ? 'text' : 'password'; });
+}
+
 // ===================================================================== the phone app
 
-const APP_SECTIONS = [['EXPENSES', 'wallet', 'Expenses'], ['INCOME', 'arrow-in', 'Income'], ['TRANSFERS', 'transfer', 'Transfers'], ['ACCOUNTS', 'bank', 'Accounts'],
-    ['CHITS', 'chit', 'Chits'], ['CLAIMS', 'hand', 'Money owed'], ['EMIS', 'calendar', 'EMIs'], ['GIFTS', 'gift', 'Gifts']];
+/** Every menu of the phone app: the tabs, the parts of Expenses, and the items under More (Settings is always there). */
+const APP_SECTIONS = [['ACCOUNTS', 'bank', 'Accounts'], ['EXPENSES', 'wallet', 'Expenses'], ['INCOME', 'arrow-in', 'Income'], ['TRANSFERS', 'transfer', 'Transfers'],
+    ['CHITS', 'chit', 'Chits'], ['CLAIMS', 'hand', 'Money owed'], ['EMIS', 'calendar', 'EMIs'], ['GIFTS', 'gift', 'Gifts'],
+    ['BUDGETS', 'target', 'Budget'], ['BALANCE_SHEET', 'scale', 'Balance sheet'], ['CATEGORIES', 'tag', 'Categories'], ['SMS', 'bell', 'Bank SMS']];
 const APP_ROLE_LABELS = { SUPER_ADMIN: 'Super admin', ADMIN: 'Admin', MANAGER: 'Manager', ACCOUNTANT: 'Accountant', MEMBER: 'Member', VIEWER: 'Viewer' };
 
 /**
@@ -254,7 +392,8 @@ async function renderMobile(body, reload) {
                         <td class="c"><label class="switch sm"><input type="checkbox" name="role-${r}" ${allowed(r) ? 'checked' : ''}><span></span></label></td>
                         ${APP_SECTIONS.map(([k]) => `<td class="c"><input type="checkbox" class="ms2-cb" name="rf-${r}-${k}" ${on(r, k) ? 'checked' : ''}></td>`).join('')}
                         <td class="c"><input type="checkbox" class="ms2-cb ro" name="ro-${r}" ${(cfg.readOnlyRoles || []).includes(r) ? 'checked' : ''}></td></tr>`).join('')}</tbody></table></div>
-                    <p class="small muted ms-pad">${icon('info')} A person also needs the section shared with them under <a href="#/admin/users">Users</a>; the app shows the overlap.</p>` })}
+                    <p class="small muted ms-pad">${icon('info')} These are every menu of the app: its tabs (Accounts, Expenses, Chits), the parts of Expenses (Income, Money owed, EMIs) and the items under More.
+                        Switched off, a menu disappears from the phone and cannot be recorded there. A person also needs the section shared with them under <a href="#/admin/users">Users</a>; the app shows the overlap.</p>` })}
             ${panel({ title: 'Balances', iconName: 'eye', body: `<div class="ms2-stack">
                 <label class="cs-check"><input type="checkbox" name="hideBalances" ${cfg.hideBalances ? 'checked' : ''}> <span><b>Open with balances hidden</b><small>dots until “View balances” is tapped</small></span></label>
                 <label class="cs-check"><input type="checkbox" name="maskNetWorth" ${cfg.maskNetWorth ? 'checked' : ''}> <span><b>Never show the net worth</b><small>the total stays off the phone's screens</small></span></label>

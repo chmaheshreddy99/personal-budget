@@ -701,7 +701,7 @@ async function openGiftForm(gift, direction, all, reload) {
             <div class="span-3 gift-book" data-book ${g.direction === 'GIVEN' && g.kind === 'CASH' ? '' : 'hidden'}>
                 <label class="check-line"><input type="checkbox" name="book" ${g.journalEntryId || !editing ? 'checked' : ''}> Also record it as an expense</label>
                 <div class="form-grid two">
-                    <label class="field"><span>Paid from</span><select name="bookAccountId">${accountOptions(accounts, a => a.active && ['BANK', 'CASH', 'WALLET', 'CREDIT_CARD'].includes(a.accountType), g.accountId)}</select></label>
+                    <label class="field"><span>Paid from</span><select name="bookAccountId">${accountOptions(accounts, a => a.active && ['BANK', 'CASH', 'WALLET', 'MEAL_CARD', 'CREDIT_CARD'].includes(a.accountType), g.accountId)}</select></label>
                     <label class="field"><span>Category</span><select name="bookCategoryId">${categoryOptions(categories, giftCat?.id)}</select></label>
                 </div></div>
             ${field({ label: 'Notes', name: 'notes', value: g.notes || '', span: 'span-3' })}
