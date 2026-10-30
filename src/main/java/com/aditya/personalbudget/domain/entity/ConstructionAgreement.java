@@ -2,6 +2,7 @@ package com.aditya.personalbudget.domain.entity;
 
 import com.aditya.personalbudget.domain.TenantOwned;
 import com.aditya.personalbudget.storage.References;
+import com.aditya.personalbudget.storage.Vaulted;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -92,16 +93,20 @@ public class ConstructionAgreement implements TenantOwned {
     private LocalDate agreementDate;
 
     /** The WHEREAS clauses, one a line. */
+    @Vaulted
     @Column(length = 3000)
     private String recitals;
 
     /** Label and value, a pair a line (label<TAB>value). */
+    @Vaulted
     @Column(length = 4000)
     private String particulars;
 
-    @Column(nullable = false, length = 16000)
+    @Vaulted
+    @Column(length = 16000)
     private String terms;
 
+    @Vaulted
     @Column(length = 2000)
     private String extraTerms;
 
@@ -114,6 +119,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 40)
     private String stampSerial;
 
+    @Vaulted
     @Column(length = 20000)
     private String companySignature;
 
@@ -126,6 +132,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 150)
     private String witnessAddress;
 
+    @Vaulted
     @Column(length = 20000)
     private String witnessSignature;
 
@@ -135,6 +142,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 150)
     private String witness2Address;
 
+    @Vaulted
     @Column(length = 20000)
     private String witness2Signature;
 
@@ -142,6 +150,7 @@ public class ConstructionAgreement implements TenantOwned {
     private Boolean thumbBoxes;
 
     /** The other party's signature drawn in person on the builder's device. */
+    @Vaulted
     @Column(length = 20000)
     private String partyInkSignature;
 
@@ -184,6 +193,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 255)
     private String acceptedUserAgent;
 
+    @Vaulted
     @Column(length = 2000)
     private String acceptedDevice;
 
@@ -193,6 +203,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 100)
     private String acceptedLocation;
 
+    @Vaulted
     @Column(length = 20000)
     private String signature;
 
@@ -205,6 +216,7 @@ public class ConstructionAgreement implements TenantOwned {
     @Column(length = 64)
     private String acceptanceSeal;
 
+    @Vaulted
     @Column(length = 4000)
     private String evidencePayload;
 

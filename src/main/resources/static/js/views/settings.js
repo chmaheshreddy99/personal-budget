@@ -4,8 +4,7 @@
  * admins) backups of the whole data. Routes: #/settings, #/settings/<section>.
  */
 import { api } from '../core/api.js';
-import { loadCategories, can, state } from '../core/store.js';
-import { qrSvg } from '../core/qr.js';
+import { loadCategories, loadAccounts, can, state } from '../core/store.js';
 import { esc, panel, emptyState, toast, confirmDialog, openModal } from '../core/ui.js';
 import { icon, categoryIcon } from '../core/icons.js';
 import { moneyShort, dateTime, setTimeZone, orgNow } from '../core/format.js';
@@ -18,7 +17,7 @@ const SECTIONS = [
     { id: 'dashboard', label: 'Dashboard', iconName: 'dashboard', hint: 'Panels, order and size' },
     { id: 'preferences', label: 'Preferences', iconName: 'settings', hint: 'How pages open' },
     { id: 'shortcuts', label: 'Keyboard', iconName: 'keyboard', hint: 'Every shortcut' },
-    { id: 'mobile', label: 'Mobile app', iconName: 'phone', hint: 'Address and who can use it' },
+    { id: 'mobile', label: 'Phone app', iconName: 'phone', hint: 'The Android app: who, what, privacy' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },
     { id: 'chits', label: 'Host a Chit', iconName: 'hand-coins', hint: 'Company name for new chits' },
     { id: 'organization', label: 'Organization', iconName: 'clock', hint: 'Time zone for dates and times' },
@@ -97,7 +96,22 @@ async function renderOrganization(body, reload) {
                 Times are kept in ${esc(tz.serverTimeZone)} and shown in this zone, so a change moves every time shown, those saved before it too.</span></div>
                 <div class="row"><button class="btn primary" type="submit">${icon('check')}Save</button></div>`
                 : `<p class="small muted">${icon('lock')} Only an admin of the organization can change it.</p>`}
-        </form>` });
+        </form>` })
+        + (admin ? panel({ title: 'Data', iconName: 'database', body: `<div class="set-data">
+            <p class="small muted">Every change made in the app, on the web or the phone, by any user, is in memory the moment it is saved, and open
+                pages refresh by themselves. Changed something directly in the spreadsheet (or run a second server on it)? Check for it here: the app reads
+                the spreadsheet once and every open page refreshes.</p>
+            <div class="row"><button class="btn" type="button" id="data-check">${icon('refresh')}Check now</button><span class="small muted" id="data-check-out"></span></div></div>` }) : '');
+    body.querySelector('#data-check')?.addEventListener('click', async e => {
+        const btn = e.currentTarget, out = body.querySelector('#data-check-out');
+        btn.disabled = true;
+        out.textContent = 'Reading the spreadsheet…';
+        try {
+            const r = await api.post('/admin/storage/check', {});
+            out.textContent = r.changed.length ? `Read in changes to ${r.changed.length} table${r.changed.length === 1 ? '' : 's'}: ${r.changed.join(', ')}` : 'Up to date: nothing was changed outside the app.';
+        } catch (error) { out.textContent = ''; toast(error.message, 'error'); }
+        btn.disabled = false;
+    });
     body.querySelector('#tz-form').addEventListener('submit', async e => {
         e.preventDefault();
         if (!admin) return;
@@ -200,68 +214,114 @@ async function renderBackup(body, reload) {
     });
 }
 
-// ===================================================================== mobile version
+// ===================================================================== the phone app
 
-/** Where the mobile version lives (admins can move it), a QR code to open it, and who may use it. */
+const APP_SECTIONS = [['EXPENSES', 'wallet', 'Expenses'], ['INCOME', 'arrow-in', 'Income'], ['TRANSFERS', 'transfer', 'Transfers'], ['ACCOUNTS', 'bank', 'Accounts'],
+    ['CHITS', 'chit', 'Chits'], ['CLAIMS', 'hand', 'Money owed'], ['EMIS', 'calendar', 'EMIs'], ['GIFTS', 'gift', 'Gifts']];
+const APP_ROLE_LABELS = { SUPER_ADMIN: 'Super admin', ADMIN: 'Admin', MANAGER: 'Manager', ACCOUNTANT: 'Accountant', MEMBER: 'Member', VIEWER: 'Viewer' };
+
+/**
+ * The Android app (phones opening the web site get the mobile web version on their own): whether it can sign in at all, which roles may,
+ * what each role sees and whether it may only look, accounts whose balance is never shown, the privacy screen, how long a sign-in lasts,
+ * and the phones signed in now (each can be signed out).
+ */
 async function renderMobile(body, reload) {
-    const app = await api.get('/meta/app');
     const admin = can('MANAGE_USERS');
-    const users = admin ? await api.get('/admin/users').catch(() => []) : [];
-    const url = `${location.origin}/${app.mobilePath}/`;
-    const cfg = admin ? await api.get('/admin/mobile-config').catch(() => null) : null;
-    body.innerHTML = panel({ title: 'Mobile app', iconName: 'phone',
-        actions: `<a class="btn sm" href="${esc(url)}" target="_blank" rel="noopener">${icon('link')}Open</a>`,
-        body: `<div class="mobile-settings">
-            <div class="ms-qr">${qrSvg(url, { size: 168 })}<small>Scan with the phone camera</small></div>
-            <div class="ms-main">
-                <p class="hint">A lighter version for phones with every section: the money at a glance, expenses (add one in seconds), accounts, chits, budgets, income and a simple view of the rest. Phones that open the full site are taken to it automatically (they can still choose the full site).
-                    It signs in separately and shows only the sections an admin shared for mobile.</p>
-                <form id="mobile-path-form" class="ms-path">
-                    <label class="field"><span>Address</span>
-                        <span class="ms-url"><span class="muted">${esc(location.origin)}/</span><input name="mobilePath" value="${esc(app.mobilePath)}" ${admin ? '' : 'readonly'}
-                            pattern="[a-z0-9][a-z0-9-]{0,29}" maxlength="30" required data-plain><span class="muted">/</span></span></label>
-                    ${admin ? `<button class="btn primary" type="submit">${icon('check')}Save address</button>` : '<span class="small muted">Only an admin can change the address.</span>'}
-                </form>
-                ${cfg ? `<div class="section-title">What the phone app offers</div>
-                    <form id="mobile-config-form" class="ms-config">
-                        <p class="small muted">${icon('info')} Switch a section off and it disappears from the phone app, and the app can no longer record it. A user still needs the section shared under Users.</p>
-                        <div class="ms-features">${[['EXPENSES', 'wallet', 'Expenses', 'Record spending, the detected SMS list'], ['INCOME', 'arrow-in', 'Income', 'Record money received'],
-                            ['TRANSFERS', 'arrow-right', 'Transfers', 'Move money between your accounts'], ['ACCOUNTS', 'bank', 'Accounts', 'See accounts and statements'],
-                            ['CHITS', 'chit', 'Chits', 'Pay installments'], ['CLAIMS', 'hand', 'Money owed', 'Lent and paid-for money, repayments'],
-                            ['EMIS', 'calendar', 'EMIs', 'See and pay EMIs'], ['GIFTS', 'gift', 'Gifts', 'Gifts given and received']].map(([k, ic, t, d]) => `
-                            <label class="ms-feature"><input type="checkbox" name="f-${k}" ${cfg.features.includes(k) ? 'checked' : ''}><span>${icon(ic)}<b>${t}</b><small>${d}</small></span></label>`).join('')}</div>
-                        <div class="section-title">Privacy on the phone</div>
-                        <label class="cs-check"><input type="checkbox" name="hideBalances" ${cfg.hideBalances ? 'checked' : ''}> <span><b>Hide balances</b> until the person taps “View balances” (the phone opens with dots, not figures)</span></label>
-                        <label class="cs-check"><input type="checkbox" name="maskNetWorth" ${cfg.maskNetWorth ? 'checked' : ''}> <span><b>Never show the overall net worth</b> in the app</span></label>
-                        <label class="field"><span>Keep a balance hidden when it is above ₹ <small class="muted">even after “View balances”; tap that one to see it. Empty = no limit</small></span>
-                            <input name="hideAbove" type="number" min="0" step="1000" value="${cfg.hideAbove ?? ''}" placeholder="e.g. 100000" data-plain></label>
-                        <p class="small muted">${icon('shield')} This is a screen against onlookers and a borrowed phone, not security: the figures still travel to a signed-in app.</p>
-                        <button class="btn primary" type="submit">${icon('check')}Save for the phone app</button>
-                    </form>` : ''}
-                ${admin ? `<div class="section-title">Who can use it</div>
-                    <div class="ms-users">${users.map(u => `<div class="ms-user"><span class="avatar sm">${esc(u.fullName.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</span>
-                        <div class="grow min-0"><b>${esc(u.fullName)}</b><small class="muted">${u.mobileAccess
-                            ? esc(u.mobileFeatures.filter(k => u.features.includes(k)).map(k => k.charAt(0) + k.slice(1).toLowerCase().replace('_', ' ')).join(', ') || 'no sections')
-                            : 'no mobile access'}</small></div>
-                        <span class="badge ${u.mobileAccess ? 'aqua' : 'gray'}">${icon('phone')}${u.mobileAccess ? 'Allowed' : 'Off'}</span></div>`).join('')}</div>
-                    <p class="small muted">${icon('info')} Change a user's sections and mobile access under <a href="#/admin/users">Users</a>.</p>` : ''}
-            </div>
-        </div>` });
-    body.querySelector('#mobile-config-form')?.addEventListener('submit', async e => {
-        e.preventDefault();
-        const f = e.target;
-        try {
-            const features = [...f.querySelectorAll('[name^="f-"]:checked')].map(x => x.name.slice(2));
-            await api.put('/admin/mobile-config', { features, hideBalances: f.hideBalances.checked, maskNetWorth: f.maskNetWorth.checked,
-                hideAbove: f.hideAbove.value === '' ? null : Number(f.hideAbove.value) });
-            toast('Saved: the phone app picks it up the next time it syncs');
-        } catch (error) { toast(error.message, 'error'); }
+    if (!admin) {
+        body.innerHTML = panel({ title: 'Phone app', iconName: 'phone', body: `<p class="hint ms-pad">${icon('lock')} Only an admin can change what the phone app offers.</p>` });
+        return;
+    }
+    const [cfg, sessions, accounts, users, app] = await Promise.all([api.get('/admin/mobile-config'), api.get('/admin/mobile-config/sessions').catch(() => []),
+        loadAccounts().catch(() => []), api.get('/admin/users').catch(() => []), api.get('/meta/app').catch(() => ({}))]);
+    const roles = Object.keys(APP_ROLE_LABELS);
+    const money = accounts.filter(a => a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY').sort((a, b) => a.name.localeCompare(b.name));
+    const on = (role, k) => (cfg.roleFeatures?.[role] || cfg.features).includes(k);
+    const allowed = role => (cfg.roles || roles).includes(role);
+    const people = role => users.filter(u => u.role === role).length;
+
+    body.innerHTML = `<div class="ms2">
+        <section class="panel ms2-hero ${cfg.enabled === false ? 'off' : ''}">
+            <span class="ms2-phone">${icon('phone')}</span>
+            <div class="grow min-0"><b>Personal Budget for Android</b>
+                <p>The app on the phone signs in once, then opens with the phone's own lock. Here you decide who can use it and what it shows.</p></div>
+            <label class="switch ms2-switch"><input type="checkbox" id="ms-enabled" ${cfg.enabled === false ? '' : 'checked'}><span></span><em>${cfg.enabled === false ? 'Switched off' : 'In use'}</em></label>
+        </section>
+        <form id="ms-form" class="ms2-grid">
+            ${panel({ title: 'Who can use it, and what they see', iconName: 'users', cls: 'ms2-wide', bodyClass: 'flush', sub: 'per role · tick the sections; “view only” lets them look but not record',
+                body: `<div class="scroll"><table class="grid compact ms2-matrix"><thead><tr><th>Role</th><th class="c">Can sign in</th>
+                    ${APP_SECTIONS.map(([k, ic, t]) => `<th class="c" title="${t}">${icon(ic)}<span>${t}</span></th>`).join('')}<th class="c">View only</th></tr></thead>
+                    <tbody>${roles.map(r => `<tr data-role="${r}" class="${allowed(r) ? '' : 'ms2-blocked'}"><th><b>${APP_ROLE_LABELS[r]}</b><small>${people(r)} ${people(r) === 1 ? 'person' : 'people'}</small></th>
+                        <td class="c"><label class="switch sm"><input type="checkbox" name="role-${r}" ${allowed(r) ? 'checked' : ''}><span></span></label></td>
+                        ${APP_SECTIONS.map(([k]) => `<td class="c"><input type="checkbox" class="ms2-cb" name="rf-${r}-${k}" ${on(r, k) ? 'checked' : ''}></td>`).join('')}
+                        <td class="c"><input type="checkbox" class="ms2-cb ro" name="ro-${r}" ${(cfg.readOnlyRoles || []).includes(r) ? 'checked' : ''}></td></tr>`).join('')}</tbody></table></div>
+                    <p class="small muted ms-pad">${icon('info')} A person also needs the section shared with them under <a href="#/admin/users">Users</a>; the app shows the overlap.</p>` })}
+            ${panel({ title: 'Balances', iconName: 'eye', body: `<div class="ms2-stack">
+                <label class="cs-check"><input type="checkbox" name="hideBalances" ${cfg.hideBalances ? 'checked' : ''}> <span><b>Open with balances hidden</b><small>dots until “View balances” is tapped</small></span></label>
+                <label class="cs-check"><input type="checkbox" name="maskNetWorth" ${cfg.maskNetWorth ? 'checked' : ''}> <span><b>Never show the net worth</b><small>the total stays off the phone's screens</small></span></label>
+                <label class="field"><span>Keep any balance above ₹ hidden <small class="muted">tap it to see · empty = no limit</small></span>
+                    <input name="hideAbove" type="number" min="0" step="1000" value="${cfg.hideAbove ?? ''}" placeholder="e.g. 100000" data-plain></label>
+                <label class="field"><span>Sign-in lasts <small class="muted">then the password is asked again</small></span>
+                    <select name="sessionDays">${[1, 7, 14, 30, 60, 90, 180].map(d => `<option value="${d}" ${Number(cfg.sessionDays || 30) === d ? 'selected' : ''}>${d === 1 ? '1 day' : `${d} days`}</option>`).join('')}</select></label>
+                <p class="small muted">${icon('shield')} A screen against onlookers and a borrowed phone: a signed-in app still receives the figures.</p></div>` })}
+            ${panel({ title: 'Accounts kept private', iconName: 'lock', bodyClass: 'flush', sub: 'their balance is always hidden in the app',
+                body: money.length ? `<div class="ms2-accts scroll">${money.map(a => `<label class="ms2-acct"><input type="checkbox" name="ha-${a.id}" ${(cfg.hiddenAccounts || []).includes(a.id) ? 'checked' : ''}>
+                    <span class="grow min-0"><b class="ellipsis">${esc(a.name)}</b><small>${esc(a.typeLabel || a.accountType || '')}</small></span><span class="ms2-bal">${moneyShort(a.balance)}</span></label>`).join('')}</div>`
+                    : emptyState('No accounts yet.', 'bank') })}
+            <div class="ms2-save ms2-wide"><span class="small muted" id="ms-dirty"></span><button class="btn primary" type="submit">${icon('check')}Save for the phone app</button></div>
+        </form>
+        ${panel({ title: 'Phones signed in', iconName: 'phone', bodyClass: 'flush', sub: sessions.length ? `${sessions.length} now` : '',
+            body: sessions.length ? `<div class="ms2-sessions">${sessions.map(x => `<div class="ms2-sess"><span class="ms2-dev">${icon('phone')}</span>
+                <div class="grow min-0"><b>${esc(x.user)}</b> <span class="badge gray">${esc(x.role || '')}</span><small class="ellipsis">${esc((x.device || 'Phone').slice(0, 80))}</small>
+                    <small>Signed in ${dateTime(x.signedIn)} · until ${dateTime(x.expires)}</small></div>
+                <button type="button" class="btn sm danger" data-end="${x.id}">${icon('log-out')}Sign out</button></div>`).join('')}</div>`
+                : `<p class="small muted ms-pad">${icon('info')} No phone is signed in to the app.</p>` })}
+        <details class="ms2-adv"><summary>${icon('settings')}Mobile web address (for phones without the app)</summary>
+            <form id="mobile-path-form" class="ms-path"><label class="field"><span>Address</span>
+                <span class="ms-url"><span class="muted">${esc(location.origin)}/</span><input name="mobilePath" value="${esc(app.mobilePath || 'm')}" pattern="[a-z0-9][a-z0-9-]{0,29}" maxlength="30" required data-plain><span class="muted">/</span></span></label>
+                <button class="btn sm" type="submit">${icon('check')}Save address</button></form>
+            <p class="small muted">Phones that open the full site are taken to the mobile web version automatically.</p></details>
+    </div>`;
+
+    const form = body.querySelector('#ms-form');
+    const enabled = body.querySelector('#ms-enabled');
+    // a role that cannot sign in greys out its row
+    form.addEventListener('change', e => {
+        const m = e.target.name?.match(/^role-(.+)$/);
+        if (m) form.querySelector(`tr[data-role="${m[1]}"]`).classList.toggle('ms2-blocked', !e.target.checked);
+        body.querySelector('#ms-dirty').textContent = 'Unsaved changes';
     });
+    const save = async () => {
+        const f = form;
+        const roleFeatures = Object.fromEntries(roles.map(r => [r, APP_SECTIONS.map(([k]) => k).filter(k => f[`rf-${r}-${k}`].checked)]));
+        await api.put('/admin/mobile-config', {
+            features: [...new Set(Object.values(roleFeatures).flat())], roleFeatures,
+            roles: roles.filter(r => f[`role-${r}`].checked), readOnlyRoles: roles.filter(r => f[`ro-${r}`].checked),
+            hiddenAccounts: money.filter(a => f[`ha-${a.id}`]?.checked).map(a => a.id),
+            hideBalances: f.hideBalances.checked, maskNetWorth: f.maskNetWorth.checked,
+            hideAbove: f.hideAbove.value === '' ? null : Number(f.hideAbove.value), sessionDays: Number(f.sessionDays.value), enabled: enabled.checked,
+        });
+    };
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        try { await save(); body.querySelector('#ms-dirty').textContent = ''; toast('Saved: the phone app picks it up the next time it syncs'); }
+        catch (error) { toast(error.message, 'error'); }
+    });
+    enabled.addEventListener('change', async () => {
+        try {
+            await save();
+            toast(enabled.checked ? 'The phone app can be used again' : 'The phone app is switched off: no one can sign in to it');
+            reload();
+        } catch (error) { toast(error.message, 'error'); enabled.checked = !enabled.checked; }
+    });
+    body.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', async () => {
+        if (!await confirmDialog('The app on that phone will ask for the password again.', { title: 'Sign this phone out?', confirmLabel: 'Sign out' })) return;
+        try { await api.del(`/admin/mobile-config/sessions/${b.dataset.end}`); toast('Signed out'); reload(); } catch (error) { toast(error.message, 'error'); }
+    }));
     body.querySelector('#mobile-path-form').addEventListener('submit', async e => {
         e.preventDefault();
         try {
             const saved = await api.put('/admin/app-settings', { mobilePath: e.target.mobilePath.value });
-            toast(`The mobile version is now at /${saved.mobilePath}/`);
+            toast(`The mobile web version is now at /${saved.mobilePath}/`);
             reload();
         } catch (error) { toast(error.message, 'error'); }
     });

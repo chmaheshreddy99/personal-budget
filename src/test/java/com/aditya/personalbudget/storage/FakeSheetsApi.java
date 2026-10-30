@@ -106,6 +106,10 @@ final class FakeSheetsApi {
             calls.add("batchUpdate");
             return batchUpdate(JsonParser.parseString(body).getAsJsonObject());
         }
+        if (method.equals("GET") && path.contains("/values/")) {
+            calls.add("values.get");
+            return valuesGet(URLDecoder.decode(path.substring(path.indexOf("/values/") + 8), StandardCharsets.UTF_8));
+        }
         if (method.equals("GET")) {
             calls.add("get");
             return metadata();
@@ -205,7 +209,26 @@ final class FakeSheetsApi {
         return "{}";
     }
 
-    private String batchGet(String query) {
+/** One range of one tab, like 'tab'!A2:A2 (only the top-left cell of the range is returned). */
+    private String valuesGet(String range) {
+        Tab tab = tabs.get(title(range.substring(0, range.lastIndexOf('!'))));
+        String a1 = range.substring(range.lastIndexOf('!') + 1).split(":")[0];
+        int row = Integer.parseInt(a1.replaceAll("[A-Z]", "")) - 1;
+        int col = a1.replaceAll("[0-9]", "").charAt(0) - 'A';
+        JsonObject vr = new JsonObject();
+        vr.addProperty("range", range);
+        String cell = tab == null ? "" : tab.cell(row, col);
+        if (!cell.isEmpty()) {
+            JsonArray values = new JsonArray();
+            JsonArray r = new JsonArray();
+            r.add(cell);
+            values.add(r);
+            vr.add("values", values);
+        }
+        return vr.toString();
+    }
+
+        private String batchGet(String query) {
         JsonArray ranges = new JsonArray();
         for (String param : query.split("&")) {
             if (!param.startsWith("ranges=")) {

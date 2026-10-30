@@ -65,7 +65,8 @@ public class InvestmentAdviceService {
     public record Bucket(String name, double percent, double monthly, double expectedReturn, double volatility, String instruments, double current, double currentPercent) {
     }
 
-    public record BankRow(String name, String type, double balance, Double rate, double yearlyInterest) {
+    /** A bank, cash or wallet account: what it holds, what it pays, and what keeping money there costs a year against the better place for it. */
+    public record BankRow(String name, String type, double balance, Double rate, double yearlyInterest, String typeCode, double lossPerYear) {
     }
 
     public record Banks(List<BankRow> accounts, double liquid, double averageYield, double yearlyInterest, double idle, double alternativeRate, double idleLossPerYear,
@@ -97,7 +98,14 @@ public class InvestmentAdviceService {
 
     public record Advice(boolean enough, String message, Profile profile, double investable, double toEmergency, double toInvest, double blendedReturn,
                          List<Step> steps, List<Bucket> allocation, Banks banks, Risk risk, List<Projection> projection, List<Simulation> simulation, Goal goal,
-                         List<String> notes, String disclaimer, Fitness fitness, List<Rebalance> rebalance) {
+                         List<String> notes, String disclaimer, Fitness fitness, List<Rebalance> rebalance, List<Move> moves, double movesGain) {
+    }
+
+    /**
+     * A suggested transfer between my own accounts to earn more interest: from a low-paying account to a better one (or to a deposit at the
+     * deposit rate), keeping the safety net liquid. gainPerYear is the extra interest a year.
+     */
+    public record Move(String from, String to, double amount, double fromRate, double toRate, double gainPerYear, String reason) {
     }
 
     public Advice advise(Integer ageIn, String riskIn, Integer horizonIn, Double goalAmount, Double alternativeRate) {
@@ -126,7 +134,7 @@ public class InvestmentAdviceService {
         double income = DeepAnalysisService.Stats.mean(incomes), spending = DeepAnalysisService.Stats.mean(spends);
         if (months < 2 || income <= 0) {
             return new Advice(false, "The plan needs at least two complete months with income recorded. Add your salary or other income as income entries, then come back.",
-                    null, 0, 0, 0, 0, List.of(), List.of(), null, null, List.of(), List.of(), null, List.of(), disclaimer(), null, List.of());
+                    null, 0, 0, 0, 0, List.of(), List.of(), null, null, List.of(), List.of(), null, List.of(), disclaimer(), null, List.of(), List.of(), 0);
         }
         double surplus = income - spending;
         double incomeCv = income == 0 ? 0 : DeepAnalysisService.Stats.sd(incomes) / income;
@@ -137,6 +145,7 @@ public class InvestmentAdviceService {
         Map<Long, BigDecimal> balances = books.balancesAsOf(today);
         double liquid = 0, liabilities = 0, costlyDebt = 0, equityNow = 0, debtNow = 0, goldNow = 0, otherNow = 0, yieldSum = 0;
         List<BankRow> bankRows = new ArrayList<>();
+        List<String[]> deposits = new ArrayList<>();   // { name, rate } of the deposits I hold
         for (Map.Entry<Long, BigDecimal> e : balances.entrySet()) {
             Account a = books.account(e.getKey());
             if (a == null) continue;
@@ -145,7 +154,11 @@ public class InvestmentAdviceService {
                 liquid += v;
                 Double rate = a.getInterestRate() == null ? null : a.getInterestRate().doubleValue();
                 if (rate != null) yieldSum += v * rate;
-                if (v > 0) bankRows.add(new BankRow(a.getName(), a.getAccountType().getLabel(), r(v), rate, r(v * (rate == null ? 0 : rate) / 100)));
+                if (v > 0) bankRows.add(new BankRow(a.getName(), a.getAccountType().getLabel(), r(v), rate, r(v * (rate == null ? 0 : rate) / 100), a.getAccountType().name(), 0));
+            }
+            if ((a.getAccountType() == AccountType.FIXED_DEPOSIT || a.getAccountType() == AccountType.RECURRING_DEPOSIT) && a.getInterestRate() != null
+                    && Boolean.TRUE.equals(a.getActive())) {
+                deposits.add(new String[]{a.getName(), a.getInterestRate().toPlainString()});
             }
             if (a.getAccountClass() == AccountClass.LIABILITY && v > 0) {
                 liabilities += v;
@@ -168,6 +181,39 @@ public class InvestmentAdviceService {
         double idle = Math.max(0, liquid - emergencyTarget - spending);
         double idleLoss = idle * Math.max(0, alt - avgYield) / 100;
         bankRows.sort(Comparator.comparingDouble(BankRow::balance).reversed());
+
+        // ---- where each rupee earns most: the safety net in the best-paying liquid account, everything above it in the best deposit
+        List<Move> moves = new ArrayList<>();
+        java.util.Map<String, Double> loss = new java.util.HashMap<>();
+        double needed = emergencyTarget + spending;   // the safety net and a month to live on stay liquid
+        BankRow bestLiquid = bankRows.stream().filter(x -> x.rate() != null && "BANK".equals(x.typeCode())).max(Comparator.comparingDouble(BankRow::rate)).orElse(null);
+        String[] bestDeposit = deposits.stream().max(Comparator.comparingDouble(d -> Double.parseDouble(d[1]))).orElse(null);
+        double depositRate = Math.max(alt, bestDeposit == null ? 0 : Double.parseDouble(bestDeposit[1]));
+        String depositName = bestDeposit != null && Double.parseDouble(bestDeposit[1]) >= alt ? bestDeposit[0] + " (or a new deposit there)" : "a fixed deposit or liquid fund";
+        // what stays liquid is kept in the best-paying accounts first; the rest is the excess, taken from the worst-paying first
+        List<BankRow> byRateDesc = bankRows.stream().filter(x -> "BANK".equals(x.typeCode()) || x.balance() > 20000)
+                .sorted(Comparator.comparingDouble((BankRow x) -> x.rate() == null ? 0 : x.rate()).reversed()).toList();
+        double keepLeft = needed;
+        for (BankRow x : byRateDesc) {
+            double rate = x.rate() == null ? 0 : x.rate();
+            double keep = Math.min(x.balance(), keepLeft), excess = x.balance() - keep;
+            keepLeft -= keep;
+            if (excess >= 1000 && depositRate - rate >= 0.25) {
+                double gain = excess * (depositRate - rate) / 100;
+                moves.add(new Move(x.name(), depositName, r(excess), rate, depositRate, r(gain),
+                        String.format("Not needed for the safety net: at %.2f%% instead of %.2f%% it earns ₹%,.0f more a year.", depositRate, rate, gain)));
+                loss.merge(x.name(), gain, Double::sum);
+            }
+            if (keep >= 1000 && bestLiquid != null && x != bestLiquid && bestLiquid.rate() - rate >= 0.5) {
+                double gain = keep * (bestLiquid.rate() - rate) / 100;
+                moves.add(new Move(x.name(), bestLiquid.name(), r(keep), rate, bestLiquid.rate(), r(gain),
+                        String.format("Safety-net money still liquid, but paying %.2f%% instead of %.2f%%: ₹%,.0f more a year.", bestLiquid.rate(), rate, gain)));
+                loss.merge(x.name(), gain, Double::sum);
+            }
+        }
+        moves.sort(Comparator.comparingDouble(Move::gainPerYear).reversed());
+        double movesGain = moves.stream().mapToDouble(Move::gainPerYear).sum();
+        bankRows = new ArrayList<>(bankRows.stream().map(x -> new BankRow(x.name(), x.type(), x.balance(), x.rate(), x.yearlyInterest(), x.typeCode(), r(loss.getOrDefault(x.name(), 0.0)))).toList());
         Banks banks = new Banks(bankRows, r(liquid), round(avgYield, 2), r(liquid * avgYield / 100), r(idle), alt, r(idleLoss),
                 idle <= 0 ? "Nothing idle: the banks hold about what the emergency fund and a month's spending need."
                         : String.format("₹%,.0f sits in the banks beyond the emergency fund and a month's spending, earning %.1f%% a year. At %.1f%% (a liquid fund or deposit) it would earn ₹%,.0f more every year.",
@@ -213,7 +259,10 @@ public class InvestmentAdviceService {
                 ? String.format("Target %.0f months of spending (income varies by %.0f%%, so %s): ₹%,.0f. Liquid now ₹%,.0f, short by ₹%,.0f; about %s at this pace.", emergencyMonths, incomeCv * 100,
                 emergencyMonths > 6 ? "more than the usual six" : "the usual six", emergencyTarget, liquid, gap, toEmergency > 0 ? Math.ceil(gap / toEmergency) + " months" : "never without a surplus")
                 : String.format("Done: ₹%,.0f liquid covers %.1f months of spending (target %.0f).", liquid, spending == 0 ? 0 : liquid / spending, emergencyMonths), r(toEmergency), gap > 0 ? "now" : "done"));
-        if (idle > 0 && idleLoss >= 500) {
+        if (movesGain >= 500) {
+            steps.add(new Step(o++, "Move money to where it earns more", String.format("%d transfer%s between your own accounts would earn ₹%,.0f more a year (₹%,.0f a month), keeping the safety net liquid. See Banks & cash.",
+                    moves.size(), moves.size() == 1 ? "" : "s", movesGain, movesGain / 12), 0, "now"));
+        } else if (idle > 0 && idleLoss >= 500) {
             steps.add(new Step(o++, "Put idle bank money to work", banks.reading() + " Keep the emergency fund liquid, move the rest in one go.", 0, "now"));
         }
         steps.add(new Step(o++, "Protection", String.format("Term life cover of about ₹%,.0f (10× a year's income) if others depend on you, and a family health policy of ₹10 lakh or more. Premiums come before investing, not out of it.", income * 12 * 10), 0, "check"));
@@ -290,7 +339,7 @@ public class InvestmentAdviceService {
             for (int i = 0; i < 3; i++) rebalance.add(new Rebalance(names[i], r(cur[i]), r(cur[i] / held * 100), tgt[i], r(held * tgt[i] / 100), r(held * tgt[i] / 100 - cur[i])));
         }
         return new Advice(true, null, profile, r(investable), r(toEmergency), r(toInvest), Math.round(mu * 10) / 10.0, steps, allocation, banks, riskView, projection, simulation, goal, notes, disclaimer(),
-                fitness, rebalance);
+                fitness, rebalance, moves, r(movesGain));
     }
 
     // ================================================================== the maths

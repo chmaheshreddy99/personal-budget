@@ -2162,3 +2162,33 @@ button.xl-chip:hover { background: #e2e8fb; border-color: #3a55b0; }
     .xl-refunds { margin-left: 8px; }
     .xl-part .xl-pct, .xl-part .xl-acts { display: none; }
 }
+/* settings › phone app */
+.ms2 { display: flex; flex-direction: column; gap: 10px; } .ms2 > * { flex: none; }
+.ms-pad { padding: 8px 12px; margin: 0; }
+.ms2-hero { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: linear-gradient(135deg, #0b4f80, #0b7cbd 60%, #13a89a); color: #fff; border: 0; }
+.ms2-hero.off { background: linear-gradient(135deg, #4b5560, #6b7785); }
+.ms2-hero p { margin: 2px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, .85); } .ms2-hero b { font-size: 15px; }
+.ms2-phone { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(255, 255, 255, .16); flex: none; } .ms2-phone svg { width: 22px; height: 22px; }
+.ms2-switch { color: #fff; font-weight: 700; } .ms2-switch em { font-style: normal; font-size: 12.5px; }
+.ms2-switch span { width: 40px; height: 22px; background: rgba(255, 255, 255, .3); } .ms2-switch span::after { width: 18px; height: 18px; } .ms2-switch input:checked + span { background: #12a150; } .ms2-switch input:checked + span::after { transform: translateX(18px); }
+.ms2-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; } .ms2-wide { grid-column: 1 / -1; }
+.ms2-matrix th, .ms2-matrix td { padding: 6px 8px; vertical-align: middle; } .ms2-matrix .c { text-align: center; }
+.ms2-matrix thead th { font-size: 10.5px; } .ms2-matrix thead th svg { display: block; margin: 0 auto 2px; width: 15px; height: 15px; color: #0b7cbd; }
+.ms2-matrix tbody th b { display: block; font-size: 13px; } .ms2-matrix tbody th small { color: #7a8794; font-size: 10.5px; font-weight: 400; }
+.ms2-cb { width: 17px; height: 17px; accent-color: #0b7cbd; cursor: pointer; } .ms2-cb.ro { accent-color: #b45f06; }
+.ms2-matrix tr.ms2-blocked td:not(:nth-child(2)), .ms2-matrix tr.ms2-blocked th { opacity: .38; }
+.ms2-matrix tbody tr:hover td, .ms2-matrix tbody tr:hover th { background: rgba(11, 124, 189, .04); }
+.ms2-stack { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; } .ms2-stack .cs-check small { display: block; color: #7a8794; font-size: 11.5px; }
+.ms2-accts { display: flex; flex-direction: column; max-height: 290px; } .ms2-acct { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--hairline); cursor: pointer; }
+.ms2-acct:hover { background: rgba(11, 124, 189, .04); } .ms2-acct small { display: block; color: #7a8794; font-size: 11px; } .ms2-acct b { display: block; font-size: 13px; }
+.ms2-acct input { width: 16px; height: 16px; accent-color: #b42318; } .ms2-acct input:checked ~ .ms2-bal { filter: blur(4px); } .ms2-bal { font-size: 12.5px; font-weight: 600; color: #4b5560; }
+.ms2-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; } #ms-dirty { color: #b45f06; }
+.ms2-sessions { display: flex; flex-direction: column; } .ms2-sess { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--hairline); }
+.ms2-sess small { display: block; color: #7a8794; font-size: 11px; } .ms2-dev { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: #eaf3fa; color: #0b5d8e; flex: none; }
+.ms2-adv { padding: 8px 12px; border-radius: 12px; background: var(--surface, #fff); border: 1px solid var(--hairline); } .ms2-adv summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: #4b5560; display: flex; gap: 6px; align-items: center; }
+.ms2-adv summary svg { width: 14px; height: 14px; } .ms2-adv[open] summary { margin-bottom: 8px; }
+@media (max-width: 900px) { .ms2-grid { grid-template-columns: minmax(0, 1fr); } }
+.panel.ms2-hero { flex-direction: row; text-align: left; } .ms2-hero > .grow, .ms2-acct > .grow, .ms2-sess > .grow { flex: 1; min-width: 0; }
+.ms2-matrix tbody th { text-transform: none; letter-spacing: 0; text-align: left; } .ms2-matrix tbody th b { color: var(--text, #1b2733); }
+.ms2-stack .field > span { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; } .ms2-stack .field small { font-weight: 400; }
+.ms2-acct .ms2-bal { min-width: 70px; text-align: right; }

@@ -78,7 +78,12 @@ public class ChitReceiptService {
     public record CreateRequest(@NotEmpty List<Long> installmentIds, @Size(max = 100) String organizerName,
                                 @NotBlank @Size(max = 20) String organizerPhone, Boolean rememberPhone,
                                 @NotBlank @Size(max = 100) String payerName, @Size(max = 200) String paymentNote,
-                                @Min(1) @Max(MAX_LINK_HOURS) Integer hours, Boolean requireSelfie, Boolean requireLocation) {
+                                @Min(1) @Max(MAX_LINK_HOURS) Integer hours, Boolean requireSelfie, Boolean requireLocation, Boolean simple) {
+
+        public CreateRequest(List<Long> installmentIds, String organizerName, String organizerPhone, Boolean rememberPhone, String payerName,
+                             String paymentNote, Integer hours, Boolean requireSelfie, Boolean requireLocation) {
+            this(installmentIds, organizerName, organizerPhone, rememberPhone, payerName, paymentNote, hours, requireSelfie, requireLocation, null);
+        }
     }
 
     /** The receipt for the payout received in full; the installments and earlier acknowledgements come from the chit. */
@@ -249,7 +254,8 @@ public class ChitReceiptService {
         a.setChitName(chit.getName());
         a.setTicketNo(blank(chit.getTicketNo()));
         a.setInstallmentIds(picked.stream().map(i -> String.valueOf(i.getId())).collect(Collectors.joining(",")));
-        a.setKind(ChitReceiptAck.KIND_INSTALLMENTS);
+        boolean simple = Boolean.TRUE.equals(r.simple());
+        a.setKind(simple ? ChitReceiptAck.KIND_SIMPLE : ChitReceiptAck.KIND_INSTALLMENTS);
         a.setLines(encode(lines));
         a.setTotalAmount(total);
         a.setPaymentNote(blank(r.paymentNote()));
@@ -264,7 +270,7 @@ public class ChitReceiptService {
         a.setContentHash("pending");
         a = acks.save(a);
         a.setAckNo(String.format("CR-%06d", a.getId()));
-        a.setTerms(terms(a, chit, lines));
+        a.setTerms(simple ? simpleTerms(a, lines) : terms(a, chit, lines));
         a.setContentHash(fingerprint(a));
         String token = newLink(a, r.hours() == null ? DEFAULT_LINK_HOURS : r.hours());
         keep(a);
@@ -698,6 +704,21 @@ public class ChitReceiptService {
      * The standard wording, with the figures filled in: numbered clauses, each "HEADING: text". The payments are listed
      * with it (and covered by the same fingerprint).
      */
+    private static String simpleTerms(ChitReceiptAck a, List<Line> lines) {
+        String rupees = ActivityService.money(a.getTotalAmount()) + " (" + HostedChitService.inWords(a.getTotalAmount()) + ")";
+        String nos = lines.stream().map(l -> String.valueOf(l.no())).collect(Collectors.joining(", "));
+        StringBuilder t = new StringBuilder();
+        t.append("I, ").append(a.getOrganizerName()).append(", received ").append(rupees).append(" from ").append(a.getPayerName())
+                .append(" for installment").append(lines.size() == 1 ? " " : "s ").append(nos).append(" of the chit \"").append(a.getChitName()).append("\"")
+                .append(a.getTicketNo() == null ? "" : " (ticket " + a.getTicketNo() + ")").append(". Nothing more is due for ")
+                .append(lines.size() == 1 ? "it" : "them").append(".\n");
+        t.append("I sign this electronically from a link sent to my phone (Information Technology Act, 2000); the time, my IP address and my phone's details are kept with it.");
+        if (a.getPaymentNote() != null) {
+            t.append("\nPaid by: ").append(a.getPaymentNote());
+        }
+        return t.toString();
+    }
+
     private static String terms(ChitReceiptAck a, Chit chit, List<Line> lines) {
         String rupees = ActivityService.money(a.getTotalAmount()) + " (" + HostedChitService.inWords(a.getTotalAmount()) + ")";
         String chitRef = "the chit \"" + a.getChitName() + "\"" + (a.getTicketNo() == null ? "" : " (ticket / group no. " + a.getTicketNo() + ")")
@@ -733,7 +754,7 @@ public class ChitReceiptService {
     }
 
     private static String kindOf(ChitReceiptAck a) {
-        return isPayout(a) ? ChitReceiptAck.KIND_PAYOUT : ChitReceiptAck.KIND_INSTALLMENTS;
+        return isPayout(a) ? ChitReceiptAck.KIND_PAYOUT : ChitReceiptAck.KIND_SIMPLE.equals(a.getKind()) ? ChitReceiptAck.KIND_SIMPLE : ChitReceiptAck.KIND_INSTALLMENTS;
     }
 
     /** The numbers of the acknowledgements a payout receipt cancels. */

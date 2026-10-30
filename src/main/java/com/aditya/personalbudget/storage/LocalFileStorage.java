@@ -38,6 +38,8 @@ public final class LocalFileStorage implements TableStorage {
     }
 
     private final Path dataDir;
+    /** The stamp of each table as this process last wrote or polled it (see poll). */
+    private final Map<String, Object> seen = new java.util.concurrent.ConcurrentHashMap<>();
 
     public LocalFileStorage(Path dataDir) {
         this.dataDir = dataDir.toAbsolutePath().normalize();
@@ -105,8 +107,9 @@ public final class LocalFileStorage implements TableStorage {
     }
 
     @Override
-    public void write(Map<String, List<List<String>>> tables, Properties sequences) {
+    public synchronized void write(Map<String, List<List<String>>> tables, Properties sequences) {
         tables.forEach(this::writeTable);
+        tables.keySet().forEach(t -> { Object st = stamp(t); if (st != null) seen.put(t, st); });   // our own writes are not news
         if (sequences != null) {
             writeSequences(sequences);
         }
@@ -124,6 +127,20 @@ public final class LocalFileStorage implements TableStorage {
             }
         }
         return p;
+    }
+
+    /** Every read checks the file's stamp already; this only finds out which files another process rewrote. */
+    @Override
+    public synchronized java.util.Set<String> poll(boolean full) {
+        java.util.Set<String> changed = new java.util.TreeSet<>();
+        for (String table : tableNames()) {
+            Object now = stamp(table);
+            Object before = seen.put(table, now);
+            if (before != null && !before.equals(now)) {
+                changed.add(table);
+            }
+        }
+        return changed;
     }
 
     @Override

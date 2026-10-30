@@ -154,6 +154,23 @@ class ChitReceiptAckTests {
     }
 
     @Test
+    void aSimpleReceiptIsThreePlainLinesAndSignsLikeTheFullOne() {
+        Long a = pay(0), b = pay(1);
+        CreatedLink made = receipts.create(chitId, new CreateRequest(List.of(a, b), null, "98765 43210", false, "Mahesh Reddy", "UPI 4411", 48, false, false, true));
+        assertThat(made.receipt().kind()).isEqualTo(ChitReceiptAck.KIND_SIMPLE);
+        assertThat(made.receipt().terms()).contains("received").contains("installments 1, 2").contains("UPI 4411")
+                .contains("Information Technology Act").doesNotContain("PARTIES").hasLineCount(3);
+
+        String token = made.token();
+        PublicAck open = receipts.open(token, new OpenRequest("9876543210"));
+        assertThat(open.kind()).isEqualTo(ChitReceiptAck.KIND_SIMPLE);
+        PublicAck done = receipts.acknowledge(token, new AckRequest("9876543210", "Ram Kumar", true, SIGN, null, "{}"), "1.2.3.4", "UA");
+        assertThat(done.step()).isEqualTo("DONE");
+        assertThat(receipts.list(chitId).getFirst().status()).isEqualTo(ChitReceiptAck.ACKNOWLEDGED);
+        assertThatThrownBy(() -> receipts.create(chitId, ask(List.of(a)))).isInstanceOf(BusinessException.class).hasMessageContaining("already has");
+    }
+
+    @Test
     void fiveWrongNumbersLockTheLinkAndOnlyPaidInstallmentsCanBeSent() {
         Long a = pay(0);
         Long unpaid = chits.detail(chitId).installments().get(5).id();

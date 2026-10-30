@@ -41,13 +41,102 @@ public class AppSettingsService {
     public static final java.util.List<String> MOBILE_FEATURES = java.util.List.of("EXPENSES", "INCOME", "TRANSFERS", "ACCOUNTS", "CHITS", "CLAIMS", "EMIS", "GIFTS");
 
     /**
-     * features: the sections the app offers (an off section is hidden in the app and refused when the phone syncs it).
-     * hideBalances: balances show as dots until the person taps to view them. maskNetWorth: the total across all accounts is
-     * never shown in the app. hideAbove: a balance above this amount (when set) stays hidden even after "view balances", until it is
-     * tapped by itself. This is a privacy screen for the phone (shoulder-surfing, a handed-over phone), not access control:
-     * the server still sends the figures to a signed-in app.
+     * What the phone app (the Android app) may do for a household, set in Settings › Mobile app on the web.
+     * <ul>
+     *   <li>enabled: the app can be signed in to at all; roles: the roles that may sign in to it.</li>
+     *   <li>features: the sections the app offers; roleFeatures: for each role, the sections it gets (within features); readOnlyRoles: roles that
+     *       see their sections but record nothing. A section that is off is hidden in the app and refused when the phone syncs it.</li>
+     *   <li>hideBalances: balances show as dots until the person taps to view them; maskNetWorth: the total is never shown; hideAbove: a balance
+     *       above this stays hidden even then, until it is tapped by itself; hiddenAccounts: these accounts' balances are always hidden.</li>
+     *   <li>sessionDays: how long a sign-in on the app lasts before the password is asked again (the phone's own lock opens it in between).</li>
+     * </ul>
+     * The privacy settings are a screen against onlookers, not access control: a signed-in app still receives the figures.
      */
-    public record MobileConfig(java.util.Set<String> features, boolean hideBalances, boolean maskNetWorth, java.math.BigDecimal hideAbove) {
+    public record MobileConfig(java.util.Set<String> features, boolean hideBalances, boolean maskNetWorth, java.math.BigDecimal hideAbove,
+                               Boolean enabled, java.util.Set<String> roles, java.util.Map<String, java.util.Set<String>> roleFeatures,
+                               java.util.Set<String> readOnlyRoles, java.util.Set<Long> hiddenAccounts, Integer sessionDays) {
+
+        public MobileConfig(java.util.Set<String> features, boolean hideBalances, boolean maskNetWorth, java.math.BigDecimal hideAbove) {
+            this(features, hideBalances, maskNetWorth, hideAbove, true, null, null, null, null, null);
+        }
+    }
+
+    /** The roles the phone app knows. */
+    public static final java.util.List<String> APP_ROLES = java.util.List.of("SUPER_ADMIN", "ADMIN", "MANAGER", "ACCOUNTANT", "MEMBER", "VIEWER");
+
+    private static java.util.Set<String> csv(String v, java.util.Collection<String> allowed) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        if (v == null) return out;
+        for (String x : v.split(",")) if (allowed.contains(x.trim())) out.add(x.trim());
+        return out;
+    }
+
+    public MobileConfig mobileConfig(Long tenantId) {
+        Properties p = read();
+        String key = "mobile." + tenantId + ".";
+        String stored = p.getProperty(key + "features");
+        java.util.Set<String> on = stored == null ? new java.util.LinkedHashSet<>(MOBILE_FEATURES) : csv(stored, MOBILE_FEATURES);
+        java.math.BigDecimal above = null;
+        try {
+            String a = p.getProperty(key + "hide-above");
+            if (a != null && !a.isBlank()) above = new java.math.BigDecimal(a.trim());
+        } catch (NumberFormatException e) {
+            above = null;
+        }
+        String roles = p.getProperty(key + "roles");
+        java.util.Map<String, java.util.Set<String>> byRole = new java.util.LinkedHashMap<>();
+        for (String role : APP_ROLES) {
+            String rf = p.getProperty(key + "role." + role + ".features");
+            byRole.put(role, rf == null ? new java.util.LinkedHashSet<>(on) : csv(rf, MOBILE_FEATURES));
+        }
+        String readOnly = p.getProperty(key + "readonly-roles");
+        java.util.Set<Long> hidden = new java.util.LinkedHashSet<>();
+        for (String x : p.getProperty(key + "hidden-accounts", "").split(",")) {
+            try { if (!x.isBlank()) hidden.add(Long.valueOf(x.trim())); } catch (NumberFormatException e) { /* skip */ }
+        }
+        int days = 30;
+        try { days = Math.max(1, Math.min(365, Integer.parseInt(p.getProperty(key + "session-days", "30").trim()))); } catch (NumberFormatException e) { days = 30; }
+        return new MobileConfig(on, Boolean.parseBoolean(p.getProperty(key + "hide-balances", "true")),
+                Boolean.parseBoolean(p.getProperty(key + "mask-net-worth", "false")), above != null && above.signum() > 0 ? above : null,
+                Boolean.parseBoolean(p.getProperty(key + "enabled", "true")), roles == null ? new java.util.LinkedHashSet<>(APP_ROLES) : csv(roles, APP_ROLES),
+                byRole, readOnly == null ? new java.util.LinkedHashSet<>(java.util.List.of("VIEWER")) : csv(readOnly, APP_ROLES), hidden, days);
+    }
+
+    public synchronized MobileConfig saveMobileConfig(Long tenantId, MobileConfig c) {
+        Properties p = read();
+        String key = "mobile." + tenantId + ".";
+        java.util.function.Function<java.util.Collection<String>, String> join = v -> v == null ? "" : String.join(",", v);
+        java.util.Set<String> features = c.features() == null ? new java.util.LinkedHashSet<>(MOBILE_FEATURES) : csv(join.apply(c.features()), MOBILE_FEATURES);
+        if (c.roleFeatures() != null) {
+            // the household's sections are every section some role has
+            features = new java.util.LinkedHashSet<>();
+            for (String role : APP_ROLES) {
+                java.util.Set<String> rf = csv(join.apply(c.roleFeatures().getOrDefault(role, java.util.Set.of())), MOBILE_FEATURES);
+                p.setProperty(key + "role." + role + ".features", String.join(",", rf));
+                features.addAll(rf);
+            }
+        }
+        p.setProperty(key + "features", String.join(",", features));
+        p.setProperty(key + "hide-balances", String.valueOf(c.hideBalances()));
+        p.setProperty(key + "mask-net-worth", String.valueOf(c.maskNetWorth()));
+        if (c.hideAbove() != null && c.hideAbove().signum() > 0) p.setProperty(key + "hide-above", c.hideAbove().toPlainString());
+        else p.remove(key + "hide-above");
+        if (c.enabled() != null) p.setProperty(key + "enabled", String.valueOf(c.enabled()));
+        if (c.roles() != null) p.setProperty(key + "roles", String.join(",", csv(join.apply(c.roles()), APP_ROLES)));
+        if (c.readOnlyRoles() != null) p.setProperty(key + "readonly-roles", String.join(",", csv(join.apply(c.readOnlyRoles()), APP_ROLES)));
+        if (c.hiddenAccounts() != null) p.setProperty(key + "hidden-accounts", c.hiddenAccounts().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        if (c.sessionDays() != null) p.setProperty(key + "session-days", String.valueOf(Math.max(1, Math.min(365, c.sessionDays()))));
+        write(p);
+        return mobileConfig(tenantId);
+    }
+
+    /** What the app offers one person: the household's settings with their role's sections in place of the household's. */
+    public MobileConfig mobileConfigFor(Long tenantId, String role) {
+        MobileConfig c = mobileConfig(tenantId);
+        java.util.Set<String> mine = new java.util.LinkedHashSet<>(c.roleFeatures().getOrDefault(role, c.features()));
+        mine.retainAll(c.features());
+        return new MobileConfig(mine, c.hideBalances(), c.maskNetWorth(), c.hideAbove(), c.enabled(), c.roles(), c.roleFeatures(), c.readOnlyRoles(),
+                c.hiddenAccounts(), c.sessionDays());
     }
 
     /** The yearly rate (percent) set for a household as "what my money could have earned", or null when none is set. */
@@ -67,35 +156,6 @@ public class AppSettingsService {
         write(p);
     }
 
-    public MobileConfig mobileConfig(Long tenantId) {
-        Properties p = read();
-        String key = "mobile." + tenantId + ".";
-        java.util.Set<String> on = new java.util.LinkedHashSet<>();
-        String stored = p.getProperty(key + "features");
-        if (stored == null) on.addAll(MOBILE_FEATURES);
-        else for (String f : stored.split(",")) if (MOBILE_FEATURES.contains(f.trim())) on.add(f.trim());
-        java.math.BigDecimal above = null;
-        try {
-            String a = p.getProperty(key + "hide-above");
-            if (a != null && !a.isBlank()) above = new java.math.BigDecimal(a.trim());
-        } catch (NumberFormatException e) {
-            above = null;
-        }
-        return new MobileConfig(on, Boolean.parseBoolean(p.getProperty(key + "hide-balances", "true")),
-                Boolean.parseBoolean(p.getProperty(key + "mask-net-worth", "false")), above != null && above.signum() > 0 ? above : null);
-    }
-
-    public synchronized MobileConfig saveMobileConfig(Long tenantId, MobileConfig c) {
-        Properties p = read();
-        String key = "mobile." + tenantId + ".";
-        p.setProperty(key + "features", c.features() == null ? "" : c.features().stream().filter(MOBILE_FEATURES::contains).collect(java.util.stream.Collectors.joining(",")));
-        p.setProperty(key + "hide-balances", String.valueOf(c.hideBalances()));
-        p.setProperty(key + "mask-net-worth", String.valueOf(c.maskNetWorth()));
-        if (c.hideAbove() != null && c.hideAbove().signum() > 0) p.setProperty(key + "hide-above", c.hideAbove().toPlainString());
-        else p.remove(key + "hide-above");
-        write(p);
-        return mobileConfig(tenantId);
-    }
 
     private final Path file;
 

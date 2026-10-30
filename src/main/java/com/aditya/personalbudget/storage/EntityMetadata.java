@@ -35,6 +35,8 @@ public final class EntityMetadata<T> {
     private final Class<T> type;
     private final String tableName;
     private final List<ColumnMeta> columns;
+    /** The {@link Vaulted} columns: kept in the record's own file, not in the table. */
+    private final List<ColumnMeta> vaulted;
     private final ColumnMeta idColumn;
     private final List<List<ColumnMeta>> uniqueKeys;
     private final Constructor<T> constructor;
@@ -46,6 +48,10 @@ public final class EntityMetadata<T> {
         this.type = type;
         this.tableName = resolveTableName(type);
         this.columns = resolveColumns(type);
+        this.vaulted = columns.stream().filter(c -> c.field().isAnnotationPresent(Vaulted.class)).toList();
+        vaulted.stream().filter(c -> !c.isText() || c.id() || c.version()).findFirst().ifPresent(c -> {
+            throw new IllegalStateException(type.getSimpleName() + "." + c.name() + ": only text fields can be @Vaulted");
+        });
         this.idColumn = columns.stream().filter(ColumnMeta::id).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(type.getName() + " has no @Id field"));
         this.uniqueKeys = resolveUniqueKeys(type, columns);
@@ -66,6 +72,10 @@ public final class EntityMetadata<T> {
 
     public List<ColumnMeta> columns() {
         return columns;
+    }
+
+    public List<ColumnMeta> vaulted() {
+        return vaulted;
     }
 
     public ColumnMeta idColumn() {

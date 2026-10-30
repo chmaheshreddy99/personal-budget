@@ -53,6 +53,10 @@ public class UserSession implements TenantOwned {
     /** Opened by the mobile version: only the user's mobile sections are available. */
     private Boolean mobile;
 
+    /** "app" for the Android app (its sign-ins are listed in Settings › Mobile app and can be signed out there); empty for a browser. */
+    @Column(length = 10)
+    private String client;
+
     /** Opened with an access link: its sections, mode and expiry apply (the user is the admin who made it). */
     private Long linkId;
 }

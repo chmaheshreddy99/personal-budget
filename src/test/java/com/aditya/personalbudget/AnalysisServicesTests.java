@@ -36,6 +36,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /** The deep analysis, the investment plan and the interest-loss figure, run on a ledger with several months of history. */
 @SpringBootTest
@@ -118,9 +119,11 @@ class AnalysisServicesTests {
         assertThat(r.health().score()).isBetween(0.0, 100.0);
         assertThat(r.health().grade()).isIn("A", "B", "C", "D", "E");
         assertThat(r.health().parts()).hasSizeGreaterThanOrEqualTo(5);
-        assertThat(r.opportunities()).isNotEmpty();   // the groceries and the hospital month run above their usual level
-        assertThat(r.opportunities().getFirst().excess()).isGreaterThan(0);
-        assertThat(r.opportunities().stream().mapToDouble(o -> o.share()).sum()).isBetween(0.5, 1.001);
+        // the one hospital month is a one-off, not overspending: never a "saving", but a sinking fund
+        String hospital = r.outliers().stream().filter(o -> o.when().length() == 7 && o.amount() >= 38000).findFirst().orElseThrow().label();
+        assertThat(r.opportunities()).noneMatch(o -> o.name().equals(hospital));
+        assertThat(r.advice()).anyMatch(a -> a.contains(hospital) && a.contains("sinking fund"));
+        assertThat(r.opportunities().stream().mapToDouble(o -> o.share()).sum()).isLessThanOrEqualTo(1.001);
     }
 
     @Test
@@ -159,6 +162,15 @@ class AnalysisServicesTests {
         assertThat(s.p10()).isLessThan(s.p50());
         assertThat(s.p50()).isLessThan(s.p90());
         assertThat(s.p50()).isGreaterThan(s.invested());
+        // money above the safety net in the 3.5% savings account should go to the 7.1% FD
+        assertThat(a.moves()).isNotEmpty();
+        var move = a.moves().getFirst();
+        assertThat(move.from()).startsWith("Savings");
+        assertThat(move.to()).startsWith("FD");
+        assertThat(move.toRate()).isEqualTo(7.1);
+        assertThat(move.gainPerYear()).isEqualTo(Math.round(move.amount() * (7.1 - 3.5)) / 100.0, within(1.0));
+        assertThat(a.banks().accounts()).anyMatch(x -> x.name().startsWith("Savings") && x.lossPerYear() > 0);
+        assertThat(a.steps()).anyMatch(x -> x.title().contains("Move money"));
         assertThat(a.fitness()).isNotNull();
         assertThat(a.fitness().score()).isBetween(0.0, 100.0);
         assertThat(a.fitness().parts()).hasSize(5);
@@ -188,6 +200,12 @@ class AnalysisServicesTests {
         var charged = claims.create(new ClaimRequest(ClaimKind.LENT, "Ravi " + System.nanoTime(), "With interest", bd(50000), LocalDate.now().minusDays(100), null,
                 BigDecimal.valueOf(12), null, savings, null, null, null, null, null, null, null));
         assertThat(charged.forgoneInterest()).isNull();
+        // the deep analysis lists it, against the same benchmark
+        var forgone = deep.analyse(LocalDate.now().minusMonths(8).withDayOfMonth(1), LocalDate.now()).forgone();
+        assertThat(forgone).isNotNull();
+        assertThat(forgone.rows()).anyMatch(x -> x.id().equals(plain.id()) && x.forgone() > 960);
+        assertThat(forgone.rows()).noneMatch(x -> x.id().equals(charged.id()));
+        assertThat(forgone.perYear()).isGreaterThan(3500);   // 50,000 still out at 7.1%
     }
 
     private static BigDecimal bd(long v) {

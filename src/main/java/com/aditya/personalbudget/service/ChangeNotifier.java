@@ -43,6 +43,7 @@ public class ChangeNotifier {
 
     public ChangeNotifier(TsvDataStore store) {
         store.addCommitListener(this::onCommit);
+        store.addOutsideChangeListener(this::onOutsideChange);
         heartbeat.scheduleAtFixedRate(this::ping, 25, 25, TimeUnit.SECONDS);
     }
 
@@ -61,6 +62,19 @@ public class ChangeNotifier {
     /** How many browsers are listening (shown in the footer). */
     public long listeners(Long tenantId) {
         return subscribers.stream().filter(s -> s.tenantId().equals(tenantId)).count();
+    }
+
+    /** Saved by another server process (the phone app's, another machine) or by hand: every browser refreshes. */
+    private void onOutsideChange(Set<String> tables) {
+        if (QUIET.containsAll(tables)) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("tables", tables);
+        payload.put("userId", null);
+        payload.put("by", "Another device");
+        payload.put("at", OrgClock.now().toString());
+        subscribers.forEach(s -> send(s, "change", payload));
     }
 
     private void onCommit(Set<String> tables) {

@@ -2,6 +2,7 @@ package com.aditya.personalbudget.domain.entity;
 
 import com.aditya.personalbudget.domain.TenantOwned;
 import com.aditya.personalbudget.storage.References;
+import com.aditya.personalbudget.storage.Vaulted;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -92,7 +93,8 @@ public class ClaimAgreement implements TenantOwned {
     private String place;
 
     /** The full wording the borrower accepts. */
-    @Column(nullable = false, length = 6000)
+    @Vaulted
+    @Column(length = 6000)
     private String terms;
 
     /** SHA-256 of the wording and figures, shown on the agreement so any change is evident. */
@@ -106,6 +108,7 @@ public class ClaimAgreement implements TenantOwned {
     @Column(length = 40)
     private String stampSerial;
 
+    @Vaulted
     @Column(length = 20000)
     private String lenderSignature;
 
@@ -118,6 +121,7 @@ public class ClaimAgreement implements TenantOwned {
     @Column(length = 150)
     private String witnessAddress;
 
+    @Vaulted
     @Column(length = 20000)
     private String witnessSignature;
 
@@ -170,6 +174,7 @@ public class ClaimAgreement implements TenantOwned {
     private String acceptedUserAgent;
 
     /** What the borrower's device reported (browser, platform, screen, time zone, language ...), as JSON. */
+    @Vaulted
     @Column(length = 2000)
     private String acceptedDevice;
 
@@ -181,6 +186,7 @@ public class ClaimAgreement implements TenantOwned {
     private String acceptedLocation;
 
     /** The borrower's drawn signature: an SVG path in a 1000 x 300 box. */
+    @Vaulted
     @Column(length = 20000)
     private String signature;
 
@@ -196,6 +202,7 @@ public class ClaimAgreement implements TenantOwned {
     private String acceptanceSeal;
 
     /** The evidence as exact JSON, and this installation's ECDSA P-256 signature over it (Base64). */
+    @Vaulted
     @Column(length = 4000)
     private String evidencePayload;
 

@@ -168,36 +168,54 @@ export function categoryIcon(name = '') {
  * Full-colour artwork for the money accounts (cash, wallets, coins): real-looking rupee notes, a wallet with notes in it and a
  * stack of coins, drawn flat so they stay crisp at 20 px. icon(name) returns these as they are (they keep their own colours).
  */
+/**
+ * A rupee note as on the real series, drawn to stay readable from 20 px up: its colour, a bold frame, the portrait as a solid disc, the
+ * security thread and the value in large figures. At x, y, w × h in a 48 × 48 box, turned by rot degrees about its centre.
+ */
+function note(x, y, w, h, rot, paper, ink, value) {
+    const cx = x + w / 2, cy = y + h / 2;
+    return `<g transform="rotate(${rot} ${cx} ${cy})">
+        <rect x="${x + 0.8}" y="${y + 1.6}" width="${w}" height="${h}" rx="2.6" fill="#0b2038" opacity=".22"/>
+        <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2.6" fill="${paper}" stroke="${ink}" stroke-width="1.5"/>
+        <rect x="${x + 2.2}" y="${y + 2.2}" width="${w - 4.4}" height="${h - 4.4}" rx="1.4" fill="none" stroke="${ink}" stroke-width=".8" opacity=".55"/>
+        <circle cx="${x + w * 0.3}" cy="${cy}" r="${h * 0.27}" fill="#fff" opacity=".75" stroke="${ink}" stroke-width=".9"/>
+        <circle cx="${x + w * 0.3}" cy="${cy - h * 0.05}" r="${h * 0.12}" fill="${ink}" opacity=".7"/>
+        <rect x="${x + w * 0.52}" y="${y + 1}" width="1.8" height="${h - 2}" fill="${ink}" opacity=".55"/>
+        <text x="${x + w - 2.6}" y="${y + h - 3.2}" text-anchor="end" font-size="${(h * 0.46).toFixed(1)}" font-weight="900" fill="${ink}" font-family="Arial, Helvetica, sans-serif">${value}</text>
+        <text x="${x + w - 2.8}" y="${y + h * 0.4}" text-anchor="end" font-size="${(h * 0.32).toFixed(1)}" font-weight="900" fill="${ink}" font-family="Arial, Helvetica, sans-serif">₹</text>
+    </g>`;
+}
+
+/** A gold coin from the side and the top, with ₹ on its face. */
+function coin(cx, cy, rx, ry, depth) {
+    return `<path d="M${cx - rx} ${cy}v${depth}a${rx} ${ry} 0 0 0 ${2 * rx} 0v${-depth}z" fill="#d18a0e" stroke="#6b4600" stroke-width="1.2"/>
+        <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#ffcf3f" stroke="#6b4600" stroke-width="1.2"/>
+        <ellipse cx="${cx - rx * 0.32}" cy="${cy - ry * 0.32}" rx="${rx * 0.3}" ry="${ry * 0.2}" fill="#fff" opacity=".6"/>
+        <text x="${cx}" y="${cy + ry * 0.5}" text-anchor="middle" font-size="${(ry * 1.45).toFixed(1)}" font-weight="900" fill="#7a5000" font-family="Arial, Helvetica, sans-serif">₹</text>`;
+}
+
+/**
+ * Full-colour artwork for the money accounts: two real-looking rupee notes (₹200 yellow behind a ₹500 stone-grey), a leather wallet with notes,
+ * gold coins and a chit passbook. Flat colours (no gradients, so many share a page) and bold outlines, readable from 20 px.
+ * icon(name) returns these as they are: they keep their own colours.
+ */
 const ART = {
-    'cash-note': `<g transform="rotate(-9 24 24)"><rect x="6" y="11" width="37" height="22" rx="3" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.6"/></g>
-        <rect x="4" y="15" width="38" height="23" rx="3" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.6"/>
-        <rect x="7.5" y="18.5" width="31" height="16" rx="1.8" fill="none" stroke="#2f7d3a" stroke-width="1" stroke-dasharray="2.2 1.8"/>
-        <circle cx="23" cy="26.5" r="6.4" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.3"/>
-        <text x="23" y="30.3" text-anchor="middle" font-size="10" font-weight="800" fill="#1d5a27" font-family="Arial, Helvetica, sans-serif">₹</text>
-        <circle cx="11.5" cy="26.5" r="1.5" fill="#2f7d3a"/><circle cx="34.5" cy="26.5" r="1.5" fill="#2f7d3a"/>`,
-    'cash-stack': `<rect x="8" y="9" width="33" height="19" rx="2.6" fill="#5aae60" stroke="#2f7d3a" stroke-width="1.5"/>
-        <rect x="6" y="14" width="35" height="19" rx="2.6" fill="#8fd187" stroke="#2f7d3a" stroke-width="1.5"/>
-        <rect x="4" y="19" width="37" height="20" rx="2.8" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.6"/>
-        <circle cx="22.5" cy="29" r="5.8" fill="#6fbf73" stroke="#2f7d3a" stroke-width="1.2"/>
-        <text x="22.5" y="32.4" text-anchor="middle" font-size="9" font-weight="800" fill="#1d5a27" font-family="Arial, Helvetica, sans-serif">₹</text>
-        <circle cx="9.5" cy="29" r="1.3" fill="#2f7d3a"/><circle cx="35.5" cy="29" r="1.3" fill="#2f7d3a"/>`,
-    'wallet-cash': `<rect x="12" y="6" width="26" height="15" rx="2" fill="#8fd187" stroke="#2f7d3a" stroke-width="1.4" transform="rotate(-6 25 13)"/>
-        <rect x="16" y="9" width="26" height="15" rx="2" fill="#b4e6a8" stroke="#2f7d3a" stroke-width="1.4" transform="rotate(5 29 16)"/>
-        <rect x="4" y="16" width="40" height="26" rx="5" fill="#c98544" stroke="#7a4a1e" stroke-width="1.7"/>
-        <path d="M4 22h40" stroke="#7a4a1e" stroke-width="1.2" opacity=".5"/>
-        <rect x="29" y="25" width="15" height="11" rx="3.5" fill="#e3a766" stroke="#7a4a1e" stroke-width="1.5"/>
-        <circle cx="35" cy="30.5" r="2.1" fill="#7a4a1e"/>
-        <path d="M8 20c8-1.5 16-1.5 24 0" stroke="#e8b27a" stroke-width="1.4" fill="none" stroke-linecap="round"/>`,
-    'coin-stack': `<ellipse cx="17" cy="37" rx="12" ry="5" fill="#d99a1b" stroke="#8a5d00" stroke-width="1.4"/>
-        <path d="M5 31v6c0 2.8 5.4 5 12 5s12-2.2 12-5v-6z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.4"/>
-        <ellipse cx="17" cy="31" rx="12" ry="5" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.4"/>
-        <path d="M5 24v7c0 2.8 5.4 5 12 5s12-2.2 12-5v-7z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.4"/>
-        <ellipse cx="17" cy="24" rx="12" ry="5" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.4"/>
-        <ellipse cx="33" cy="30" rx="10" ry="4.3" fill="#d99a1b" stroke="#8a5d00" stroke-width="1.3"/>
-        <path d="M23 22v8c0 2.4 4.5 4.3 10 4.3S43 32.4 43 30v-8z" fill="#f0b73a" stroke="#8a5d00" stroke-width="1.3"/>
-        <ellipse cx="33" cy="22" rx="10" ry="4.3" fill="#ffd25e" stroke="#8a5d00" stroke-width="1.3"/>
-        <text x="33" y="24.4" text-anchor="middle" font-size="6.5" font-weight="800" fill="#8a5d00" font-family="Arial, Helvetica, sans-serif">₹</text>
-        <text x="17" y="26.4" text-anchor="middle" font-size="6.5" font-weight="800" fill="#8a5d00" font-family="Arial, Helvetica, sans-serif">₹</text>`,
+    'cash-note': note(3, 7, 38, 21, -11, '#f6c945', '#6e4b00', '200') + note(8, 18, 38, 22, 3, '#c9d2b5', '#33402a', '500'),
+    'wallet-cash': note(10, 3, 30, 17, -8, '#f6c945', '#6e4b00', '200') + `
+        <rect x="3.8" y="19.6" width="41" height="25" rx="5.5" fill="#0b2038" opacity=".22"/>
+        <rect x="3" y="18" width="41" height="25" rx="5.5" fill="#9c5a24" stroke="#4a2808" stroke-width="1.6"/>
+        <rect x="6" y="21" width="35" height="19" rx="3.6" fill="none" stroke="#e9b882" stroke-width="1" stroke-dasharray="2 1.6"/>
+        <rect x="27" y="25.5" width="18" height="12" rx="4" fill="#bd7432" stroke="#4a2808" stroke-width="1.5"/>
+        <circle cx="34" cy="31.5" r="2.8" fill="#ffcf3f" stroke="#6b4600" stroke-width="1"/>`,
+    'coin-stack': coin(16, 38, 11, 4.6, 4.2) + coin(16, 31.5, 11, 4.6, 4.2) + coin(16, 25, 11, 4.6, 4.2) + coin(33, 34, 10, 4.2, 4) + coin(33, 27.5, 10, 4.2, 4) + coin(31, 15, 9.5, 9.5, 0),
+    'chit-book': `<rect x="7.8" y="5.8" width="28" height="36" rx="3.2" fill="#0b2038" opacity=".25"/>
+        <rect x="6" y="4" width="28" height="36" rx="3.2" fill="#174a85" stroke="#0a2a52" stroke-width="1.6"/>
+        <rect x="6" y="4" width="6" height="36" rx="2.4" fill="#0f3a6b"/>
+        <rect x="32" y="6.5" width="3.2" height="31" rx="1" fill="#f6f2e4" stroke="#bcb497" stroke-width=".8"/>
+        <text x="22.5" y="15.5" text-anchor="middle" font-size="8.6" font-weight="900" fill="#ffd45e" font-family="Arial, Helvetica, sans-serif" letter-spacing=".3">CHIT</text>
+        <circle cx="22.5" cy="26" r="7.2" fill="#ffd45e" stroke="#9a6c00" stroke-width="1.2"/>
+        <text x="22.5" y="30.2" text-anchor="middle" font-size="11" font-weight="900" fill="#174a85" font-family="Arial, Helvetica, sans-serif">₹</text>`
+        + coin(37, 41, 9.5, 3.8, 3.6) + coin(37, 35.6, 9.5, 3.8, 3.6),
 };
 
 export function icon(name, extraClass = '') {
@@ -221,7 +239,7 @@ export function accountTypeIcon(type) {
         FIXED_DEPOSIT: ['lock', 'violet'], RECURRING_DEPOSIT: ['repeat', 'violet'], SAVINGS_SCHEME: ['piggy', 'violet'],
         MUTUAL_FUND: ['trending', 'violet'], STOCKS: ['trending', 'violet'], BONDS: ['report', 'violet'],
         GOLD: ['gem', 'gold'], SILVER: ['gem', 'gray'], REAL_ESTATE: ['home', ''], VEHICLE: ['car', 'gray'],
-        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['coin-stack', 'art'], RECEIVABLE: ['arrow-in', 'aqua'],
+        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['chit-book', 'art'], RECEIVABLE: ['arrow-in', 'aqua'],
         LOAN_GIVEN: ['hand', 'aqua'], OTHER_ASSET: ['layers', 'gray'],
         CREDIT_CARD: ['card', 'coral'], HOME_LOAN: ['home', 'red'], VEHICLE_LOAN: ['car', 'red'],
         PERSONAL_LOAN: ['briefcase', 'red'], GOLD_LOAN: ['gem', 'red'], EDUCATION_LOAN: ['journal', 'red'],

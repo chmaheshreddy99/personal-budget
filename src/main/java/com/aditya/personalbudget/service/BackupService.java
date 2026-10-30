@@ -190,7 +190,7 @@ public class BackupService {
         dump.sequences().forEach((k, v) -> sequences.put(k.toString(), v.toString()));
         BackupFile backup = new BackupFile(FORMAT, VERSION, OrgClock.now(), UserContext.username(),
                 properties.storage().type().name().toLowerCase().replace('_', '-'), tables, sequences,
-                includeFiles ? readFiles() : null);
+                readFiles(includeFiles));
 
         Path dir = ensureFolder();
         String stamp = OrgClock.now().format(STAMP);
@@ -241,22 +241,31 @@ public class BackupService {
 
     // ------------------------------------------------------------------ evidence files
 
-    /** The evidence files under the data folder, by path relative to it. */
-    private Map<String, String> readFiles() {
+    /** Folders under the data folder a backup carries: the signed documents always, the photos and scans when asked. */
+    private static final List<String> DOCUMENTS = List.of("vault", "evidence");
+    private static final String PHOTOS = "attachments";
+
+    /**
+     * The files under the data folder, by path relative to it: the agreements, signatures and evidence kept out of the tables (data/vault,
+     * data/evidence) always, since the tables alone are not the whole record; the photos and scans (data/attachments) when asked.
+     */
+    private Map<String, String> readFiles(boolean includePhotos) {
         Path data = store.dataDir();
-        Path attachments = data.resolve("attachments");
         Map<String, String> files = new LinkedHashMap<>();
-        if (!Files.isDirectory(attachments)) {
-            return files;
-        }
-        try (Stream<Path> all = Files.walk(attachments)) {
-            for (Path p : all.filter(Files::isRegularFile).sorted().toList()) {
-                files.put(data.relativize(p).toString().replace('\\', '/'), Base64.getEncoder().encodeToString(Files.readAllBytes(p)));
+        List<String> folders = new ArrayList<>(DOCUMENTS);
+        if (includePhotos) folders.add(PHOTOS);
+        for (String folder : folders) {
+            Path dir = data.resolve(folder);
+            if (!Files.isDirectory(dir)) continue;
+            try (Stream<Path> all = Files.walk(dir)) {
+                for (Path p : all.filter(Files::isRegularFile).filter(p -> !p.getFileName().toString().endsWith(".tmp")).sorted().toList()) {
+                    files.put(data.relativize(p).toString().replace('\\', '/'), Base64.getEncoder().encodeToString(Files.readAllBytes(p)));
+                }
+            } catch (IOException e) {
+                throw new StorageException("Cannot read the files in " + folder + " for the backup", e);
             }
-            return files;
-        } catch (IOException e) {
-            throw new StorageException("Cannot read the evidence files for the backup", e);
         }
+        return files;
     }
 
     private int restoreFiles(Map<String, String> files) {
@@ -264,7 +273,8 @@ public class BackupService {
         int count = 0;
         for (Map.Entry<String, String> f : files.entrySet()) {
             Path target = data.resolve(f.getKey()).normalize();
-            if (!target.startsWith(data.resolve("attachments"))) {
+            boolean allowed = target.startsWith(data.resolve(PHOTOS)) || DOCUMENTS.stream().anyMatch(d -> target.startsWith(data.resolve(d)));
+            if (!allowed) {
                 log.warn("Backup file {} skipped: not an evidence file", f.getKey());
                 continue;
             }

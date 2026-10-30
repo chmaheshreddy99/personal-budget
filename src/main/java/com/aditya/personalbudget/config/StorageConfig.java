@@ -41,7 +41,16 @@ public class StorageConfig {
     /** The startup steps (seeding, migrations, checks) ran on this thread: it keeps nothing they read. */
     @EventListener(ApplicationReadyEvent.class)
     public void forgetStartupReads(ApplicationReadyEvent event) {
-        event.getApplicationContext().getBean(TsvDataStore.class).endRequest();
+        TsvDataStore store = event.getApplicationContext().getBean(TsvDataStore.class);
+        try {
+            store.vaultLegacyRows();   // agreements, signatures and evidence written before they were kept in files of their own
+        } catch (RuntimeException e) {
+            log.error("Could not move the documents out of the tables into data/vault; they stay where they are: {}", e.getMessage());
+        }
+        store.endRequest();
+        // only when configured (several server processes on one spreadsheet): look for their saves on a timer
+        BudgetProperties.Storage s = event.getApplicationContext().getBean(BudgetProperties.class).storage();
+        store.watchOutsideChanges(Duration.ofSeconds(s.watchSeconds()), Duration.ofSeconds(s.fullCheckSeconds()));
     }
 
     @Bean

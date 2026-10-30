@@ -86,7 +86,9 @@ function Shell() {
       <View style={{ flex: 1 }}>
         {account ? <AccountDetail account={account} onBack={() => setAccount(null)} onAdd={a => setAdding({ prefill: { paidFromId: a.id } })} />
           : tab === 'accounts' ? <AccountsScreen onOpen={setAccount} onSettings={() => { setTab('more'); setPage('settings'); }}
-              onTransfer={mobileOn(app.snapshot, 'TRANSFERS') && app.snapshot?.canRecord !== false ? () => setTransfer(true) : undefined} />
+              onTransfer={mobileOn(app.snapshot, 'TRANSFERS') && app.snapshot?.canRecord !== false ? () => setTransfer(true) : undefined}
+              onRecord={app.snapshot?.canRecord !== false && (mobileOn(app.snapshot, 'EXPENSES') || mobileOn(app.snapshot, 'INCOME')) ? (mode: RecordMode) => setAdding({ prefill: { mode } }) : undefined}
+              onChits={mobileOn(app.snapshot, 'CHITS') && app.snapshot?.canPayChits !== false && app.snapshot?.canRecord !== false ? () => setTab('chits') : undefined} />
           : tab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
           : tab === 'chits' ? <ChitsScreen />
           : page === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />

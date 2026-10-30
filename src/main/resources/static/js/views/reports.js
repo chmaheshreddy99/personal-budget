@@ -128,6 +128,12 @@ export async function render(container, params, isCurrent) {
         exportRows = await drawer(content, toolbar, period);
     };
 
+    // the preset whose dates are the period's stays lit; typed dates that match none light nothing
+    const markPreset = () => toolbar.querySelectorAll('#presets [data-preset]').forEach(b => {
+        const p = PRESETS[Number(b.dataset.preset)];
+        b.classList.toggle('active', p.from() === period.from && (p.to ? p.to() : isoDate()) === period.to);
+    });
+    markPreset();
     toolbar.querySelector('#presets')?.addEventListener('click', e => {
         const btn = e.target.closest('[data-preset]');
         if (!btn) return;
@@ -136,10 +142,12 @@ export async function render(container, params, isCurrent) {
         period.to = p.to ? p.to() : isoDate();
         toolbar.querySelector('#from').value = period.from;
         toolbar.querySelector('#to').value = period.to;
+        markPreset();
         load();
     });
     ['#from', '#to', '#asof'].forEach(sel => toolbar.querySelector(sel)?.addEventListener('change', e => {
         period[sel.slice(1) === 'asof' ? 'asOf' : sel.slice(1)] = e.target.value;
+        markPreset();
         load();
     }));
     // Excel / PDF / CSV from the report's table rows: the first row is the header; numbers become money columns

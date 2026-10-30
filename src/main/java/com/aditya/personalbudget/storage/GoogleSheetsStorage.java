@@ -75,6 +75,11 @@ public final class GoogleSheetsStorage implements TableStorage {
     private static final Logger log = LoggerFactory.getLogger(GoogleSheetsStorage.class);
 
     static final String SEQUENCES = "_sequences";
+    /**
+     * One row naming the last save (who, when, which tables), rewritten by every save of every server process on this
+     * spreadsheet: reading this single cell tells another process whether the spreadsheet changed since it last read it.
+     */
+    static final String CHANGES = "_changes";
     /** Google Sheets refuses a cell longer than this. */
     private static final int MAX_CELL = 50_000;
     /** Cells per write call: a large import goes in several calls. */
@@ -145,6 +150,10 @@ public final class GoogleSheetsStorage implements TableStorage {
     /** Nanoseconds; zero: every request reads the spreadsheet; negative: only saves (and the first read) do. */
     private final long maxAge;
     private final LongSupplier clock;
+    /** Names this server process in the change marker. */
+    private final String instance = java.util.UUID.randomUUID().toString().substring(0, 8);
+    /** The marker of this process's latest save. */
+    private volatile String ownMarker = "";
 
     /**
      * Signs in with a service account key file and opens the spreadsheet.
@@ -200,6 +209,7 @@ public final class GoogleSheetsStorage implements TableStorage {
         this.clock = clock;
         this.title = loadLayout();
         create(SEQUENCES, List.of("table", "lastId"));
+        create(CHANGES, List.of("stamp", "tables"));
     }
 
     @Override
@@ -263,6 +273,10 @@ public final class GoogleSheetsStorage implements TableStorage {
         if (all.isEmpty()) {
             return;
         }
+        // the marker other server processes watch for (see poll)
+        String marker = instance + ":" + versions.incrementAndGet() + ":" + System.currentTimeMillis();
+        ownMarker = marker;   // a check that reads it before this save is shared must not take it for someone else's
+        all.put(CHANGES, List.of(List.of("stamp", "tables"), List.of(marker, String.join(",", tables.keySet()))));
         // what the tabs hold now (read afresh by this unit of work): only rows that differ are written, and rows and
         // columns no longer used are cleared
         Snapshot before = snapshot();
@@ -307,7 +321,7 @@ public final class GoogleSheetsStorage implements TableStorage {
         int tables = 0;
         long bytes = 0;
         for (Map.Entry<String, Table> e : s.tables().entrySet()) {
-            if (!e.getKey().equals(SEQUENCES)) {
+            if (!e.getKey().startsWith("_")) {   // not the id sequences or the change marker
                 tables++;
                 for (List<String> row : e.getValue().rows()) {
                     bytes += row.stream().mapToLong(String::length).sum() + row.size();
@@ -315,6 +329,49 @@ public final class GoogleSheetsStorage implements TableStorage {
             }
         }
         return new Footprint(tables, bytes);
+    }
+
+    // ================================================================== changes made elsewhere
+
+    @Override
+    public Set<String> poll(boolean full) {
+        Snapshot known = latest.get();
+        if (known == null) {
+            return Set.of();   // nothing read yet: the first read will be fresh anyway
+        }
+        if (!full) {
+            String marker;
+            try {
+                ValueRange v = call("check for changes", () -> sheets.spreadsheets().values().get(spreadsheetId, range(CHANGES) + "!A2:A2").execute());
+                marker = v.getValues() == null || v.getValues().isEmpty() || v.getValues().getFirst().isEmpty() ? "" : String.valueOf(v.getValues().getFirst().getFirst());
+            } catch (StorageException e) {
+                log.debug("Google Sheets: could not check for changes: {}", e.getMessage());
+                return Set.of();
+            }
+            List<List<String>> rows = known.rows(CHANGES);
+            String seen = rows.size() > 1 && !rows.get(1).isEmpty() ? rows.get(1).getFirst() : "";
+            if (marker.equals(seen) || marker.equals(ownMarker)) {
+                return Set.of();
+            }
+        }
+        Snapshot fresh;
+        try {
+            fresh = readNow();
+        } catch (StorageException e) {
+            log.debug("Google Sheets: could not read the spreadsheet for changes: {}", e.getMessage());
+            return Set.of();
+        }
+        Set<String> changed = new java.util.TreeSet<>();
+        fresh.tables().forEach((name, t) -> {
+            Table before = known.tables().get(name);
+            if (!name.startsWith("_") && (before == null || before.version() != t.version())) {
+                changed.add(name);
+            }
+        });
+        if (!changed.isEmpty()) {
+            log.info("Google Sheets: picked up changes saved elsewhere in {}", changed);
+        }
+        return changed;
     }
 
     // ================================================================== import

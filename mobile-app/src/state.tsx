@@ -69,6 +69,11 @@ type AppContext = {
   showBalances(): void;
   hideBalances(): void;
   reveal(accountId: number): void;
+  /** kept private (by the household or on this phone) and not tapped open yet */
+  isPrivate(accountId: number): boolean;
+  /** the household made it private: the phone cannot undo that */
+  privateByHousehold(accountId: number): boolean;
+  togglePrivate(accountId: number): Promise<void>;
   /** an amount as text, or dots when it is hidden; id is the account it is the balance of (for the above-the-limit rule) */
   bal(amount: number, accountId?: number, decimals?: number): string;
   balShort(amount: number, accountId?: number): string;
@@ -199,7 +204,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- back to the front: sync and pick up SMS caught meanwhile; every minute while something waits
+  // ---- back to the front: sync and pick up SMS caught meanwhile; every minute while something waits, and every two
+  // minutes anyway while the app is open, so a change made on the web or another phone shows here without a pull
+  const lastSyncRef = useRef<number | null>(null);
+  lastSyncRef.current = meta.lastSync;
   useEffect(() => {
     const sub = AppState.addEventListener('change', st => {
       if (st !== 'active') { setShown(false); setRevealed([]); leftAt.current = Date.now(); return; }   // out of sight: balances go back to dots
@@ -211,7 +219,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     const timer = setInterval(() => {
       const { settings: s, queue: q, chitQueue: cq, uploads: ups, records: rs } = ref.current;
-      if (s.token && !s.offline && (q.some(e => e.status === 'QUEUED') || cq.some(c => c.status === 'QUEUED') || rs.some(r => r.status === 'QUEUED')
+      const stale = AppState.currentState === 'active' && Date.now() - (lastSyncRef.current || 0) > 120000;
+      if (s.token && !s.offline && (stale || q.some(e => e.status === 'QUEUED') || cq.some(c => c.status === 'QUEUED') || rs.some(r => r.status === 'QUEUED')
         || ups.some(u => u.status === 'WAITING'))) sync(true);
     }, 60000);
     const off = nativeSms.onSms(sms => setRaw(list => (list.some(x => x.id === sms.id) ? list : [...list, sms])));
@@ -417,7 +426,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const hideBalances = useCallback(() => { setShown(false); setRevealed([]); if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
   const reveal = useCallback((id: number) => setRevealed(r => (r.includes(id) ? r : [...r, id])), []);
-  const masked = (amount: number, id?: number) => !balancesVisible || (hideAbove != null && Math.abs(amount) > hideAbove && (id == null || !revealed.includes(id)));
+  const byHousehold = useCallback((id: number) => (mobile?.hiddenAccounts || []).includes(id), [mobile]);
+  const isPrivate = (id: number) => (byHousehold(id) || (settings.privateAccounts || []).includes(id)) && !revealed.includes(id);
+  const togglePrivate = useCallback(async (id: number) => {
+    const mine = ref.current.settings.privateAccounts || [];
+    await saveSettings({ privateAccounts: mine.includes(id) ? mine.filter(x => x !== id) : [...mine, id] });
+  }, [saveSettings]);
+  const masked = (amount: number, id?: number) => !balancesVisible || (id != null && isPrivate(id))
+    || (hideAbove != null && Math.abs(amount) > hideAbove && (id == null || !revealed.includes(id)));
   const bal = (amount: number, id?: number, decimals?: number) => (masked(amount, id) ? '••••••' : money(amount, decimals));
   const balShort = (amount: number, id?: number) => (masked(amount, id) ? '••••' : moneyShort(amount));
   const net = (amount: number) => (mobile?.maskNetWorth ? 'Hidden' : masked(amount) ? '••••••' : money(amount));
@@ -453,7 +469,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppContext = {
     ready, settings, snapshot, accounts, queue, chitQueue, records, uploads, sheet, budgets, meta, syncing, step, online, detected, used, perms,
     saveSettings, signIn, signOut, sync, addExpense, updateExpense, removeExpense, addEvidence, removeEvidence, payChit, removeChitPayment,
-    addRecord, removeRecord, balanceOf, locked: locked && !!settings.token && settings.deviceLock !== false, unlock, lockNow, loadSheet, loadBudgets, balancesVisible, showBalances, hideBalances, reveal, bal, balShort, net,
+    addRecord, removeRecord, balanceOf, locked: locked && !!settings.token && settings.deviceLock !== false, unlock, lockNow, loadSheet, loadBudgets, balancesVisible, showBalances, hideBalances, reveal, isPrivate, privateByHousehold: byHousehold, togglePrivate, bal, balShort, net,
     statement, dismissSms, scanInbox, enableSms, checkPerms, readSms, clearCache, notify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

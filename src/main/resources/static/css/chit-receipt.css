@@ -15,3 +15,9 @@
 #cr-kyc-error:empty, #cr-error:empty, #cr-dispute-error:empty, #cr-gate-error:empty { display: none; }
 @media (max-width: 480px) { .cr-lines th:nth-child(3), .cr-lines td:nth-child(3) { display: none; } }
 .cr-h { margin: 14px 0 2px; font-size: 14px; }
+
+/* the simple receipt: the installments as chips and three short lines */
+.cr-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.cr-chips span { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 10px; background: #f2f7fb; border: 1px solid #dbe7f1; font-size: 13px; }
+.cr-chips b { color: #0b5d8e; } .cr-chips i { font-style: normal; font-weight: 700; }
+.cs-terms.cr-short { white-space: pre-line; font-size: 14px; line-height: 1.55; background: #fbfdf7; border-left: 4px solid #12a150; }

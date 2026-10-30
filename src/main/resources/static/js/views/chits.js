@@ -178,7 +178,7 @@ function portfolioStrip(chits) {
     const dueThisMonth = running.filter(c => c.nextDueDate && c.nextDueDate.slice(0, 7) === month);
     const dividends = sum(pool, 'dividendsEarned');
     const card = `
-        <div class="cp-head"><span class="cp-mark">${icon('chit')}</span>
+        <div class="cp-head"><span class="cp-mark art-mark">${icon('chit-book')}</span>
             <div class="min-0"><small>Chit portfolio · <span class="cp-count">${running.length} running${done.length ? ` · ${done.length} done` : ''}</span></small>
                 <div class="cp-line"><b>${moneyShort(sum(pool, 'paidIn'))} <em>paid in</em></b>
                 ${stillToPay > 0 ? `<span class="cp-still" title="${pending} installments left in the running chits">${moneyShort(stillToPay)} to pay · ${pending} left</span>` : '<span class="cp-still done">all installments paid</span>'}</div></div>
@@ -387,7 +387,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     target.innerHTML = `
         <section class="panel p-chit-head">
             <div class="chit-banner">
-                <span class="hero-icon">${icon('chit')}</span>
+                <span class="hero-icon art-mark">${icon('chit-book')}</span>
                 <div class="ab-id">
                     <div class="ab-name">${esc(c.name)} ${statusBadge(c.status)}${closed && c.closedAt ? `<span class="ab-closed">${icon('lock')}closed ${date(c.closedAt.slice(0, 10))}</span>` : ''}</div>
                     <div class="ab-meta">${[c.organizer, c.ticketNo ? 'Ticket ' + c.ticketNo : '', `${c.numberOfInstallments} × ${money(c.monthlyInstallment)}`]

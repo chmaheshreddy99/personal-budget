@@ -187,6 +187,25 @@ class TsvDataStoreTest {
     }
 
     @Test
+    void theWatcherAnnouncesWhatAnotherProcessSavedButNotItsOwnSaves() throws Exception {
+        tenants.save(tenant("home"));
+        java.util.concurrent.BlockingQueue<java.util.Set<String>> heard = new java.util.concurrent.LinkedBlockingQueue<>();
+        store.addOutsideChangeListener(heard::add);
+        store.watchOutsideChanges(java.time.Duration.ofMillis(50), java.time.Duration.ZERO);
+        try {
+            Thread.sleep(200);   // the first look only learns what is there
+            tenants.save(tenant("mine"));
+            assertThat(heard.poll(400, java.util.concurrent.TimeUnit.MILLISECONDS)).as("its own save is not news").isNull();
+
+            TsvDataStore other = new TsvDataStore(dataDir.toString(), validator);
+            new OrganizationRepository(other).save(tenant("phone"));   // the phone app's server, on the same folder
+            assertThat(heard.poll(3, java.util.concurrent.TimeUnit.SECONDS)).contains("organizations");
+        } finally {
+            store.stopWatching();
+        }
+    }
+
+    @Test
     void neverServesAnOlderParseOfAFileRewrittenWithinTheSameClockTick() {
         Organization home = tenants.save(tenant("home"));
         TsvDataStore other = new TsvDataStore(dataDir.toString(), validator);

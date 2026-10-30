@@ -77,6 +77,17 @@ public class SessionRegistry {
         return token;
     }
 
+    /** A sign-in on the Android app: lasts {@code days} (the phone's own lock opens the app in between), marked as the app's. */
+    public String openForApp(AppUser user, String userAgent, int days) {
+        String token = open(user, userAgent, false);
+        sessions.findByTokenHash(hash(token)).ifPresent(s -> {
+            s.setClient("app");
+            s.setExpiresAt(OrgClock.now().plusDays(Math.max(1, days)));
+            sessions.save(s);
+        });
+        return token;
+    }
+
     /**
      * A session for someone who opened an access link: tied to the admin who made the link, ending when the link
      * expires (or after the usual session hours, whichever comes first).

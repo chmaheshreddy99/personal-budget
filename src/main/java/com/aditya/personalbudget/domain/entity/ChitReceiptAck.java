@@ -46,6 +46,8 @@ public class ChitReceiptAck implements TenantOwned {
 
     /** The installments paid (the default, also when empty). */
     public static final String KIND_INSTALLMENTS = "INSTALLMENTS";
+    /** The same receipt in a few plain lines, for an organizer who wants to sign and be done. */
+    public static final String KIND_SIMPLE = "SIMPLE";
     /** The payout received in full: a final settlement that replaces the earlier acknowledgements. */
     public static final String KIND_PAYOUT = "PAYOUT";
 

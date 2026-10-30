@@ -92,11 +92,12 @@ function bindGate() {
 // ---------------------------------------------------------------- reading and signing
 
 function headHtml(badge, tone) {
-    return `<div class="sh-head"><div><small>${esc(r.household)} · acknowledgement of receipt · ${esc(r.ackNo)}</small><h1>${esc(r.chitName)}${r.ticketNo ? ` · ${esc(r.ticketNo)}` : ''}</h1>
+    return `<div class="sh-head"><div><small>${esc(r.household)} · ${isSimple() ? 'receipt' : 'acknowledgement of receipt'} · ${esc(r.ackNo)}</small><h1>${esc(r.chitName)}${r.ticketNo ? ` · ${esc(r.ticketNo)}` : ''}</h1>
         <small>from ${esc(r.payerName)} to ${esc(r.organizerName)}</small></div><span class="st-badge ${tone}">${badge}</span></div>`;
 }
 
 const isPayout = () => r.kind === 'PAYOUT';
+const isSimple = () => r.kind === 'SIMPLE';
 
 function totalHtml() {
     const n = r.lines.length;
@@ -116,6 +117,9 @@ function linesTable(lines, { first, last, installments }) {
 }
 
 function linesHtml() {
+    if (isSimple()) {
+        return `<div class="cr-chips">${r.lines.map(l => `<span><b>#${l.no}</b>${day(l.paidDate)}<i>${money(l.cash)}</i></span>`).join('')}</div>`;
+    }
     const note = r.paymentNote ? `<p class="cr-note"><b>${isPayout() ? 'Payout' : 'Payment'} details given by ${esc(r.payerName)}:</b> ${esc(r.paymentNote)}</p>` : '';
     if (!isPayout()) return linesTable(r.lines, { first: 'Paid on', last: 'You received', installments: true }) + note;
     return `<h3 class="cr-h">The payout you paid</h3>${linesTable(r.lines, { first: 'Paid on', last: 'Paid by you', installments: false })}${note}
@@ -129,8 +133,8 @@ function openHtml() {
         ${headHtml('Waiting for you', 'part')}
         ${totalHtml()}
         ${linesHtml()}
-        <div class="cs-terms">${esc(r.terms)}</div>
-        <div class="cs-print-row"><button type="button" class="cs-print" id="cr-preview">See it as a document</button><button type="button" class="cs-print" id="cr-print">Print view (A4)</button></div>
+        <div class="cs-terms ${isSimple() ? 'cr-short' : ''}">${esc(r.terms)}</div>
+        <div class="cs-print-row" ${isSimple() ? 'hidden' : ''}><button type="button" class="cs-print" id="cr-preview">See it as a document</button><button type="button" class="cs-print" id="cr-print">Print view (A4)</button></div>
         <div id="cr-deed" class="bond-preview" hidden></div>
         ${r.requireSelfie ? `<div class="la-step"><div class="la-step-no">${++no}</div><div class="min-0 grow">
             <b>A selfie</b><small>Taken now with your phone's front camera (not from the gallery); the date and time are printed on it.</small>
@@ -141,7 +145,7 @@ function openHtml() {
         </div></div>` : ''}
         <p class="cs-error" id="cr-kyc-error"></p>
         <form class="cs-accept la-step" id="cr-accept" onsubmit="return false"><div class="la-step-no">${++no}</div><div class="min-0 grow">
-            <b>Sign to acknowledge</b>
+            <b>${isSimple() ? 'Sign and you are done' : 'Sign to acknowledge'}</b>
             <div class="cs-fields"><label class="cs-name"><span>Your full name</span><input name="name" maxlength="100" autocomplete="name" value="${esc(r.organizerName)}"></label></div>
             <div class="cs-sign"><div class="cs-sign-head"><span>Sign here with your finger</span><button type="button" id="cr-sign-clear">Clear</button></div>
                 <canvas id="cr-sign" width="1000" height="300"></canvas></div>
@@ -150,8 +154,8 @@ function openHtml() {
                 ? `I have paid the whole payout of ${money(r.totalAmount)} of ${esc(r.chitName)} to ${esc(r.payerName)}, who has received it; I confirm the installments I received and that the earlier acknowledgements are cancelled, of my own free will.`
                 : `I have received ${money(r.totalAmount)} from ${esc(r.payerName)} towards ${r.lines.length === 1 ? 'this installment' : `these ${r.lines.length} installments`} of ${esc(r.chitName)}, and I acknowledge it of my own free will.`}</label>
             <p class="cs-error" id="cr-error"></p>
-            <button type="submit" class="cs-pay-btn">Acknowledge and sign</button>
-            <small class="muted">Recorded with your acknowledgement: your name, mobile number and signature, the time, your IP address, this phone's details
+            <button type="submit" class="cs-pay-btn">${isSimple() ? 'Sign the receipt' : 'Acknowledge and sign'}</button>
+            <small class="muted" ${isSimple() ? 'hidden' : ''}>Recorded with your acknowledgement: your name, mobile number and signature, the time, your IP address, this phone's details
                 ${r.requireLocation ? 'and your location' : 'and your location if you allow it'}. They are sealed together and digitally signed, so any change shows.</small>
         </div></form>
         <div class="cr-wrong"><button type="button" id="cr-wrong">Something is not right? Tell ${esc(r.payerName)} instead</button></div>

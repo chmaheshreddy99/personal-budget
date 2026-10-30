@@ -65,39 +65,77 @@ export function accountIcon(type: string, group?: string): LucideIcon {
   }
 }
 
-/** Full-colour cash artwork (a rupee note, a wallet with notes, a stack of coins) for the money accounts, drawn like the web app's. */
-export function CashArt({ kind, size = 36 }: { kind: 'note' | 'wallet' | 'coins'; size?: number }) {
-  const stroke = kind === 'coins' ? '#8a5d00' : kind === 'wallet' ? '#7a4a1e' : '#2f7d3a';
+/** A rupee note as on the real series (its colour, frame, portrait window, security thread and value), at x, y, w × h, turned by rot degrees. */
+function Note({ x, y, w, h, rot, paper, ink, value }: { x: number; y: number; w: number; h: number; rot: number; paper: string; ink: string; value: string }) {
+  const cx = x + w / 2, cy = y + h / 2;
+  return (
+    <G rotation={rot} origin={`${cx}, ${cy}`}>
+      <Rect x={x + 0.8} y={y + 1.6} width={w} height={h} rx={2.6} fill="#0b2038" opacity={0.22} />
+      <Rect x={x} y={y} width={w} height={h} rx={2.6} fill={paper} stroke={ink} strokeWidth={1.5} />
+      <Rect x={x + 2.2} y={y + 2.2} width={w - 4.4} height={h - 4.4} rx={1.4} fill="none" stroke={ink} strokeWidth={0.8} opacity={0.55} />
+      <Circle cx={x + w * 0.3} cy={cy} r={h * 0.27} fill="#fff" opacity={0.75} stroke={ink} strokeWidth={0.9} />
+      <Circle cx={x + w * 0.3} cy={cy - h * 0.05} r={h * 0.12} fill={ink} opacity={0.7} />
+      <Rect x={x + w * 0.52} y={y + 1} width={1.8} height={h - 2} fill={ink} opacity={0.55} />
+      <SvgText x={x + w - 2.6} y={y + h - 3.2} textAnchor="end" fontSize={h * 0.46} fontWeight="bold" fill={ink}>{value}</SvgText>
+      <SvgText x={x + w - 2.8} y={y + h * 0.4} textAnchor="end" fontSize={h * 0.32} fontWeight="bold" fill={ink}>₹</SvgText>
+    </G>
+  );
+}
+
+/** A gold coin from the side and the top, ₹ on its face. */
+function Coin({ cx, cy, rx, ry, depth }: { cx: number; cy: number; rx: number; ry: number; depth: number }) {
+  return (
+    <>
+      <Path d={`M${cx - rx} ${cy}v${depth}a${rx} ${ry} 0 0 0 ${2 * rx} 0v${-depth}z`} fill="#d9951a" stroke="#7a5200" strokeWidth={1} />
+      <Ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="#ffd45e" stroke="#7a5200" strokeWidth={1} />
+      <Ellipse cx={cx} cy={cy} rx={rx * 0.72} ry={ry * 0.68} fill="none" stroke="#c98a12" strokeWidth={0.8} />
+      <Ellipse cx={cx - rx * 0.35} cy={cy - ry * 0.35} rx={rx * 0.28} ry={ry * 0.18} fill="#fff" opacity={0.55} />
+      <SvgText x={cx} y={cy + ry * 0.45} textAnchor="middle" fontSize={ry * 1.25} fontWeight="bold" fill="#8a5d00">₹</SvgText>
+    </>
+  );
+}
+
+/**
+ * Full-colour artwork for the money accounts, the same as the web app's: real-looking rupee notes (₹100 lavender, ₹200 yellow, ₹500 stone grey),
+ * a leather wallet with notes in it, a stack of gold coins and a chit passbook with coins.
+ */
+export function CashArt({ kind, size = 36 }: { kind: 'note' | 'wallet' | 'coins' | 'chit'; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
       {kind === 'note' ? (
         <>
-          <G rotation={-9} origin="24, 24"><Rect x={6} y={11} width={37} height={22} rx={3} fill="#6fbf73" stroke={stroke} strokeWidth={1.6} /></G>
-          <Rect x={4} y={15} width={38} height={23} rx={3} fill="#b4e6a8" stroke={stroke} strokeWidth={1.6} />
-          <Rect x={7.5} y={18.5} width={31} height={16} rx={1.8} fill="none" stroke={stroke} strokeWidth={1} strokeDasharray="2.2 1.8" />
-          <Circle cx={23} cy={26.5} r={6.4} fill="#6fbf73" stroke={stroke} strokeWidth={1.3} />
-          <SvgText x={23} y={30.3} textAnchor="middle" fontSize={10} fontWeight="bold" fill="#1d5a27">₹</SvgText>
-          <Circle cx={11.5} cy={26.5} r={1.5} fill={stroke} /><Circle cx={34.5} cy={26.5} r={1.5} fill={stroke} />
+          <Note x={3} y={7} w={38} h={21} rot={-11} paper="#f6c945" ink="#6e4b00" value="200" />
+          <Note x={8} y={18} w={38} h={22} rot={3} paper="#c9d2b5" ink="#33402a" value="500" />
         </>
       ) : kind === 'wallet' ? (
         <>
-          <G rotation={-6} origin="25, 13"><Rect x={12} y={6} width={26} height={15} rx={2} fill="#8fd187" stroke="#2f7d3a" strokeWidth={1.4} /></G>
-          <G rotation={5} origin="29, 16"><Rect x={16} y={9} width={26} height={15} rx={2} fill="#b4e6a8" stroke="#2f7d3a" strokeWidth={1.4} /></G>
-          <Rect x={4} y={16} width={40} height={26} rx={5} fill="#c98544" stroke={stroke} strokeWidth={1.7} />
-          <Rect x={29} y={25} width={15} height={11} rx={3.5} fill="#e3a766" stroke={stroke} strokeWidth={1.5} />
-          <Circle cx={35} cy={30.5} r={2.1} fill={stroke} />
+          <Note x={10} y={3} w={30} h={17} rot={-8} paper="#f6c945" ink="#6e4b00" value="200" />
+          <Rect x={3.8} y={19.6} width={41} height={25} rx={5.5} fill="#0b2038" opacity={0.22} />
+          <Rect x={3} y={18} width={41} height={25} rx={5.5} fill="#9c5a24" stroke="#4a2808" strokeWidth={1.6} />
+          <Rect x={6} y={21} width={35} height={19} rx={3.6} fill="none" stroke="#e9b882" strokeWidth={1} strokeDasharray="2 1.6" />
+          <Rect x={27} y={25.5} width={18} height={12} rx={4} fill="#bd7432" stroke="#4a2808" strokeWidth={1.5} />
+          <Circle cx={34} cy={31.5} r={2.8} fill="#ffcf3f" stroke="#6b4600" strokeWidth={1} />
+        </>
+      ) : kind === 'coins' ? (
+        <>
+          <Coin cx={16} cy={38} rx={11} ry={4.4} depth={4} />
+          <Coin cx={16} cy={32} rx={11} ry={4.4} depth={4} />
+          <Coin cx={16} cy={26} rx={11} ry={4.4} depth={4} />
+          <Coin cx={33} cy={33} rx={10} ry={4} depth={4} />
+          <Coin cx={33} cy={27} rx={10} ry={4} depth={4} />
+          <Coin cx={31} cy={17} rx={9} ry={9} depth={0} />
         </>
       ) : (
         <>
-          <Ellipse cx={17} cy={37} rx={12} ry={5} fill="#d99a1b" stroke={stroke} strokeWidth={1.4} />
-          <Path d="M5 31v6c0 2.8 5.4 5 12 5s12-2.2 12-5v-6z" fill="#f0b73a" stroke={stroke} strokeWidth={1.4} />
-          <Ellipse cx={17} cy={31} rx={12} ry={5} fill="#ffd25e" stroke={stroke} strokeWidth={1.4} />
-          <Path d="M5 24v7c0 2.8 5.4 5 12 5s12-2.2 12-5v-7z" fill="#f0b73a" stroke={stroke} strokeWidth={1.4} />
-          <Ellipse cx={17} cy={24} rx={12} ry={5} fill="#ffd25e" stroke={stroke} strokeWidth={1.4} />
-          <Path d="M23 22v8c0 2.4 4.5 4.3 10 4.3S43 32.4 43 30v-8z" fill="#f0b73a" stroke={stroke} strokeWidth={1.3} />
-          <Ellipse cx={33} cy={22} rx={10} ry={4.3} fill="#ffd25e" stroke={stroke} strokeWidth={1.3} />
-          <SvgText x={33} y={24.4} textAnchor="middle" fontSize={6.5} fontWeight="bold" fill={stroke}>₹</SvgText>
-          <SvgText x={17} y={26.4} textAnchor="middle" fontSize={6.5} fontWeight="bold" fill={stroke}>₹</SvgText>
+          <Rect x={7.8} y={5.8} width={28} height={36} rx={3.2} fill="#0b2038" opacity={0.25} />
+          <Rect x={6} y={4} width={28} height={36} rx={3.2} fill="#174a85" stroke="#0a2a52" strokeWidth={1.6} />
+          <Rect x={6} y={4} width={6} height={36} rx={2.4} fill="#0f3a6b" />
+          <Rect x={32} y={6.5} width={3.2} height={31} rx={1} fill="#f6f2e4" stroke="#bcb497" strokeWidth={0.8} />
+          <SvgText x={22.5} y={15.5} textAnchor="middle" fontSize={8.6} fontWeight="bold" fill="#ffd45e">CHIT</SvgText>
+          <Circle cx={22.5} cy={26} r={7.2} fill="#ffd45e" stroke="#9a6c00" strokeWidth={1.2} />
+          <SvgText x={22.5} y={30.2} textAnchor="middle" fontSize={11} fontWeight="bold" fill="#174a85">₹</SvgText>
+          <Coin cx={37} cy={41} rx={9.5} ry={3.8} depth={3.6} />
+          <Coin cx={37} cy={35.6} rx={9.5} ry={3.8} depth={3.6} />
         </>
       )}
     </Svg>
@@ -106,8 +144,8 @@ export function CashArt({ kind, size = 36 }: { kind: 'note' | 'wallet' | 'coins'
 
 export function AccountBubble({ type, group, size }: { type: string; group?: string; size?: number }) {
   if (!group || group === 'OWN') {
-    const art = type === 'CASH' ? 'note' : type === 'WALLET' ? 'wallet' : type === 'CHIT_FUND' ? 'coins' : null;
-    if (art) return <View style={{ width: size || 44, height: size || 44, alignItems: 'center', justifyContent: 'center' }}><CashArt kind={art} size={(size || 44) * 0.95} /></View>;
+    const art = type === 'CASH' ? 'note' : type === 'WALLET' ? 'wallet' : type === 'CHIT_FUND' ? 'chit' : null;
+    if (art) return <View style={{ width: size || 44, height: size || 44, alignItems: 'center', justifyContent: 'center' }}><CashArt kind={art} size={(size || 44) * 1.08} /></View>;
   }
   const t = accountTone(type, group);
   return <IconBubble Icon={accountIcon(type, group)} fg={t.fg} bg={t.bg} size={size} />;

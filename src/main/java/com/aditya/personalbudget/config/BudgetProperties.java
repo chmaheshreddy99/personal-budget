@@ -27,10 +27,12 @@ public record BudgetProperties(String dataDir, Security security, Seed seed, Int
     }
 
     /** Where the tables live: tab-separated files in the data folder (default) or a Google spreadsheet. */
-    public record Storage(StorageType type, GoogleSheets googleSheets) {
+    public record Storage(StorageType type, GoogleSheets googleSheets, Integer watchSeconds, Integer fullCheckSeconds) {
         public Storage {
             type = type == null ? StorageType.FILES : type;
             googleSheets = googleSheets == null ? new GoogleSheets(null, null, null, null, false) : googleSheets;
+            watchSeconds = watchSeconds == null ? 0 : Math.max(0, watchSeconds);           // off: one server needs no polling
+            fullCheckSeconds = fullCheckSeconds == null ? 0 : Math.max(0, fullCheckSeconds);
         }
     }
 
@@ -52,7 +54,7 @@ public record BudgetProperties(String dataDir, Security security, Seed seed, Int
     }
 
     public Storage storage() {
-        return storage == null ? new Storage(null, null) : storage;
+        return storage == null ? new Storage(null, null, null, null) : storage;
     }
 
     /** Interest on money lent and owed. */

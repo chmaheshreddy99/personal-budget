@@ -52,8 +52,11 @@ public class DeepAnalysisService {
 
     private final LedgerService ledger;
 
-    public DeepAnalysisService(LedgerService ledger) {
+    private final ClaimService claims;
+
+    public DeepAnalysisService(LedgerService ledger, ClaimService claims) {
         this.ledger = ledger;
+        this.claims = claims;
     }
 
     // ================================================================== result
@@ -113,7 +116,19 @@ public class DeepAnalysisService {
     public record DeepAnalysis(LocalDate from, LocalDate to, String unit, boolean enough, String message, List<PeriodRow> periods, Summary summary, Trend trend,
                                Control control, Forecast forecast, List<Season> seasons, List<CategoryRow> categories, List<Correlation> correlations,
                                Concentration concentration, List<Outlier> outliers, Rhythm rhythm, double committedShare, List<String> advice, List<String> findings,
-                               Health health, List<Opportunity> opportunities) {
+                               Health health, List<Opportunity> opportunities, Forgone forgone) {
+    }
+
+    /** One item paid for someone or lent without interest: what the money could have earned in the best bank account while it was out. */
+    public record ForgoneRow(Long id, String party, String kind, String narration, double amount, double outstanding, LocalDate since, long days,
+                             double forgone, double perYear, boolean settled) {
+    }
+
+    /**
+     * Interest lost on money paid for others or lent without interest, against the benchmark (the rate set in Settings, else the best rate among
+     * the bank, FD and RD accounts): lost so far, and what the money still out keeps costing each year. All items, whatever the period.
+     */
+    public record Forgone(double total, Double rate, String source, double outstanding, double perYear, int open, List<ForgoneRow> rows, String reading) {
     }
 
     // ================================================================== the analysis
@@ -142,16 +157,16 @@ public class DeepAnalysisService {
         }
         if (spent.isEmpty()) {
             return new DeepAnalysis(from, to, "none", false, "No expenses in this period. Pick a longer period (6 to 12 months works best).", List.of(), null, null, null, null,
-                    List.of(), List.of(), List.of(), null, List.of(), null, 0, List.of(), List.of(), null, List.of());
+                    List.of(), List.of(), List.of(), null, List.of(), null, 0, List.of(), List.of(), null, List.of(), forgone());
         }
 
         // ---- the buckets: months if there are enough complete ones, else weeks, else none
         List<Bucket> months = new ArrayList<>(), weeks = new ArrayList<>();
         for (YearMonth m = YearMonth.from(from); !m.isAfter(YearMonth.from(to)); m = m.plusMonths(1)) {
-            months.add(new Bucket(m.toString(), m.toString(), m.atDay(1), m.atEndOfMonth()));
+            months.add(new Bucket(m.toString(), monthName(m), m.atDay(1), m.atEndOfMonth()));
         }
         for (LocalDate d = from.with(DayOfWeek.MONDAY); !d.isAfter(to); d = d.plusWeeks(1)) {
-            weeks.add(new Bucket(d.toString(), d.toString(), d, d.plusDays(6)));
+            weeks.add(new Bucket(d.toString(), weekName(d), d, d.plusDays(6)));
         }
         java.util.function.Predicate<Bucket> complete = b -> !b.start().isBefore(from) && !b.end().isAfter(to) && b.end().isBefore(today);
         List<Bucket> fullMonths = months.stream().filter(complete).toList(), fullWeeks = weeks.stream().filter(complete).toList();
@@ -324,7 +339,7 @@ public class DeepAnalysisService {
                 long present = java.util.Arrays.stream(s).filter(v -> v > 0).count();
                 steady = cv < 0.25 && present >= Math.ceil(n * 0.8);
                 if (steady) committed += e.getValue();
-                suggested = Stats.quantile(s, 0.8);
+                suggested = present * 2 < n ? e.getValue() / n : Stats.quantile(s, 0.8);   // an occasional cost: spread it over the periods
                 vol = cv < 0.25 ? "steady" : cv < 0.6 ? "variable" : "erratic";
             }
             List<Double> series = new ArrayList<>();
@@ -383,7 +398,7 @@ public class DeepAnalysisService {
                 for (int i = 0; i < s.length; i++) {
                     double mz = mad > 0 ? 0.6745 * (s[i] - med) / mad : (s[i] - med) / (1.253314 * meanAd);
                     if (Math.abs(mz) > 3.5 && s[i] > 0) {
-                        outliers.add(new Outlier("period", c.name(), used.get(i).label(), s[i], r(med), round(mz, 1), (mz > 0 ? "far above" : "far below") + " its usual " + Math.round(med)));
+                        outliers.add(new Outlier("period", c.name(), used.get(i).key(), s[i], r(med), round(mz, 1), (mz > 0 ? "far above" : "far below") + " its usual " + Math.round(med)));
                     }
                 }
             }
@@ -425,7 +440,7 @@ public class DeepAnalysisService {
             findings.add(String.format("Memory: lag-1 autocorrelation %.2f (%s). Control chart: %s.", trend.lag1(),
                     trend.lag1() > 0.4 ? "a high month tends to be followed by another high one" : trend.lag1() < -0.4 ? "a high month is followed by a low one" : "each period is mostly independent of the last", control.reading()));
             findings.add(String.format("Next %s (%s): ₹%,.0f by trend (95%% range ₹%,.0f to ₹%,.0f), ₹%,.0f by smoothing. Historically 4 in 5 %ss stayed under ₹%,.0f and 19 in 20 under ₹%,.0f.",
-                    unitName, forecast.label(), forecast.ols(), forecast.low(), forecast.high(), forecast.holt(), unitName, forecast.p80(), forecast.p95()));
+                    unitName, unit.equals("month") ? monthName(YearMonth.parse(forecast.label())) : weekName(LocalDate.parse(forecast.label())), forecast.ols(), forecast.low(), forecast.high(), forecast.holt(), unitName, forecast.p80(), forecast.p95()));
             advice.add(String.format("Set the %s spending limit at about ₹%,.0f (the 80th percentile): you would have met it in 4 of 5 %ss. ₹%,.0f is the 95th percentile, a safe ceiling for the worst %s.",
                     unitName, forecast.p80(), unitName, forecast.p95(), unitName));
             if (summary.savingsRate() != null) {
@@ -446,13 +461,18 @@ public class DeepAnalysisService {
                     .forEach(c -> findings.add(String.format("%s is rising by ₹%,.0f a %s (t = %.2f, Mann–Kendall p = %.3f).", c.name(), c.slope(), unitName, c.t(), c.mkP())));
             shares.stream().filter(c -> c.latestZ() > 2).limit(2)
                     .forEach(c -> findings.add(String.format("%s in the latest %s (₹%,.0f) is %.1f standard deviations above its average of ₹%,.0f.", c.name(), unitName, c.latest(), c.latestZ(), c.mean())));
-            shares.stream().filter(c -> "erratic".equals(c.volatility()) && c.share() >= 0.05).limit(2)
-                    .forEach(c -> advice.add(String.format("%s is erratic (CV %.2f): plan a buffer of about ₹%,.0f a %s instead of the average ₹%,.0f.", c.name(), c.cv(), c.suggested(), unitName, c.mean())));
+            shares.stream().filter(c -> c.share() >= 0.03 && occasional(c)).limit(2)
+                    .forEach(c -> advice.add(String.format("%s is occasional (in %d of %d %ss, ₹%,.0f in all): it is not overspending, but it lands all at once. Setting aside ₹%,.0f a %s in a sinking fund keeps it from upsetting one %s.",
+                            c.name(), presentIn(c), c.series().size(), unitName, c.total(), c.suggested(), unitName, unitName)));
+            shares.stream().filter(c -> "erratic".equals(c.volatility()) && c.share() >= 0.05 && !occasional(c)).limit(2)
+                    .forEach(c -> advice.add(String.format("%s swings a lot (CV %.2f): plan about ₹%,.0f a %s (its 80th percentile) rather than its average of ₹%,.0f.", c.name(), c.cv(), c.suggested(), unitName, c.mean())));
             shares.stream().filter(c -> "rising".equals(c.trend()) && c.share() >= 0.08).limit(2)
                     .forEach(c -> advice.add(String.format("Look at %s first: it is the largest rising item (₹%,.0f a %s more each %s).", c.name(), c.slope(), unitName, unitName)));
         }
         for (Correlation c : correlations.stream().limit(2).toList()) {
-            findings.add(String.format("%s and %s %s (r = %.2f): one tends to bring the other.", c.a(), c.b(), c.reading(), c.r()));
+            findings.add(c.r() > 0
+                    ? String.format("%s and %s rise and fall together (r = %.2f): a high %s in one usually means a high one in the other.", c.a(), c.b(), c.r(), unitName)
+                    : String.format("%s and %s move in opposite directions (r = %.2f): spending seems to shift from one to the other.", c.a(), c.b(), c.r()));
         }
         if (rhythm.uneven()) findings.add(String.format("Spending is unevenly spread over the week (χ² = %.1f, above 12.59): %s is the busiest day and %.0f%% falls on the weekend.", chi2, rhythm.busiest(), rhythm.weekendShare() * 100));
         if (!topOutliers.isEmpty()) findings.add(topOutliers.size() + " unusual item" + (topOutliers.size() == 1 ? "" : "s") + " stand out from the pattern (see below).");
@@ -463,7 +483,7 @@ public class DeepAnalysisService {
         double totalExcess = 0;
         if (n >= 4) {
             for (CategoryRow c : shares) {
-                if (c.committed()) continue;
+                if (c.committed() || occasional(c)) continue;   // committed costs are not trimmed, and a one-off is not overspending
                 double[] s = c.series().stream().mapToDouble(Double::doubleValue).toArray();
                 double med = Stats.median(s), excess = 0;
                 for (double v : s) excess += Math.max(0, v - med);
@@ -505,19 +525,63 @@ public class DeepAnalysisService {
         }
 
         return new DeepAnalysis(from, to, unit, true, null, rows, summary, trend, control, forecast, seasons, shares, correlations, conc, topOutliers, rhythm, round(committedShare, 3),
-                advice, findings, health, opportunities);
+                advice, findings, health, opportunities, forgone());
+    }
+
+    /** In how many periods a category had any spending. */
+    private static int presentIn(CategoryRow c) {
+        return (int) c.series().stream().filter(v -> v > 0).count();
+    }
+
+    /** A category that shows up in fewer than half the periods: a one-off or occasional cost, not a habit. */
+    private static boolean occasional(CategoryRow c) {
+        return !c.series().isEmpty() && presentIn(c) * 2 < c.series().size();
+    }
+
+    /** The interest lost on interest-free money owed to me (see {@link Forgone}). */
+    private Forgone forgone() {
+        List<ForgoneRow> rows = new ArrayList<>();
+        Double rate = null;
+        String source = null;
+        LocalDate today = OrgClock.today();
+        for (var c : claims.list()) {
+            if (c.forgoneInterest() == null) continue;
+            rate = c.benchmarkRate() == null ? null : c.benchmarkRate().doubleValue();
+            source = c.benchmarkSource();
+            double out = c.outstanding() == null ? 0 : c.outstanding().doubleValue();
+            boolean settled = out <= 0;
+            rows.add(new ForgoneRow(c.id(), c.party(), c.kindLabel(), c.narration(), r(c.amount().doubleValue()), r(out), c.startDate(),
+                    ChronoUnit.DAYS.between(c.startDate(), today), r(c.forgoneInterest().doubleValue()), r(out * (rate == null ? 0 : rate) / 100), settled));
+        }
+        if (rows.isEmpty()) return null;
+        rows.sort(Comparator.comparingDouble(ForgoneRow::forgone).reversed());
+        double total = rows.stream().mapToDouble(ForgoneRow::forgone).sum(), outstanding = rows.stream().mapToDouble(ForgoneRow::outstanding).sum();
+        double perYear = rows.stream().mapToDouble(ForgoneRow::perYear).sum();
+        int open = (int) rows.stream().filter(x -> !x.settled()).count();
+        String reading = String.format("Money paid for others or lent without interest has cost you ₹%,.0f so far: what it would have earned at %.2f%%%s. "
+                        + "The ₹%,.0f still out costs about ₹%,.0f a year (₹%,.0f a month) for as long as it stays out.",
+                total, rate == null ? 0 : rate, source == null ? "" : " (" + source + ")", outstanding, perYear, perYear / 12);
+        return new Forgone(r(total), rate, source, r(outstanding), r(perYear), open, rows, reading);
     }
 
     private static Bucket bucketOf(String unit, LocalDate d) {
         if (unit.equals("month")) {
             YearMonth m = YearMonth.from(d);
-            return new Bucket(m.toString(), m.toString(), m.atDay(1), m.atEndOfMonth());
+            return new Bucket(m.toString(), monthName(m), m.atDay(1), m.atEndOfMonth());
         }
         if (unit.equals("week")) {
             LocalDate s = d.with(DayOfWeek.MONDAY);
-            return new Bucket(s.toString(), s.toString(), s, s.plusDays(6));
+            return new Bucket(s.toString(), weekName(s), s, s.plusDays(6));
         }
         return null;
+    }
+
+    private static String monthName(YearMonth m) {
+        return m.format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy", java.util.Locale.ENGLISH));
+    }
+
+    private static String weekName(LocalDate d) {
+        return "week of " + d.format(java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.ENGLISH));
     }
 
     private static double sumOf(double[] v) {

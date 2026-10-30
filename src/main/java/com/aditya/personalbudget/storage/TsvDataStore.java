@@ -74,6 +74,11 @@ public class TsvDataStore {
     private final Map<TsvTable<?>, Parsed<?>> parsed = new ConcurrentHashMap<>();
     private final List<Consumer<Set<String>>> commitListeners = new CopyOnWriteArrayList<>();
     private final List<StoreListener> storeListeners = new CopyOnWriteArrayList<>();
+    /** Told the tables that changed outside this process (see {@link #watchOutsideChanges}). */
+    private final List<Consumer<Set<String>>> outsideListeners = new CopyOnWriteArrayList<>();
+    private java.util.concurrent.ScheduledExecutorService watcher;
+    /** The files of the {@link Vaulted} fields (data/vault): read on demand, written at commit. */
+    private final VaultFiles vault;
 
     /** A store on tab-separated files in {@code dataDir}. */
     public TsvDataStore(String dataDir, Validator validator) {
@@ -88,6 +93,7 @@ public class TsvDataStore {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.storage = storage;
         this.validator = validator;
+        this.vault = new VaultFiles(this.dataDir.resolve("vault"));
         try {
             Files.createDirectories(this.dataDir);
         } catch (IOException e) {
@@ -98,6 +104,11 @@ public class TsvDataStore {
 
     public Path dataDir() {
         return dataDir;
+    }
+
+    /** Where the data is, in one line. */
+    public String describe() {
+        return storage.describe();
     }
 
     /** How many tables there are and how much they hold. */
@@ -113,6 +124,72 @@ public class TsvDataStore {
     /** Called after every successful commit with the names of the tables that changed. */
     public void addCommitListener(Consumer<Set<String>> listener) {
         commitListeners.add(listener);
+    }
+
+    /** Called with the tables that another process (or an edit by hand) changed, once this process has noticed. */
+    public void addOutsideChangeListener(Consumer<Set<String>> listener) {
+        outsideListeners.add(listener);
+    }
+
+    /**
+     * Looks once, now, for changes saved outside this process (another server on the same storage, or an edit by hand
+     * in the spreadsheet): {@code full} compares everything, else only the change marker every save writes. What
+     * changed is read into memory and announced to the {@linkplain #addOutsideChangeListener outside-change listeners}
+     * (every open browser refreshes). Returns the tables that changed. A save made through this process never needs
+     * this: what it wrote is in memory the moment it commits.
+     */
+    public Set<String> checkOutsideChanges(boolean full) {
+        Set<String> changed;
+        try {
+            changed = storage.poll(full);
+        } finally {
+            storage.forget();
+        }
+        if (!changed.isEmpty()) {
+            outsideListeners.forEach(listener -> {
+                try {
+                    listener.accept(changed);
+                } catch (RuntimeException e) {
+                    log.warn("Outside-change listener failed: {}", e.getMessage());
+                }
+            });
+        }
+        return changed;
+    }
+
+    /**
+     * Only for several server processes on one storage: {@link #checkOutsideChanges} every {@code every} (the cheap
+     * check) and a full one every {@code fullEvery}. Off by default: with one server every save is in memory at once,
+     * and an edit by hand is picked up on demand (Settings, Organization, "Check now").
+     */
+    public synchronized void watchOutsideChanges(java.time.Duration every, java.time.Duration fullEvery) {
+        if (watcher != null || every.isZero() || every.isNegative()) {
+            return;
+        }
+        long fullTicks = fullEvery.isZero() || fullEvery.isNegative() ? Long.MAX_VALUE : Math.max(1, fullEvery.toMillis() / every.toMillis());
+        long[] tick = {0};
+        watcher = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "storage-watch");
+            t.setDaemon(true);
+            return t;
+        });
+        watcher.scheduleWithFixedDelay(() -> {
+            try {
+                checkOutsideChanges(++tick[0] % fullTicks == 0);
+            } catch (RuntimeException e) {
+                log.debug("Watching the storage: {}", e.getMessage());
+            }
+        }, every.toMillis(), every.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        log.info("Watching the storage for changes saved elsewhere: every {} s (a full check every {} s)", every.toSeconds(),
+                fullTicks == Long.MAX_VALUE ? "—" : String.valueOf(fullTicks * every.toSeconds()));
+    }
+
+    /** Stops watching (tests, shutdown). */
+    public synchronized void stopWatching() {
+        if (watcher != null) {
+            watcher.shutdownNow();
+            watcher = null;
+        }
     }
 
     /** Hooks into every save, delete and commit (see {@link StoreListener}). */
@@ -139,12 +216,12 @@ public class TsvDataStore {
 
     public <T extends Identifiable> List<T> findAll(Class<T> type, Predicate<? super T> filter) {
         TsvTable<T> table = table(type);
-        return rows(table).values().stream().filter(filter).map(table.meta()::copy).collect(Collectors.toList());
+        return rows(table).values().stream().filter(filter).map(table.meta()::copy).map(row -> fill(table, row)).collect(Collectors.toList());
     }
 
     public <T extends Identifiable> Optional<T> findById(Class<T> type, Long id) {
         TsvTable<T> table = table(type);
-        return Optional.ofNullable(id == null ? null : rows(table).get(id)).map(table.meta()::copy);
+        return Optional.ofNullable(id == null ? null : rows(table).get(id)).map(table.meta()::copy).map(row -> fill(table, row));
     }
 
     public <T extends Identifiable> long count(Class<T> type, Predicate<? super T> filter) {
@@ -298,6 +375,64 @@ public class TsvDataStore {
         return table.encode(rows(table).values());
     }
 
+    // ================================================================== vaulted fields
+
+    private static String vaultKey(TsvTable<?> table, Long id) {
+        return table.name() + "/" + id;
+    }
+
+    /**
+     * Puts a record's {@link Vaulted} fields back from its file (or from what this transaction is about to write): read now, for this
+     * copy only. A row from before the field was vaulted still carries the value in its column, and keeps it until it is moved.
+     */
+    private <T extends Identifiable> T fill(TsvTable<T> table, T row) {
+        List<ColumnMeta> cols = table.meta().vaulted();
+        if (cols.isEmpty() || row.getId() == null) return row;
+        String key = vaultKey(table, row.getId());
+        UnitOfWork work = currentWork.get();
+        Map<String, String> doc = work != null && work.vaultWrites.containsKey(key) ? work.vaultWrites.get(key)
+                : work != null && work.vaultDeletes.contains(key) ? Map.of() : vault.read(table.name(), row.getId());
+        for (ColumnMeta c : cols) {
+            String v = doc.get(c.name());
+            if (v != null) c.write(row, v);
+        }
+        return row;
+    }
+
+    /**
+     * Moves the vaulted fields still held in the tables (rows written before the fields were vaulted) into their files, and empties the
+     * columns: the file is written before the row, so nothing is lost if it stops half way. Run at every start; it does nothing once moved.
+     */
+    public int vaultLegacyRows() {
+        int moved = 0;
+        for (TsvTable<?> table : tables.values()) moved += vaultLegacy(table);
+        return moved;
+    }
+
+    private <T extends Identifiable> int vaultLegacy(TsvTable<T> table) {
+        List<ColumnMeta> cols = table.meta().vaulted();
+        if (cols.isEmpty()) return 0;
+        List<T> legacy = rows(table).values().stream().filter(r -> cols.stream().anyMatch(c -> c.read(r) != null)).map(table.meta()::copy).toList();
+        if (legacy.isEmpty()) return 0;
+        begin();
+        try {
+            for (T row : legacy) {
+                // what the file already has wins; the column fills in the rest
+                Map<String, String> doc = vault.read(table.name(), row.getId());
+                for (ColumnMeta c : cols) {
+                    if (doc.get(c.name()) != null) c.write(row, doc.get(c.name()));
+                }
+                saveRow(table, row, true);
+            }
+            commit();
+        } catch (RuntimeException e) {
+            rollback();
+            throw e;
+        }
+        log.info("Moved the documents of {} {} row(s) out of the table into data/vault", legacy.size(), table.name());
+        return legacy.size();
+    }
+
     // ================================================================== transactions
 
     public boolean isInTransaction() {
@@ -343,6 +478,8 @@ public class TsvDataStore {
                     written.put(table.name(), encode(table, work));
                     changed.add(table.name());
                 }
+                // the vault files first: a row is never written pointing at a document that is not there yet
+                work.vaultWrites.forEach((key, doc) -> vault.write(key.substring(0, key.indexOf('/')), Long.valueOf(key.substring(key.indexOf('/') + 1)), doc));
                 try {
                     storage.write(written, work.sequencesChanged ? work.sequences : null);
                 } catch (RuntimeException e) {
@@ -350,6 +487,7 @@ public class TsvDataStore {
                     throw e;
                 }
                 work.dirty.forEach(table -> remember(table, work.rows.get(table)));   // what was written is the current version
+                work.vaultDeletes.forEach(key -> vault.delete(key.substring(0, key.indexOf('/')), Long.valueOf(key.substring(key.indexOf('/') + 1))));
             }
         } finally {
             end(work);
@@ -404,6 +542,9 @@ public class TsvDataStore {
         private Properties sequences;
         private boolean sequencesChanged;
         private boolean rollbackOnly;
+        /** Vault files to write (table/id → the fields) and to delete, at commit; a rollback drops them. */
+        private final Map<String, Map<String, String>> vaultWrites = new LinkedHashMap<>();
+        private final Set<String> vaultDeletes = new LinkedHashSet<>();
 
         UnitOfWork(Path lockFile) {
             try {
@@ -564,6 +705,21 @@ public class TsvDataStore {
         validateUniqueKeys(rows.values(), meta, row);
         validateForeignKeys(meta, row);
 
+        // the vaulted fields go to the record's own file (at commit); the table keeps the row without them
+        T full = null;
+        if (!meta.vaulted().isEmpty()) {
+            full = meta.copy(row);
+            Map<String, String> doc = new LinkedHashMap<>();
+            for (ColumnMeta c : meta.vaulted()) {
+                Object v = c.read(row);
+                if (v != null) doc.put(c.name(), v.toString());
+                c.write(row, null);
+            }
+            String key = vaultKey(table, row.getId());
+            work.vaultWrites.put(key, doc);
+            work.vaultDeletes.remove(key);
+        }
+
         work.dirty.add(table);
         rows.put(row.getId(), row);
         entity.setId(row.getId()); // like JPA, the caller's instance receives the generated id
@@ -571,7 +727,7 @@ public class TsvDataStore {
         for (StoreListener listener : storeListeners) {
             listener.afterSave(type, existing == null ? null : meta.copy(existing), meta.copy(row));
         }
-        return meta.copy(row);
+        return full != null ? full : meta.copy(row);
     }
 
     /**
@@ -615,6 +771,11 @@ public class TsvDataStore {
         }
         work.dirty.add(table);
         T removed = rows.remove(id);
+        if (!table.meta().vaulted().isEmpty()) {
+            String key = vaultKey(table, id);
+            work.vaultWrites.remove(key);
+            work.vaultDeletes.add(key);
+        }
         for (StoreListener listener : storeListeners) {
             listener.afterDelete(type, table.meta().copy(removed));
         }

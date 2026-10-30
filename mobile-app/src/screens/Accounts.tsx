@@ -6,8 +6,9 @@
  * Sync button.
  */
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { ChevronDown, ChevronRight, CloudOff, HandCoins, HardHat, RefreshCw, User, WifiOff, CalendarClock, AlertTriangle, EyeOff, Eye, ArrowLeftRight } from 'lucide-react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ChevronDown, ChevronRight, CloudOff, HandCoins, HardHat, RefreshCw, User, WifiOff, CalendarClock, AlertTriangle, EyeOff, Eye, ArrowLeftRight, Lock, Receipt, ArrowDownLeft, BookOpen } from 'lucide-react-native';
+import type { RecordMode } from './AddExpense';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { Account, liveBalance } from '../data';
@@ -23,7 +24,8 @@ const OWN_ORDER: [string, (a: Account) => boolean][] = [
   ['Loans & dues', a => a.accountClass === 'LIABILITY' && a.type !== 'CREDIT_CARD'],
 ];
 
-export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a: Account) => void; onSettings?: () => void; onTransfer?: () => void }) {
+export function AccountsScreen({ onOpen, onSettings, onTransfer, onRecord, onChits }: { onOpen: (a: Account) => void; onSettings?: () => void; onTransfer?: () => void;
+  onRecord?: (mode: RecordMode) => void; onChits?: () => void }) {
   const app = useApp();
   const insets = useSafeAreaInsets();
   const [closed, setClosed] = useState<Record<string, boolean>>({});
@@ -38,6 +40,15 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a:
   const netWorth = own.reduce((s, a) => s + signed(a), 0);
   const cash = own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)).reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
   const cards = own.filter(a => a.type === 'CREDIT_CARD').reduce((s, a) => s + liveBalance(a, app.queue, app.chitQueue, app.records).balance, 0);
+
+  const sealed = (list: Account[]) => list.some(a => app.isPrivate(a.id));
+  const sum = (list: Account[], text: string) => (sealed(list) ? '••••' : text);
+  const actions = [
+    onRecord ? { key: 'exp', label: 'Expense', Icon: Receipt, fg: colors.coral, onPress: () => onRecord('EXPENSE') } : null,
+    onRecord ? { key: 'inc', label: 'Income', Icon: ArrowDownLeft, fg: colors.green, onPress: () => onRecord('INCOME') } : null,
+    onTransfer ? { key: 'tr', label: 'Transfer', Icon: ArrowLeftRight, fg: colors.ocean, onPress: onTransfer } : null,
+    onChits ? { key: 'chit', label: 'Pay chit', Icon: BookOpen, fg: colors.gold, onPress: onChits } : null,
+  ].filter(Boolean) as { key: string; label: string; Icon: typeof Receipt; fg: string; onPress: () => void }[];
 
   const byName = (list: Account[]) => {
     const m = new Map<string, Account[]>();
@@ -59,7 +70,7 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a:
           <View style={{ flex: 1 }}>
             <Text style={st.hello}>{app.snapshot?.household || 'Personal Budget'}</Text>
             <Text style={st.label}>{chosen ? 'NET WORTH · CHOSEN ACCOUNTS' : 'NET WORTH · MY ACCOUNTS'}</Text>
-            <Text style={st.big}>{app.net(netWorth)}</Text>
+            <Text style={st.big}>{sealed(own) && !app.snapshot?.mobile?.maskNetWorth ? '••••••' : app.net(netWorth)}</Text>
           </View>
           <Pressable onPress={() => app.sync()} style={({ pressed }) => [st.syncBtn, pressed && { opacity: 0.8 }]} disabled={app.syncing}>
             {app.syncing ? <ActivityIndicator color={colors.white} /> : <RefreshCw color={colors.white} size={20} />}
@@ -71,12 +82,10 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a:
             {app.balancesVisible ? <EyeOff color={colors.white} size={15} /> : <Eye color={colors.white} size={15} />}
             <Text style={st.privacyText}>{app.balancesVisible ? 'Hide balances' : 'View balances'}</Text>
           </Pressable>
-          {onTransfer ? <Pressable onPress={onTransfer} style={({ pressed }) => [st.privacyBtn, pressed && { opacity: 0.8 }]}>
-            <ArrowLeftRight color={colors.white} size={15} /><Text style={st.privacyText}>Transfer</Text></Pressable> : null}
         </View>
         <View style={st.figs}>
-          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{app.balShort(cash)}</Text></View>
-          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{app.balShort(cards)}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Cash & bank</Text><Text style={st.figValue}>{sum(own.filter(a => ['BANK', 'CASH', 'WALLET'].includes(a.type)), app.balShort(cash))}</Text></View>
+          <View style={st.fig}><Text style={st.figLabel}>Card dues</Text><Text style={st.figValue}>{sum(own.filter(a => a.type === 'CREDIT_CARD'), app.balShort(cards))}</Text></View>
           <View style={st.fig}><Text style={st.figLabel}>To sync</Text><Text style={[st.figValue, waiting.length ? { color: '#ffd68a' } : null]}>{waiting.length}</Text></View>
         </View>
         <View style={st.statusRow}>
@@ -85,6 +94,17 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a:
           {app.snapshot ? <Text style={st.statusMuted}>· balances of {ago(app.snapshot.fetchedAt)}</Text> : null}
         </View>
       </GradientPanel>
+
+      {actions.length ? (
+        <View style={st.actions}>
+          {actions.map(x => (
+            <Pressable key={x.key} onPress={x.onPress} style={({ pressed }) => [st.action, pressed && { transform: [{ scale: 0.96 }] }]}>
+              <View style={[st.actionIco, { backgroundColor: x.fg + '1f' }]}><x.Icon color={x.fg} size={20} /></View>
+              <Text style={st.actionText}>{x.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {failed ? (
         <Card style={[st.banner, { borderColor: colors.redSoft }]}>
@@ -118,7 +138,7 @@ export function AccountsScreen({ onOpen, onSettings, onTransfer }: { onOpen: (a:
               <Text style={st.groupTitle}>{label}</Text>
               <Text style={st.groupCount}>{list.length}</Text>
               <View style={{ flex: 1 }} />
-              <Text style={st.groupTotal}>{app.bal(total)}</Text>
+              <Text style={st.groupTotal}>{sealed(list) ? '••••••' : app.bal(total)}</Text>
               {closed[label] ? <ChevronRight color={colors.muted} size={18} /> : <ChevronDown color={colors.muted} size={18} />}
             </Pressable>
             {!closed[label] ? list.map(a => <AccountRow key={a.id} a={a} onPress={() => onOpen(a)} />) : null}
@@ -158,10 +178,10 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   const card = a.type === 'CREDIT_CARD';
   const available = card && a.creditLimit ? a.creditLimit - balance : null;
   return (
-    <Pressable onPress={onPress} onLongPress={() => app.reveal(a.id)} style={({ pressed }) => [st.row, pressed && { backgroundColor: colors.sunken }]} android_ripple={{ color: '#00000008' }}>
+    <Pressable onPress={onPress} onLongPress={() => privacyMenu(app, a)} style={({ pressed }) => [st.row, pressed && { backgroundColor: colors.sunken }]} android_ripple={{ color: '#00000008' }}>
       <AccountBubble type={a.type} group={a.group} />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={st.name} numberOfLines={1}>{a.name}</Text>
+        <View style={st.nameRow}><Text style={st.name} numberOfLines={1}>{a.name}</Text>{app.isPrivate(a.id) ? <Lock color={colors.muted} size={12} /> : null}</View>
         <Text style={st.meta} numberOfLines={1}>{[a.typeLabel, a.institution, a.last4 ? `•• ${a.last4}` : null].filter(Boolean).join(' · ')}</Text>
         {available !== null ? <Text style={st.avail}>Available {app.bal(available, a.id, 2)}</Text> : null}
       </View>
@@ -173,7 +193,23 @@ function AccountRow({ a, onPress }: { a: Account; onPress: () => void }) {
   );
 }
 
+/** Long press on an account: show its balance this once, or keep it private on this phone (the household's own choice cannot be undone here). */
+function privacyMenu(app: ReturnType<typeof useApp>, a: Account) {
+  const mine = (app.settings.privateAccounts || []).includes(a.id);
+  const house = app.privateByHousehold(a.id);
+  Alert.alert(a.name, house ? 'The household keeps this balance private on phones.' : mine ? 'Kept private on this phone.' : 'Balance privacy for this account', [
+    { text: 'Show balance once', onPress: () => app.reveal(a.id) },
+    ...(house ? [] : [{ text: mine ? 'Stop keeping it private' : 'Keep private on this phone', onPress: () => { app.togglePrivate(a.id); } }]),
+    { text: 'Cancel', style: 'cancel' as const },
+  ]);
+}
+
 const st = StyleSheet.create({
+  actions: { flexDirection: 'row', gap: 8, marginTop: space.m },
+  action: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 16, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
+  actionIco: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  actionText: { fontSize: 12, fontWeight: '700', color: colors.text2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   headRow: { flexDirection: 'row', alignItems: 'flex-start' },
   hello: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', marginBottom: 10 },
   label: { color: 'rgba(255,255,255,0.6)', fontSize: 10.5, fontWeight: '800', letterSpacing: 1 },
@@ -200,7 +236,7 @@ const st = StyleSheet.create({
   groupCount: { fontSize: 11, fontWeight: '700', color: colors.muted, backgroundColor: colors.card, paddingHorizontal: 7, borderRadius: 9, overflow: 'hidden' },
   groupTotal: { fontSize: 13.5, fontWeight: '800', color: colors.text2, marginRight: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: space.m, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
-  name: { fontSize: 15, fontWeight: '700', color: colors.text },
+  name: { fontSize: 15, fontWeight: '700', color: colors.text, flexShrink: 1 },
   meta: { fontSize: 12, color: colors.muted, marginTop: 1 },
   avail: { fontSize: 11.5, color: colors.aqua, fontWeight: '700', marginTop: 2 },
   balance: { fontSize: 15.5, fontWeight: '800', color: colors.text },

@@ -33,6 +33,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** The phone app's API: the snapshot it keeps offline, and expenses recorded offline synced once however often sent. */
 @SpringBootTest
@@ -53,6 +54,8 @@ class AppSyncTests {
     @Autowired LedgerService ledger;
     @Autowired com.aditya.personalbudget.service.AppSettingsService appSettings;
     @Autowired com.aditya.personalbudget.service.ChitService chits;
+    @Autowired com.aditya.personalbudget.service.AuthService auth;
+    @Autowired com.aditya.personalbudget.web.AdminController admin;
 
     @BeforeEach
     void signIn() {
@@ -138,6 +141,54 @@ class AppSyncTests {
             assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("8000");
         } finally {
             appSettings.saveMobileConfig(UserContext.tenantId(), new AppSettingsService.MobileConfig(new java.util.LinkedHashSet<>(AppSettingsService.MOBILE_FEATURES), true, false, null));
+        }
+    }
+
+    @Test
+    void theAppFollowsTheRolesSectionsAndSignInRulesSetOnTheWeb() {
+        Long tenant = UserContext.tenantId();
+        Long bank = accounts.create(new AccountRequest(null, "Role bank " + System.nanoTime(), AccountType.BANK, "HDFC", null, BigDecimal.valueOf(10000),
+                LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
+        Long category = categories.list().stream().filter(c -> c.kind() == CategoryKind.EXPENSE && !c.system()).findFirst().orElseThrow().id();
+        var all = new java.util.LinkedHashSet<>(AppSettingsService.MOBILE_FEATURES);
+        try {
+            // admins get expenses only, and one account's balance is always hidden
+            java.util.Map<String, java.util.Set<String>> byRole = new java.util.LinkedHashMap<>();
+            AppSettingsService.APP_ROLES.forEach(r -> byRole.put(r, all));
+            byRole.put("ADMIN", java.util.Set.of("EXPENSES"));
+            byRole.put("SUPER_ADMIN", java.util.Set.of("EXPENSES"));
+            appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, true, new java.util.LinkedHashSet<>(AppSettingsService.APP_ROLES),
+                    byRole, java.util.Set.of("VIEWER"), java.util.Set.of(bank), 14));
+            var snap = app.snapshot(30);
+            assertThat(snap.mobile().features()).containsExactly("EXPENSES");
+            assertThat(snap.mobile().hiddenAccounts()).containsExactly(bank);
+            assertThat(snap.mobile().sessionDays()).isEqualTo(14);
+            assertThat(snap.canRecord()).isTrue();
+            var t = new AppSyncService.SyncTransfer("role-t-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, bank, bank, null, null);
+            assertThat(app.sync(new SyncRequest(null, null, null, null, null, null, null, List.of(t)))).singleElement()
+                    .satisfies(r -> assertThat(r.message()).contains("switched off"));
+
+            // admins made view-only: nothing is recorded
+            appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, true, null, null, java.util.Set.of("ADMIN", "SUPER_ADMIN"), null, null));
+            assertThat(app.snapshot(30).canRecord()).isFalse();
+            var e = new SyncExpense("ro-" + System.nanoTime(), LocalDate.now(), BigDecimal.TEN, category, bank, null, null, null, null);
+            assertThat(app.sync(new SyncRequest(List.of(e), null))).singleElement().satisfies(r -> assertThat(r.status()).isEqualTo("FAILED"));
+
+            // the app switched off: no sign-in from it; on: a sign-in that is listed and can be ended
+            appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, false, null, null, java.util.Set.of(), null, null));
+            assertThatThrownBy(() -> auth.login(new com.aditya.personalbudget.dto.UserDtos.LoginRequest("admin", "admin@123", "app"), "Android"))
+                    .hasMessageContaining("switched off");
+            appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, true, new java.util.LinkedHashSet<>(AppSettingsService.APP_ROLES), null, java.util.Set.of(), null, 30));
+            auth.login(new com.aditya.personalbudget.dto.UserDtos.LoginRequest("admin", "admin@123", "app"), "Android test phone");
+            var phones = admin.appSessions();
+            assertThat(phones).anyMatch(x -> "Android test phone".equals(x.device()) && x.expires().isAfter(java.time.LocalDateTime.now().plusDays(29)));
+            admin.endAppSession(phones.getFirst().id());
+            assertThat(admin.appSessions()).noneMatch(x -> x.id().equals(phones.getFirst().id()));
+        } finally {
+            java.util.Map<String, java.util.Set<String>> everything = new java.util.LinkedHashMap<>();
+            AppSettingsService.APP_ROLES.forEach(r -> everything.put(r, all));
+            appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, true, new java.util.LinkedHashSet<>(AppSettingsService.APP_ROLES),
+                    everything, java.util.Set.of("VIEWER"), java.util.Set.of(), 30));
         }
     }
 

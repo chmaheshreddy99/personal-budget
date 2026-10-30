@@ -285,7 +285,8 @@ public class AppSyncService {
                         g.value(), g.quantity(), g.unit(), g.mode(), g.donation(), g.notes(), g.accountName(), g.entryNo()))
                 .toList();
         return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay,
-                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord, claimList, emiList, incomeList, giftList, settings.mobileConfig(tenant));
+                f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord && !settings.mobileConfig(tenant).readOnlyRoles().contains(me.role().name()), claimList, emiList, incomeList, giftList,
+                settings.mobileConfigFor(tenant, me.role().name()));
     }
 
     /** The income received since {@code from}: entries that credit an income category, into the account they debit. */
@@ -331,7 +332,9 @@ public class AppSyncService {
     public List<SyncResult> sync(SyncRequest r) {
         List<SyncResult> out = new ArrayList<>();
         // a section switched off in Settings > Mobile app is refused here, whatever an older copy of the app still offers
-        var allowed = settings.mobileConfig(UserContext.tenantId()).features();
+        var cfg = settings.mobileConfig(UserContext.tenantId());
+        var allowed = cfg.readOnlyRoles().contains(UserContext.get().role().name()) ? java.util.Set.<String>of()   // view only: nothing is recorded
+                : settings.mobileConfigFor(UserContext.tenantId(), UserContext.get().role().name()).features();
         r = new SyncRequest(off(out, allowed, "EXPENSES", r.expenses(), SyncExpense::clientId), off(out, allowed, "CHITS", r.chitPayments(), SyncChitPayment::clientId),
                 off(out, allowed, "CLAIMS", r.claims(), SyncClaim::clientId), off(out, allowed, "CLAIMS", r.repayments(), SyncRepayment::clientId),
                 off(out, allowed, "INCOME", r.incomes(), SyncIncome::clientId), off(out, allowed, "GIFTS", r.gifts(), SyncGift::clientId),

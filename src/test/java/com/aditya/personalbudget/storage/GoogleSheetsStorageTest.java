@@ -414,15 +414,15 @@ class GoogleSheetsStorageTest {
         Organization changed = tenants.findById(one.getId()).orElseThrow();
         changed.setName("Renamed");
         tenants.save(changed);
-        assertThat(api.writtenRows).containsExactly("'organizations':2+1");   // header row 1, "one" row 2
+        assertThat(api.writtenRows).containsExactly("'organizations':2+1", "'_changes':2+1");   // and the change marker   // header row 1, "one" row 2
 
         api.writtenRows.clear();
         tenants.save(tenant("four"));
-        assertThat(api.writtenRows).containsExactly("'organizations':5+1", "'_sequences':2+1");
+        assertThat(api.writtenRows).containsExactly("'organizations':5+1", "'_sequences':2+1", "'_changes':2+1");
 
         api.writtenRows.clear();
         tenants.deleteById(one.getId());
-        assertThat(api.writtenRows).containsExactly("'organizations':2+4");   // the rows below move up, the last is cleared
+        assertThat(api.writtenRows).containsExactly("'organizations':2+4", "'_changes':2+1");   // the rows below move up, the last is cleared
 
         open();
         assertThat(tenants.findAll()).extracting(Organization::getCode).containsExactly("two", "three", "four");
@@ -436,5 +436,96 @@ class GoogleSheetsStorageTest {
         TableStorage.Footprint footprint = store.footprint();
         assertThat(footprint.tables()).isEqualTo(2);
         assertThat(footprint.bytes()).isPositive();
+    }
+
+    // ------------------------------------------------------------------ changes saved by another server process
+
+    @Test
+    void aSaveByAnotherProcessIsPickedUpByTheCheapCheckAndAnnounced() {
+        openSharing();
+        tenants.save(tenant("first"));   // the tabs exist before the second process opens the spreadsheet
+        store.endRequest();
+        // a second server process (the phone app's) on the same spreadsheet, sharing what it read forever
+        GoogleSheetsStorage otherStorage = new GoogleSheetsStorage(api.client(), "sheet-1", "budget@test.iam.gserviceaccount.com", Duration.ofSeconds(-1), now::get);
+        TsvDataStore other = new TsvDataStore(dataDir, otherStorage, validator);
+        OrganizationRepository otherTenants = new OrganizationRepository(other);
+        new AppUserRepository(other);
+        assertThat(otherTenants.findAll()).hasSize(1);
+        other.endRequest();
+        assertThat(otherStorage.poll(false)).isEmpty();   // nothing saved since it read
+
+        tenants.save(tenant("home"));   // saved through this process
+        store.endRequest();
+        assertThat(storage.poll(false)).as("its own save is not news to the process that made it").isEmpty();
+
+        assertThat(otherTenants.findAll()).as("the other process still serves what it read").hasSize(1);
+        other.endRequest();
+        api.calls.clear();
+        assertThat(otherStorage.poll(false)).containsExactly("organizations");
+        assertThat(api.calls).containsExactly("values.get", "batchGet");   // one cell, then one read of everything
+        assertThat(otherTenants.findAll()).extracting(Organization::getCode).containsExactly("first", "home");
+        other.endRequest();
+
+        api.calls.clear();
+        assertThat(otherStorage.poll(false)).isEmpty();
+        assertThat(api.calls).containsExactly("values.get");   // nothing new: one cell read, nothing else
+    }
+
+    @Test
+    void theFullCheckFindsAnEditByHand() {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        api.tabs.get("organizations").cells.get(1).set(2, "Edited by hand");
+        assertThat(storage.poll(false)).as("an edit by hand does not touch the marker").isEmpty();
+        assertThat(storage.poll(true)).containsExactly("organizations");
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Edited by hand");
+    }
+
+    // ------------------------------------------------------------------ a pooled request thread never serves an older read
+
+    @Test
+    void aRequestNeverServesWhatAnEarlierUseOfItsPooledThreadRead() throws Exception {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        var filter = new com.aditya.personalbudget.config.RequestScopeFilter(store);
+        ExecutorService other = Executors.newSingleThreadExecutor();
+        try {
+            // the live-update stream: its sign-in check reads, and the stream goes on without this thread
+            filter.doFilter(new org.springframework.mock.web.MockHttpServletRequest("GET", "/api/events"), new org.springframework.mock.web.MockHttpServletResponse(),
+                    (rq, rs) -> assertThat(tenants.findAll()).hasSize(1));
+            // a stale read left on the thread by anything else
+            assertThat(tenants.findAll()).hasSize(1);
+            // the phone app saves, on another thread
+            other.submit(() -> { tenants.save(tenant("phone")); store.endRequest(); }).get();
+            // the next page request this pooled thread serves sees it
+            List<Integer> seen = new ArrayList<>();
+            filter.doFilter(new org.springframework.mock.web.MockHttpServletRequest("GET", "/api/organizations"), new org.springframework.mock.web.MockHttpServletResponse(),
+                    (rq, rs) -> seen.add(tenants.findAll().size()));
+            assertThat(seen).containsExactly(2);
+        } finally {
+            other.shutdownNow();
+        }
+    }
+
+    @Test
+    void anEditByHandIsReadInOnDemandAndAnnounced() {
+        openSharing();
+        tenants.save(tenant("home"));
+        store.endRequest();
+        List<java.util.Set<String>> heard = new ArrayList<>();
+        store.addOutsideChangeListener(heard::add);
+        api.tabs.get("organizations").cells.get(1).set(2, "Edited by hand");
+        api.calls.clear();
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).as("no polling: memory is not read again by itself").isEqualTo("Organization home");
+        store.endRequest();
+        assertThat(api.calls).isEmpty();
+
+        assertThat(store.checkOutsideChanges(true)).containsExactly("organizations");   // Settings > Organization > Check now
+        assertThat(heard).containsExactly(java.util.Set.of("organizations"));
+        assertThat(tenants.findByCode("home").orElseThrow().getName()).isEqualTo("Edited by hand");
+        store.endRequest();
+        assertThat(store.checkOutsideChanges(true)).isEmpty();
     }
 }

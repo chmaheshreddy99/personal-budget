@@ -36,11 +36,20 @@ public class AdminController {
     private final com.aditya.personalbudget.service.HostedChitService chits;
     private final OrgTimeZoneService timeZones;
     private final com.aditya.personalbudget.service.ClaimService claimService;
+    private final com.aditya.personalbudget.repository.UserSessionRepository sessionRepository;
+    private final com.aditya.personalbudget.repository.AppUserRepository userRepository;
 
-    public AdminController(UserService users, AppSettingsService appSettings, com.aditya.personalbudget.service.TenantMailService mail,
+    private final com.aditya.personalbudget.storage.TsvDataStore store;
+
+        public AdminController(UserService users, AppSettingsService appSettings, com.aditya.personalbudget.service.TenantMailService mail,
                            com.aditya.personalbudget.service.HostedChitService chits, OrgTimeZoneService timeZones,
-                           com.aditya.personalbudget.service.ClaimService claimService) {
+                           com.aditya.personalbudget.service.ClaimService claimService, com.aditya.personalbudget.repository.UserSessionRepository sessionRepository,
+                           com.aditya.personalbudget.repository.AppUserRepository userRepository,
+                           com.aditya.personalbudget.storage.TsvDataStore store) {
+        this.store = store;
         this.claimService = claimService;
+        this.sessionRepository = sessionRepository;
+        this.userRepository = userRepository;
         this.timeZones = timeZones;
         this.chits = chits;
         this.mail = mail;
@@ -78,6 +87,43 @@ public class AdminController {
     @RequiresPermission(Permission.MANAGE_USERS)
     public AppSettingsService.MobileConfig mobileConfig() {
         return appSettings.mobileConfig(com.aditya.personalbudget.security.UserContext.tenantId());
+    }
+
+    /** A phone signed in to the app: who, which phone, since when and until when. */
+    public record AppSession(Long id, String user, String role, String device, java.time.LocalDateTime signedIn, java.time.LocalDateTime expires) {
+    }
+
+    @GetMapping("/mobile-config/sessions")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public java.util.List<AppSession> appSessions() {
+        Long tenant = com.aditya.personalbudget.security.UserContext.tenantId();
+        java.time.LocalDateTime now = com.aditya.personalbudget.service.OrgClock.now();
+        java.util.Map<Long, com.aditya.personalbudget.domain.entity.AppUser> people = new java.util.HashMap<>();
+        userRepository.findByTenantId(tenant).forEach(u -> people.put(u.getId(), u));
+        return sessionRepository.findByTenantId(tenant).stream().filter(s -> "app".equals(s.getClient()) && s.getExpiresAt().isAfter(now))
+                .sorted(java.util.Comparator.comparing(com.aditya.personalbudget.domain.entity.UserSession::getCreatedAt).reversed())
+                .map(s -> { var u = people.get(s.getUserId());
+                    return new AppSession(s.getId(), u == null ? "?" : u.getFullName(), u == null ? null : u.getRole().getLabel(), s.getUserAgent(), s.getCreatedAt(), s.getExpiresAt()); })
+                .toList();
+    }
+
+    /** Signs a phone out of the app: its next sync asks for the password. */
+    @DeleteMapping("/mobile-config/sessions/{id}")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public org.springframework.http.ResponseEntity<Void> endAppSession(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        sessionRepository.findByIdAndTenantId(id, com.aditya.personalbudget.security.UserContext.tenantId())
+                .filter(s -> "app".equals(s.getClient())).ifPresent(s -> sessionRepository.deleteById(s.getId()));
+        return org.springframework.http.ResponseEntity.noContent().build();
+    }
+
+    /** Checks the storage now for changes made outside the app (an edit by hand, another server); what changed is read in. */
+    public record StorageCheck(java.util.Set<String> changed, String source) {
+    }
+
+    @PostMapping("/storage/check")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public StorageCheck checkStorage() {
+        return new StorageCheck(store.checkOutsideChanges(true), store.describe());
     }
 
     @PutMapping("/mobile-config")

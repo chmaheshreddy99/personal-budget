@@ -133,6 +133,10 @@ export function openReceiptSend(chit, installments, acks, preselect, onDone) {
     const modal = openModal({
         title: 'Ask for an acknowledgement', sub: `${chit.name} · ${chit.organizer || 'organizer'}`, iconName: 'shield', size: 'lg',
         body: `<form class="rc-form" data-rc-form onsubmit="return false">
+            <div class="rc-style">
+                <label class="rc-style-opt"><input type="radio" name="style" value="simple" checked><span>${icon('receipt')}<b>Simple receipt</b><small>Three plain lines: received ₹, for which installments, signed. Quickest for the organizer.</small></span></label>
+                <label class="rc-style-opt"><input type="radio" name="style" value="full"><span>${icon('shield')}<b>Full acknowledgement</b><small>Six clauses with the chit's details, due dates and dividends. Best for large amounts or a court record.</small></span></label>
+            </div>
             <div class="rc-pick"><div class="rc-pick-head"><b>Payments to acknowledge</b>
                 <span class="grow"></span><button type="button" class="btn sm ghost" data-rc-all>All</button><button type="button" class="btn sm ghost" data-rc-none>None</button></div>
                 <div class="rc-list">${rows}</div>
@@ -146,7 +150,7 @@ export function openReceiptSend(chit, installments, acks, preselect, onDone) {
             const form = m.el.querySelector('[data-rc-form]');
             const ids = [...form.querySelectorAll('[data-rc-i]:checked')].map(x => Number(x.dataset.rcI));
             if (!ids.length) throw new Error('Tick at least one payment');
-            const made = await api.post(`/chits/${chit.id}/receipts`, { installmentIds: ids, ...readRecipient(form) });
+            const made = await api.post(`/chits/${chit.id}/receipts`, { installmentIds: ids, ...readRecipient(form), simple: form.style.value === 'simple' });
             onDone?.();
             setTimeout(() => showLink(chit, made), 0);
         } }],
@@ -253,7 +257,13 @@ export function receiptsTabHtml(acks, manage, { payoutReady = false, payoutDone 
         return `${bar}<div class="empty-note">${icon('shield')}<b>No acknowledgements yet</b>
             <p class="muted">Pick paid installments and send the organizer a link: they sign on their phone and you keep it as proof they received the money. Or print it and get it signed on paper.</p></div>`;
     }
-    return `${bar}<table class="grid compact dense rc-table"><thead><tr><th>Sent</th><th>For</th><th class="r">Amount</th><th>Organizer</th><th>State</th><th></th></tr></thead>
+    const done = shown.filter(isFinal), waiting = shown.filter(a => a.status === 'PENDING'), disputed = shown.filter(a => a.status === 'DISPUTED');
+    const sum = list => list.filter(a => !isPayout(a)).reduce((s, a) => s + Number(a.totalAmount || 0), 0);
+    const strip = `<div class="rc-strip">
+        <div class="rc-kpi good">${icon('check-circle')}<div><small>Signed</small><b>${done.length}</b><em>${money(sum(done))} acknowledged</em></div></div>
+        <div class="rc-kpi wait">${icon('clock')}<div><small>Waiting</small><b>${waiting.length}</b><em>${waiting.length ? `${money(sum(waiting))} out for signing` : 'nothing pending'}</em></div></div>
+        <div class="rc-kpi ${disputed.length ? 'bad' : ''}">${icon('alert')}<div><small>Disputed</small><b>${disputed.length}</b><em>${disputed.length ? 'see the reason, then send again' : 'none'}</em></div></div></div>`;
+    return `${bar}${strip}<table class="grid compact dense rc-table"><thead><tr><th>Sent</th><th>For</th><th class="r">Amount</th><th>Organizer</th><th>State</th><th></th></tr></thead>
         <tbody>${shown.map(a => {
             const [tone, ico, label] = STATUS[a.status] || ['gray', 'info', a.status];
             const nos = a.lines.map(l => l.no);
@@ -264,7 +274,7 @@ export function receiptsTabHtml(acks, manage, { payoutReady = false, payoutDone 
                 : a.status === 'PENDING' ? `${LINK[a.link]}${a.link === 'ACTIVE' ? ` until ${dateTime(a.linkExpiresAt)}` : ''}${a.views ? ` · opened ${a.views}×` : ''}` : '';
             const again = ['DISPUTED', 'REVOKED', 'CANCELLED'].includes(a.status) || (a.status === 'PENDING' && a.link !== 'ACTIVE');
             return `<tr class="clickable ${a.status === 'CANCELLED' ? 'withdrawn' : ''}" data-ack-open="${a.id}"><td>${dateTime(a.createdAt)}<small class="muted block">${esc(a.ackNo)}</small></td>
-                <td>${isPayout(a) ? `${icon('gift')} ` : ''}${span}<small class="muted block">${isPayout(a) ? `${a.installCount} installments restated` : `${a.lines.length} payment${a.lines.length === 1 ? '' : 's'}`}</small></td>
+                <td>${isPayout(a) ? `${icon('gift')} ` : ''}${span}<small class="muted block">${isPayout(a) ? `${a.installCount} installments restated` : `${a.lines.length} payment${a.lines.length === 1 ? '' : 's'}`}${a.kind === 'SIMPLE' ? ' · <span class="rc-kind">simple</span>' : ''}</small></td>
                 <td class="r"><b>${money(a.totalAmount)}</b></td><td>${esc(a.organizerName)}<small class="muted block">••••••${esc(String(a.organizerPhone).slice(6))}</small></td>
                 <td><span class="badge ${tone}">${icon(ico)}${label}</span><small class="muted block">${stateText}</small></td>
                 <td class="r nowrap"><button class="btn sm ghost icon" data-ack-print="${a.id}" title="Print: stamp paper, plain paper for a revenue stamp, or PDF">${icon('printer')}</button>${manage ? `

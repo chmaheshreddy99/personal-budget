@@ -95,6 +95,12 @@ public class AuthService {
             throw new UnauthorizedException("This user is deactivated");
         }
         boolean mobile = "mobile".equalsIgnoreCase(request.client());
+        boolean app = "app".equalsIgnoreCase(request.client());
+        if (app) {
+            var cfg = appSettings.mobileConfig(user.getTenantId());
+            if (!Boolean.TRUE.equals(cfg.enabled())) throw new UnauthorizedException("The phone app is switched off for your household. Ask your admin, or use the website.");
+            if (!cfg.roles().contains(user.getRole().name())) throw new UnauthorizedException("The phone app is not open to your role (" + user.getRole().getLabel() + "). Ask your admin.");
+        }
         if (mobile && FeaturePolicy.granted(user, tenants.findById(user.getTenantId()).orElse(null), true).isEmpty()) {
             throw new UnauthorizedException("The mobile version is not shared with you. Ask your admin, or use the full site.");
         }
@@ -110,9 +116,9 @@ public class AuthService {
         }
         user = users.save(user);
 
-        String token = sessions.open(user, userAgent, mobile);
+        String token = app ? sessions.openForApp(user, userAgent, appSettings.mobileConfig(user.getTenantId()).sessionDays()) : sessions.open(user, userAgent, mobile);
         activity.record(SessionRegistry.toCurrent(user, tenant, mobile), "SIGNED_IN", "Sign-in",
-                mobile ? "Signed in on the mobile version" : "Signed in", null, null);
+                app ? "Signed in on the phone app" : mobile ? "Signed in on the mobile version" : "Signed in", null, null);
         return new SessionView(token, toMe(user, tenant, mobile));
     }
 

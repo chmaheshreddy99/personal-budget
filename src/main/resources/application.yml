@@ -38,6 +38,13 @@ budget:
   storage:
     # files = tab-separated files in data-dir; google-sheets = one tab per table in a Google spreadsheet
     type: files
+    # One server: every save (web, phone app, any user) is in memory the moment it is made and every open browser
+    # refreshes, with no extra reads of the spreadsheet. An edit made by hand in the spreadsheet is picked up on demand:
+    # Settings > Organization > "Check now". Only when SEVERAL server processes share one spreadsheet, set
+    # watch-seconds to look for the others' saves on a timer (one cell read each time) and full-check-seconds for a
+    # full comparison that also catches edits by hand. 0 = off (the default for both).
+    watch-seconds: 0
+    full-check-seconds: 0
     google-sheets:
       # the id in the spreadsheet's address: docs.google.com/spreadsheets/d/<spreadsheet-id>/edit
       spreadsheet-id:

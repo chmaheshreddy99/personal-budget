@@ -3,6 +3,7 @@ package com.aditya.personalbudget.storage;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Where the tables physically live: tab-separated files in the data folder ({@link LocalFileStorage}) or the tabs of a
@@ -50,6 +51,16 @@ public interface TableStorage {
      */
     default void refresh() {
         forget();
+    }
+
+    /**
+     * Looks for changes saved by someone else: another server process on the same storage (the phone app's server, a
+     * second machine) or an edit by hand. Shared copies are refreshed so the next read sees them. {@code full}: compare
+     * everything (catches edits by hand), else the cheapest check the storage has. Returns the tables that changed;
+     * empty when nothing did. Called on a background thread every few seconds.
+     */
+    default Set<String> poll(boolean full) {
+        return Set.of();
     }
 
     /** How much is stored, for the footer. */

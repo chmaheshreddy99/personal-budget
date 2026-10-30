@@ -94,7 +94,9 @@ export type Snapshot = {
 };
 
 /** features: the sections on; hideBalances: balances show as dots until viewed; maskNetWorth: never show the total; hideAbove: a balance above this stays hidden until tapped. */
-export type MobileConfig = { features: string[]; hideBalances: boolean; maskNetWorth: boolean; hideAbove: number | null };
+export type MobileConfig = { features: string[]; hideBalances: boolean; maskNetWorth: boolean; hideAbove: number | null;
+  /** accounts whose balance the household never shows on the phone (until tapped by itself) */
+  hiddenAccounts?: number[]; sessionDays?: number | null };
 
 /** Is a section switched on for the app in the household's settings? (an older server does not say: yes) */
 export const mobileOn = (snap: Snapshot | null, key: string) => !snap?.mobile || snap.mobile.features.includes(key);
@@ -189,6 +191,8 @@ export type Settings = {
   chosenAccounts: number[];
   /** open the app with the phone's own lock (pattern, PIN, password, fingerprint) instead of typing the password: on unless turned off */
   deviceLock?: boolean;
+  /** accounts kept private on this phone: their balance stays dots until tapped by itself */
+  privateAccounts?: number[];
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -353,7 +357,7 @@ export async function ping(serverUrl: string): Promise<boolean> {
 
 export async function login(serverUrl: string, username: string, password: string): Promise<{ token: string; name: string }> {
   const out = await request<{ token: string; user: { fullName?: string; username: string; mustChangePassword?: boolean } }>(
-    { serverUrl, token: null }, '/api/auth/login', { method: 'POST', body: { username, password }, timeoutMs: 15000 });
+    { serverUrl, token: null }, '/api/auth/login', { method: 'POST', body: { username, password, client: 'app' }, timeoutMs: 15000 });
   return { token: out.token, name: out.user?.fullName || out.user?.username || username };
 }
 
