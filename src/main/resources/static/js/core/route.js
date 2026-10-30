@@ -54,6 +54,20 @@ export function showPageRoute(page, hash, move, { routed = false } = {}) {
     showRoute(hash, { push: !routed && before !== undefined && before !== move });
 }
 
+/**
+ * Sets some keys of the current address's query (null, '' or false removes one) and keeps the rest, without drawing
+ * the page again: for a part of a page (a report's tab, a side panel) that the page's own address does not cover.
+ * {@code push}: a real move (a tab) gets its own step in the history; otherwise the address is only replaced.
+ */
+export function setQuery(changes, { push = false } = {}) {
+    const q = Object.fromEntries(readQuery());
+    Object.entries(changes).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '' || v === false) delete q[k];
+        else q[k] = String(v);
+    });
+    showRoute(routeHash(currentPath(), q), { push });
+}
+
 /** A list from the query ("1,2,3"), or [] when it is not there. */
 export function queryList(query, key) {
     const v = query.get(key);

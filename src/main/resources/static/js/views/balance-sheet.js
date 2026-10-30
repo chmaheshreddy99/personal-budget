@@ -5,6 +5,7 @@
  * the net-worth trend, health ratios, dues profile and the biggest movers.
  */
 import { api } from '../core/api.js';
+import { showPageRoute, routeHash, fromAddress } from '../core/route.js';
 import { loadAccounts } from '../core/store.js';
 import { esc, printElement } from '../core/ui.js';
 import { exportButton, bindExport } from '../core/export.js';
@@ -23,6 +24,13 @@ const COMPARE = {
 const view = { asOf: isoDate(), compare: 'month', compareTo: '', showPrevious: false, collapsed: new Set() };
 
 export async function render(container, _params, isCurrent) {
+    const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+    if (fromAddress(_params)) {   // #/balance-sheet?asOf=2026-09-30&compare=year (&to=… for a date of your own)
+        const q = _params.query;
+        view.asOf = isDate(q.get('asOf')) ? q.get('asOf') : isoDate();
+        view.compare = q.get('compare') in COMPARE ? q.get('compare') : 'month';
+        if (isDate(q.get('to'))) view.compareTo = q.get('to');
+    }
     const asOfDate = new Date(view.asOf + 'T00:00:00');
     view.compareTo = COMPARE[view.compare].date(asOfDate) || view.compareTo;
     const [bs, accounts] = await Promise.all([
@@ -31,6 +39,8 @@ export async function render(container, _params, isCurrent) {
     ]);
     if (!isCurrent()) return;
     view.compareTo = bs.compareDate;
+    const query = { asOf: view.asOf === isoDate() ? null : view.asOf, compare: view.compare === 'month' ? null : view.compare, to: view.compare === 'custom' ? view.compareTo : null };
+    showPageRoute('balance-sheet', routeHash('balance-sheet', query), Object.values(query).join('|'), { routed: fromAddress(_params) });
     const reload = () => render(container, [], isCurrent);
 
     const assets = Number(bs.assets.total);

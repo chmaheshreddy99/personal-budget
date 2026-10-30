@@ -21,8 +21,12 @@ import { barChart, legend } from '../core/charts.js';
 import { toggleEntryRow } from '../components/entry-inline.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
+import { showPageRoute, routeHash, fromAddress } from '../core/route.js';
 
 let month = isoDate().slice(0, 7);
+/** The address: the month (a real move) and the filter. */
+const planningRoute = routed => showPageRoute('planning', routeHash('planning', { month: month === isoDate().slice(0, 7) ? null : month,
+    filter: budgetView.filter === 'all' ? null : budgetView.filter }), month, { routed });
 const budgetView = { selectedId: null, filter: 'all', q: '' };
 /** This month and the five before it (budget summaries), for the insights across months. */
 let budgetHistory = [];
@@ -46,6 +50,12 @@ const SEVERITY_ICON = { critical: 'alert-circle', warning: 'alert', info: 'info'
 
 export async function render(container, params, isCurrent) {
     if (params[0] === 'recurring') { location.hash = '#/planning'; return; }
+    if (fromAddress(params)) {   // #/planning?month=2026-09&filter=over
+        const m = params.query?.get('month');
+        month = /^\d{4}-\d{2}$/.test(m || '') ? m : isoDate().slice(0, 7);
+        budgetView.filter = params.query?.get('filter') || 'all';
+    }
+    planningRoute(fromAddress(params));
     container.innerHTML = `<div class="page planning-page">
         <div class="page-toolbar">
             <h2 class="page-title">${icon('target')} Budgets</h2>
@@ -195,7 +205,7 @@ async function renderBudgets(container, isCurrent) {
             if (first) show(Number(first.dataset.account));
         }
     };
-    const setFilter = key => { budgetView.filter = key; applyFilter(); showFirstIfHidden(); };
+    const setFilter = key => { budgetView.filter = key; planningRoute(false); applyFilter(); showFirstIfHidden(); };
     body.querySelector('#bn-filters').addEventListener('click', e => {
         const b = e.target.closest('[data-filter]');
         if (b && !b.disabled) setFilter(b.dataset.filter);

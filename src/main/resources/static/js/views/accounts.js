@@ -15,7 +15,7 @@ import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMont
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, shortAccount, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
-import { showRoute } from '../core/route.js';
+import { showRoute, routeHash, fromAddress } from '../core/route.js';
 import { claimContextHtml, claimBadge, reminderText } from '../components/claim-panel.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openDebtDialog } from '../components/debt-dialog.js';
@@ -65,6 +65,13 @@ const savePrefs = () => setPref('statement', prefs);
 
 const toneOf = a => BUCKET_TONE[a.bucket] || (a.accountClass === 'INCOME' ? 'green' : a.accountClass === 'EXPENSE' ? 'coral' : 'slate');
 
+/** The address of what the page shows: the account, the class chip (or EMIs) and its pane. */
+function accountsRoute(push = false) {
+    if (!view.selectedId) return;
+    showRoute(routeHash(`accounts/${view.selectedId}`, { show: view.emi ? 'EMI' : view.tab === 'ALL' ? null : view.tab,
+        pane: view.pane === 'people' && view.paneAccount === view.selectedId ? 'people' : null }), { push });
+}
+
 export async function render(container, params, isCurrent) {
     // the address: #/accounts/<account>; #/accounts/<account>/entry/<entry> opens that account with its statement
     // reaching back to the entry, the entry expanded
@@ -72,6 +79,14 @@ export async function render(container, params, isCurrent) {
     const focusEntry = focusAccount && params[1] === 'entry' && /^\d+$/.test(params[2] || '') ? Number(params[2]) : null;
     if (focusAccount && focusAccount !== view.selectedId || focusEntry) {
         Object.assign(view, { selectedId: focusAccount, search: '', tab: 'ALL', emi: false, flow: 'all', pane: 'ledger', paneAccount: focusAccount, q: '' });
+    }
+    // …?show=ASSET (the class chips, or EMI) &pane=people (a receivable's people instead of its statement)
+    if (fromAddress(params)) {
+        const show = params.query?.get('show');
+        view.emi = show === 'EMI';
+        view.tab = show && show !== 'EMI' && /^[A-Z_]+$/.test(show) ? show : 'ALL';
+        view.pane = params.query?.get('pane') === 'people' ? 'people' : 'ledger';
+        view.paneAccount = view.selectedId;
     }
     if (focusEntry) {
         const entry = await api.get(`/transactions/${focusEntry}`).catch(() => null);
@@ -240,7 +255,7 @@ export async function render(container, params, isCurrent) {
     let detailTimer;
     const select = (id, { soon = false, push = false } = {}) => {
         view.selectedId = id;
-        showRoute(`#/accounts/${id}`, { push });
+        accountsRoute(push);
         listEl.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         listEl.querySelector(`[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
         clearTimeout(detailTimer);
@@ -266,6 +281,7 @@ export async function render(container, params, isCurrent) {
         const chipEl = e.target.closest('[data-tab]');
         if (!emiChip && (!chipEl || (chipEl.dataset.tab === view.tab && !view.emi))) return;
         if (chipEl) { view.tab = chipEl.dataset.tab; view.emi = false; }
+        accountsRoute(true);
         container.querySelectorAll('#class-filter [data-tab]').forEach(c => c.classList.toggle('active', !view.emi && c.dataset.tab === view.tab));
         container.querySelector('#class-filter [data-emi-accounts]')?.classList.toggle('active', view.emi);
         drawList();
@@ -580,7 +596,7 @@ async function drawDetail(target, account, reload, all = []) {
 
     target.querySelector('#pane-tabs')?.addEventListener('click', e => {
         const b = e.target.closest('[data-pane]');
-        if (b) { view.pane = b.dataset.pane; drawDetail(target, account, reload, all); }
+        if (b && b.dataset.pane !== view.pane) { view.pane = b.dataset.pane; accountsRoute(true); drawDetail(target, account, reload, all); }
     });
     if (view.pane === 'people') {
         target.querySelector('#people-filter')?.addEventListener('click', e => {

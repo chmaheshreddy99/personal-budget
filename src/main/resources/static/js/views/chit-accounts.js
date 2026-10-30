@@ -22,6 +22,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { openEntryDetail } from '../components/transaction-forms.js';
 import { toggleEntryRow } from '../components/entry-inline.js';
 import { getPref, setPref } from '../core/prefs.js';
+import { showRoute, routeHash, readQuery } from '../core/route.js';
 
 /** chit: the chit the page shows (its accounts and the shared ones holding its money), or null for all chits. */
 const view = { selected: null, tab: 'where', range: '3m', chitOnly: true, chit: getPref('chitAccounts', { chit: undefined }).chit };
@@ -109,7 +110,16 @@ export function moneyAccountOptions(accounts, { chitId = null, chitName = 'This 
 
 // ===================================================================== page
 
+/** The address: #/host-chits/accounts?chit=<id|all>&item=<acct:12|transfers>&tab=moves. */
+function caRoute(push = false) {
+    showRoute(routeHash('host-chits/accounts', { chit: view.chit === null ? 'all' : view.chit, item: view.selected, tab: view.tab === 'moves' ? 'moves' : null }), { push });
+}
+
 export async function render(container, _params, isCurrent) {
+    const q = readQuery();
+    if (q.has('chit')) view.chit = q.get('chit') === 'all' ? null : Number(q.get('chit')) || undefined;
+    if (q.get('item')) view.selected = q.get('item');
+    if (q.has('chit') || q.has('item')) view.tab = q.get('tab') === 'moves' ? 'moves' : 'statement';
     // coming from Chits the page stays on screen until this one is drawn (no spinner in between)
     if (!container.querySelector('.hc-page')) container.innerHTML = loading();
     const [book, accounts] = await Promise.all([api.get('/hosted-chits/book'), loadAccounts(true, { all: true })]);
@@ -163,16 +173,19 @@ function draw(container, book, accounts, reload) {
         </section>
         <div class="chit-detail" id="ca-detail"></div>
     </div>`;
+    caRoute(false);   // what is drawn is what the address says
     container.querySelector('#ca-chit').addEventListener('change', e => {
         view.chit = e.target.value === 'all' ? null : Number(e.target.value);
         setPref('chitAccounts', { chit: view.chit });
         view.selected = null;
         view.tab = 'statement';
+        caRoute(true);
         draw(container, book, accounts, reload);
     });
 
     const listEl = container.querySelector('#ca-list');
     const select = key => {
+        if (key !== view.selected) { view.selected = key; caRoute(true); }
         view.selected = key;
         listEl.querySelectorAll('[data-key]').forEach(el => el.classList.toggle('selected', el.dataset.key === key));
         listEl.querySelector(`[data-key="${key}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -452,7 +465,7 @@ async function act(el, { book, accounts, reload }) {
         toast('Transfer undone');
         reload();
     }
-    else if (a === 'tab') { view.tab = el.dataset.tab; reload(); }
+    else if (a === 'tab') { view.tab = el.dataset.tab; caRoute(true); reload(); }
     else if (a === 'range') { view.range = el.dataset.range; reload(); }
     else if (a === 'chit-only') { view.chitOnly = !view.chitOnly; reload(); }
 }

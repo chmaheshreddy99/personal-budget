@@ -25,6 +25,7 @@ import { donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { evidenceFieldHtml, bindEvidenceField, evidenceBadge } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
+import { showRoute, routeHash, fromAddress } from '../core/route.js';
 
 export const KINDS = {
     CASH: { label: 'Cash', iconName: 'cash', tone: 'aqua', unit: '' },
@@ -55,13 +56,25 @@ const prefs = (() => {
 })();
 const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode */ } };
 
+/** The address: #/gifts?dir=GIVEN&year=2026&person=<key>. */
+function giftsRoute(push = false) {
+    showRoute(routeHash('gifts', { dir: view.dir === 'all' ? null : view.dir, year: view.year === 'all' ? null : view.year, person: view.person }), { push });
+}
+
 export async function render(container, _params, isCurrent) {
+    if (fromAddress(_params)) {
+        const q = _params.query;
+        view.dir = ['GIVEN', 'RECEIVED', 'DONATION'].includes(q.get('dir')) ? q.get('dir') : 'all';
+        view.year = q.get('year') || 'all';
+        view.person = q.get('person') || null;
+    }
     const gifts = await api.get('/gifts');
     if (!isCurrent()) return;
     const reload = () => render(container, [], isCurrent);
     const manage = can('POST_TRANSACTIONS');
     const years = [...new Set(gifts.map(g => g.giftDate.slice(0, 4)))].sort().reverse();
     if (view.year !== 'all' && !years.includes(view.year)) view.year = 'all';
+    giftsRoute(false);
     if (!SORTS[prefs.sort]) prefs.sort = 'total';
     if (!GROUPS[prefs.group]) prefs.group = 'family';
 
@@ -225,6 +238,7 @@ export async function render(container, _params, isCurrent) {
     const pickPerson = key => {
         view.person = key || null;
         view.open = null;
+        giftsRoute(false);
         markPerson();
         drawList();
     };
@@ -234,12 +248,12 @@ export async function render(container, _params, isCurrent) {
     on('#gf-dir', 'click', e => {
         const b = e.target.closest('[data-dir]');
         if (!b) return;
-        view.dir = b.dataset.dir;
+        if (b.dataset.dir !== view.dir) { view.dir = b.dataset.dir; giftsRoute(true); }
         $('#gf-dir').querySelectorAll('[data-dir]').forEach(x => x.classList.toggle('active', x === b));
         drawList();
     });
     const setYear = y => {
-        view.year = y;
+        if (y !== view.year) { view.year = y; giftsRoute(true); }
         $('#gf-year').querySelectorAll('[data-year]').forEach(x => x.classList.toggle('active', x.dataset.year === y));
         drawAll();
     };

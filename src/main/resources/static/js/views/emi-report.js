@@ -12,6 +12,7 @@
  * The "No-cost EMI" tab (no-cost-emi.js) works out what an offer really costs, month by month against the bank.
  */
 import { api } from '../core/api.js';
+import { readQuery, setQuery } from '../core/route.js';
 import { panel, table, esc, emptyState } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, date, monthLabel } from '../core/format.js';
@@ -66,7 +67,9 @@ export function analysePlan(p, rate) {
 
 export async function emiReport(content, toolbar) {
     const prefs = getPref('emiReport', { rate: 6.5, closed: false, tab: 'nocost' });
-    const tab = prefs.tab === 'mine' ? 'mine' : 'nocost';
+    const asked = readQuery().get('tab');   // #/reports/emi?tab=mine; without it the tab last used
+    const tab = asked === 'mine' || (!asked && prefs.tab === 'mine') ? 'mine' : 'nocost';
+    setQuery({ tab: tab === 'mine' ? 'mine' : null, side: tab === 'mine' ? null : readQuery().get('side') });
     const book = await api.get('/expenses/emis', { closed: prefs.closed });
     const plans = (book.plans || []).filter(p => prefs.closed || p.status !== 'CLOSED');
 
@@ -81,7 +84,9 @@ export async function emiReport(content, toolbar) {
         <button class="tab ${tab === 'nocost' ? 'active' : ''}" data-emi-tab="nocost">${icon('percent')}No-cost EMI checker</button>
         <button class="tab ${tab === 'mine' ? 'active' : ''}" data-emi-tab="mine">${icon('calendar')}My EMIs</button></div></div>`;
     const bindTabs = () => content.querySelectorAll('[data-emi-tab]').forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.emiTab === tab) return;
         setPref('emiReport', { ...getPref('emiReport', prefs), tab: b.dataset.emiTab });
+        setQuery({ tab: b.dataset.emiTab === 'mine' ? 'mine' : null, side: null }, { push: true });
         redraw();
     }));
     toolbar.querySelector('.emi-controls').classList.toggle('muted-controls', false);

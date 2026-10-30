@@ -15,6 +15,7 @@
  * month-by-month statement, and the tenure table, charts and what-ifs. An offer can be pinned and compared with the next one, and the result
  * copied as a sentence.
  */
+import { readQuery, setQuery } from '../core/route.js';
 import { panel, esc } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent } from '../core/format.js';
@@ -263,7 +264,8 @@ export function mountNoCost(host, savings, onSavings, plans = []) {
     const form = host.querySelector('.nc-form');
     const setField = (name, v) => { if (form[name]) form[name].value = v == null ? '' : v; };
     let current = null;
-    let rtab = 'tenure';
+    const SIDES = ['tenure', 'charts', 'whatif'];
+    let rtab = SIDES.includes(readQuery().get('side')) ? readQuery().get('side') : 'tenure';   // …?side=whatif
     const run = () => {
         const v = Object.fromEntries([...new FormData(form)].filter(([k]) => k !== 'plan').map(([k, x]) => [k, x === '' ? '' : Number(x)]));
         const sv = Math.max(0, Number(v.savings) || 0);
@@ -302,7 +304,12 @@ export function mountNoCost(host, savings, onSavings, plans = []) {
     });
     host.addEventListener('click', async e => {
         const tab = e.target.closest('[data-rtab]');
-        if (tab) { rtab = tab.dataset.rtab; run(); return; }
+        if (tab) {
+            if (tab.dataset.rtab !== rtab) setQuery({ side: tab.dataset.rtab === 'tenure' ? null : tab.dataset.rtab }, { push: true });
+            rtab = tab.dataset.rtab;
+            run();
+            return;
+        }
         const act = e.target.closest('[data-nc]')?.dataset.nc;
         if (!act || !current) return;
         if (act === 'copy') {

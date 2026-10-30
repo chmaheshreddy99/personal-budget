@@ -9,6 +9,7 @@
  * report area scrolls as one column; wide tables scroll inside their own panel.
  */
 import { api } from '../core/api.js';
+import { readQuery, setQuery } from '../core/route.js';
 import { panel, table, esc, emptyState, openModal } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent, monthLabel, date } from '../core/format.js';
@@ -119,6 +120,9 @@ function draw(content, r) {
     const hasForgone = !!(r.forgone && r.forgone.rows.length);
     const tabs = `<div class="da-tabs">${TABS.filter(([k]) => (k !== 'interest' || hasForgone) && (series || k !== 'trend'))
         .map(([k, l, ic]) => `<button class="da-tab ${ui.tab === k ? 'active' : ''}" data-da-tab="${k}">${icon(ic)}${l}</button>`).join('')}</div>`;
+    const asked = readQuery().get('tab');   // #/reports/deep-analysis?tab=trend
+    if (asked && TABS.some(([k]) => k === asked)) ui.tab = asked;
+    else if (!asked) ui.tab = 'overview';
     if (!TABS.some(([k]) => k === ui.tab)) ui.tab = 'overview';
     if ((!series && ui.tab === 'trend') || (!hasForgone && ui.tab === 'interest')) ui.tab = 'overview';
 
@@ -344,7 +348,8 @@ function draw(content, r) {
         <li>With few periods, intervals are wide and trends rarely significant: that is the statistics being honest. Six to twelve months work best.</li></ul>` })}</div>`;
 
     const body = { overview, trend: trendTab, interest: () => interestTab(), categories: categoriesTab, unusual: unusualTab, method: methodTab };
-    const show = () => {
+    const show = (push = false) => {
+        setQuery({ tab: ui.tab === 'overview' ? null : ui.tab }, { push });
         charts.length = 0;
         const host = content.querySelector('#da-body');
         content.classList.add('da-fit');
@@ -357,11 +362,11 @@ function draw(content, r) {
         ${partial ? `<p class="emi-how da-partial">${icon('info')} ${label(partial.key)} is still in progress (${money(partial.expense)} so far) and is left out of the statistics.</p>` : ''}`;
     content.querySelector('.da-tabs').addEventListener('click', e => {
         const b = e.target.closest('[data-da-tab]');
-        if (b) { ui.tab = b.dataset.daTab; show(); }
+        if (b && b.dataset.daTab !== ui.tab) { ui.tab = b.dataset.daTab; show(true); }
     });
     content.querySelector('#da-body').addEventListener('click', e => {
         const go = e.target.closest('[data-da-go]');
-        if (go) { ui.tab = go.dataset.daGo; show(); return; }
+        if (go) { ui.tab = go.dataset.daGo; show(true); return; }
         const row = e.target.closest('[data-cat]');
         if (row) openCategory(row.dataset.cat);
     });

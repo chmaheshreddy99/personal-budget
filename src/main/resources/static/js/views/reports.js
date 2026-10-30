@@ -24,7 +24,7 @@ import { barChart, lineChart, donutChart, legend, seriesColor, foldOthers, spark
 import { categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { entryHref } from '../components/entry-inline.js';
-import { showRoute, routeHash } from '../core/route.js';
+import { showRoute, routeHash, readQuery, currentPath } from '../core/route.js';
 
 const REPORTS = [
     { key: 'insights', label: 'Insights', iconName: 'sparkles', note: 'What changed and what to act on' },
@@ -124,7 +124,10 @@ export async function render(container, params, isCurrent) {
         const drawer = { insights: insightsReport, categories: categoriesReport, accounts: accountsReport, chits: chitsReport,
                          'chit-summary': chitSummaryReport, 'hosted-chits': hostedChitReport, 'income-statement': incomeStatement, 'trial-balance': trialBalance,
                          'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport, 'deep-analysis': deepAnalysis, 'investment-plan': investmentPlan }[active.key];
-        if (isCurrent()) showRoute(routeHash(`reports/${active.key}`, ownToolbar || periodless ? {} : usesAsOf ? { asOf: period.asOf } : { from: period.from, to: period.to }));
+        // a report's own tab and side panel (#/reports/deep-analysis?…&tab=trend) stay when only the period changes
+        const keep = {};
+        if (currentPath() === `reports/${active.key}`) ['tab', 'side'].forEach(k => { if (readQuery().get(k)) keep[k] = readQuery().get(k); });
+        if (isCurrent()) showRoute(routeHash(`reports/${active.key}`, ownToolbar || periodless ? keep : usesAsOf ? { asOf: period.asOf, ...keep } : { from: period.from, to: period.to, ...keep }));
         exportRows = await drawer(content, toolbar, period);
     };
 

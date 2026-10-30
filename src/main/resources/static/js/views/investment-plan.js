@@ -13,6 +13,7 @@
  * a tile whose content is longer scrolls inside itself.
  */
 import { api } from '../core/api.js';
+import { readQuery, setQuery } from '../core/route.js';
 import { panel, table, esc, emptyState } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent } from '../core/format.js';
@@ -244,18 +245,22 @@ function draw(content, r, controls, bind, p) {
     </div>`;
 
     const body = { plan: planTab, mix: mixTab, banks: banksTab, growth: growthTab, goal: goalTab, notes: notesTab };
-    const show = () => {
+    const show = (push = false) => {
+        setQuery({ tab: ui.tab === 'plan' ? null : ui.tab }, { push });
         charts.length = 0;
         content.querySelector('#ip-body').innerHTML = body[ui.tab]();
         charts.forEach(fn => fn());
         content.querySelectorAll('[data-ip-tab]').forEach(x => x.classList.toggle('active', x.dataset.ipTab === ui.tab));
     };
+    const asked = readQuery().get('tab');   // #/reports/investment-plan?tab=banks
+    if (asked && body[asked]) ui.tab = asked;
+    else if (!asked) ui.tab = 'plan';
     if (!body[ui.tab]) ui.tab = 'plan';
     content.classList.add('da-fit', 'ip-fit');
     content.innerHTML = `${controls}${hero}${tabs}<div class="da-body" id="ip-body"></div>`;
     content.querySelector('.da-tabs').addEventListener('click', e => {
         const t = e.target.closest('[data-ip-tab]');
-        if (t) { ui.tab = t.dataset.ipTab; show(); }
+        if (t && t.dataset.ipTab !== ui.tab) { ui.tab = t.dataset.ipTab; show(true); }
     });
     // the move plan as plain text, to paste into a note or a message
     content.querySelector('#ip-body').addEventListener('click', async e => {
