@@ -1467,6 +1467,34 @@ tr.cursor td:first-child { box-shadow: inset 3px 0 0 var(--brand-gold); }
 .pref-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px dashed var(--hairline); }
 .pref-row small { display: block; font-size: var(--font-size-xs); color: var(--text-muted); }
 
+/* settings → appearance: the theme cards, each with a small preview of its look */
+.theme-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.theme-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--hairline-strong); background: var(--surface-solid); }
+.theme-card.current { border-color: var(--ocean-500); box-shadow: 0 0 0 2px rgba(11, 139, 208, 0.18); }
+.theme-card .tc-text { display: flex; flex-direction: column; gap: 3px; }
+.theme-card .tc-text b { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.theme-card .tc-text small { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+.theme-card > .btn, .theme-card > .tc-state { align-self: flex-start; }
+.tc-state { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 650; color: var(--ocean-700); }
+.tc-state svg { width: 15px; height: 15px; }
+.tc-note { display: flex; align-items: center; gap: 6px; margin: 10px 2px 0; }
+.tc-note svg { width: 13px; height: 13px; }
+.tp-preview { display: flex; flex-direction: column; gap: 4px; height: 118px; padding: 0 0 8px; border-radius: 8px; overflow: hidden; border: 1px solid var(--hairline); }
+.tp-preview > span { display: block; flex-shrink: 0; }
+.tp-bar { height: 16px; background: linear-gradient(100deg, #133352, #1d5c87); }
+.tp-row { height: 9px; margin: 0 8px; border-radius: 3px; background: rgba(16, 66, 104, 0.1); }
+.tp-row.open { background: rgba(11, 106, 166, 0.22); }
+.tp-preview > .tp-panel { flex: 1; display: flex; gap: 6px; margin: 0 8px; padding: 6px; border-radius: 5px; }
+.tp-panel i { flex: 1; border-radius: 4px; }
+.tp-preview.classic { background: #f4f8fb; }
+.tp-preview.classic .tp-panel { background: rgba(227, 245, 253, 0.8); border-left: 3px solid #33aee8; }
+.tp-preview.classic .tp-panel i { flex: 0 0 34%; height: 10px; background: #fff; border: 1px solid rgba(16, 66, 104, 0.15); }
+.tp-preview.ocean { background: #eef3f7; }
+.tp-preview.ocean .tp-panel { background: #eef3f7; border: 1px solid rgba(10, 79, 128, 0.2); box-shadow: inset 3px 0 0 #0b6aa6; }
+.tp-preview.ocean .tp-panel i { background: linear-gradient(180deg, #c6dcee 0 9px, #f8fbfe 9px, #dbe9f5 100%); border: 1px solid rgba(10, 79, 128, 0.24); }
+.tp-preview.ocean .tp-panel i:first-child { border-top: 2px solid #3cc06b; }
+.tp-preview.ocean .tp-panel i:last-child { border-top: 2px solid #e5676b; }
+
 /* ---------------------------------------------------------------- accounts: lower, planning-focused overview */
 .acct-overview { grid-template-columns: minmax(210px, 1.6fr) repeat(9, minmax(0, 1fr)); gap: 6px; }
 .ov-chip { padding: 5px 9px; border-radius: 8px; border-left: 3px solid var(--ocean-300); }

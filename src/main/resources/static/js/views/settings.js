@@ -9,6 +9,7 @@ import { esc, panel, emptyState, toast, confirmDialog, openModal } from '../core
 import { icon, categoryIcon } from '../core/icons.js';
 import { moneyShort, dateTime, setTimeZone, orgNow } from '../core/format.js';
 import { getPref, setPref, clearPrefs } from '../core/prefs.js';
+import { THEMES, currentTheme, setTheme } from '../core/theme.js';
 import { SHORTCUTS, setPageKeys, listNavigator } from '../core/keys.js';
 import { customizerHtml, bindCustomizer } from '../components/dashboard-customizer.js';
 
@@ -16,6 +17,7 @@ const SECTIONS = [
     { id: 'categories', label: 'Categories', iconName: 'tag', hint: 'Expense and income categories' },
     { id: 'dashboard', label: 'Dashboard', iconName: 'dashboard', hint: 'Panels, order and size' },
     { id: 'preferences', label: 'Preferences', iconName: 'settings', hint: 'How pages open' },
+    { id: 'appearance', label: 'Appearance', iconName: 'sparkles', hint: 'Theme: Classic or Ocean' },
     { id: 'shortcuts', label: 'Keyboard', iconName: 'keyboard', hint: 'Every shortcut' },
     { id: 'mobile', label: 'Phone app', iconName: 'phone', hint: 'The Android app: who, what, privacy' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },
@@ -57,6 +59,7 @@ export async function render(container, params, isCurrent) {
         draw();
     }
     if (section === 'preferences') renderPreferences(body);
+    if (section === 'appearance') renderAppearance(body);
     if (section === 'mobile') await renderMobile(body, () => render(container, params, isCurrent));
     if (section === 'email') await renderMail(body, () => render(container, params, isCurrent));
     if (section === 'statements') await renderStatements(body, () => render(container, params, isCurrent));
@@ -605,6 +608,35 @@ function renderPreferences(body) {
         if (!await confirmDialog('Reset every view preference and the dashboard layout?', { confirmLabel: 'Reset', danger: false })) return;
         clearPrefs();
         location.reload();   // modules read their preferences once, when they load
+    });
+}
+
+// ===================================================================== appearance
+
+/**
+ * The theme, as a choice of two cards with a small preview of each look. Saved in this browser; choosing one reloads
+ * the page so everything redraws in it.
+ */
+function renderAppearance(body) {
+    const current = currentTheme();
+    const preview = id => `<div class="tp-preview ${id}" aria-hidden="true">
+            <span class="tp-bar"></span>
+            <span class="tp-row"></span><span class="tp-row open"></span>
+            <span class="tp-panel"><i></i><i></i></span>
+            <span class="tp-row"></span>
+        </div>`;
+    body.innerHTML = panel({ title: 'Appearance', iconName: 'sparkles', sub: 'Saved in this browser',
+        body: `<div class="theme-picker">${THEMES.map(t => `
+            <div class="theme-card ${t.id === current ? 'current' : ''}" data-theme-card="${t.id}">
+                ${preview(t.id)}
+                <div class="tc-text"><b>${esc(t.label)}${t.id === 'classic' ? ' <span class="tag">default</span>' : ''}</b><small>${esc(t.hint)}</small></div>
+                ${t.id === current ? `<span class="tc-state">${icon('check-circle')}In use</span>`
+                    : `<button class="btn sm primary" data-theme-pick="${t.id}">${icon('check')}Use ${esc(t.label)}</button>`}
+            </div>`).join('')}</div>
+            <p class="small muted tc-note">${icon('info')}Applies to this browser only; other people and devices keep their own choice. The page reloads to switch.</p>` });
+    body.querySelector('.theme-picker').addEventListener('click', e => {
+        const pick = e.target.closest('[data-theme-pick]');
+        if (pick) setTheme(pick.dataset.themePick);
     });
 }
 

@@ -12,7 +12,7 @@ import { shortAccount } from './chit-trail.js';
 
 const KINDS = {
     EXPENSE: { iconName: 'receipt', tone: 'coral', label: 'Expense' },
-    INCOME: { iconName: 'arrow-in', tone: 'aqua', label: 'Income' },
+    INCOME: { iconName: 'income', tone: 'aqua', label: 'Income' },
     TRANSFER: { iconName: 'transfer', tone: '', label: 'Transfer' },
     CHIT_INSTALLMENT: { iconName: 'chit', tone: 'gold', label: 'Chit payment' },
     CHIT_PAYOUT: { iconName: 'gift', tone: 'aqua', label: 'Chit payout' },

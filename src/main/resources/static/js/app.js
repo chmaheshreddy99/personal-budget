@@ -43,7 +43,7 @@ import * as entryLink from './views/entry-link.js';
 const ROUTES = [
     { path: 'dashboard', label: 'Dashboard', iconName: 'dashboard', view: dashboard, feature: 'DASHBOARD' },
     { path: 'expenses', label: 'Expenses', iconName: 'receipt', view: expenses, feature: 'EXPENSES' },
-    { path: 'income', label: 'Income', iconName: 'arrow-in', view: income, feature: 'INCOME' },
+    { path: 'income', label: 'Income', iconName: 'income', view: income, feature: 'INCOME' },
     { path: 'transactions', label: 'Journal', iconName: 'journal', view: transactions, feature: 'JOURNAL' },
     { path: 'accounts', label: 'Accounts', iconName: 'wallet', view: accounts, feature: 'ACCOUNTS' },
     { path: 'chits', label: 'Chits', iconName: 'chit', view: chits, feature: 'CHITS' },

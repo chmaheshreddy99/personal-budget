@@ -49,11 +49,13 @@ function tooltipHtml(title, rows) {
 /**
  * Renders draw(width, height) into el now and whenever el is resized.
  * draw returns { svg: string, bind?: (svgElement) => void }.
+ * The first drawing is marked .enter so it animates in (bars grow, lines draw, slices sweep); a redraw on resize does not.
  */
 function mount(el, draw) {
     el.classList.add('chart');
     el._chartObserver?.disconnect();
     let lastSize = '';
+    let first = true;
     const render = () => {
         const width = Math.floor(el.clientWidth);
         const height = Math.floor(el.clientHeight);
@@ -63,6 +65,7 @@ function mount(el, draw) {
         lastSize = size;
         const { svg, bind } = draw(width, height);
         el.innerHTML = svg;
+        if (first) { el.querySelector('svg')?.classList.add('enter'); first = false; }
         bind?.(el.querySelector('svg'));
     };
     const observer = new ResizeObserver(() => render());
@@ -145,7 +148,7 @@ export function barChart(el, { labels, series, format, labelFormat = l => l }) {
             series.forEach((s, k) => {
                 const v = Number(s.values[i] || 0);
                 const color = s.color || seriesColor(k);
-                marks += `<path class="mark" data-i="${i}" d="${barPath(gx + k * (barW + gap), barW, y(0), y(v))}" style="fill:${color}"/>`;
+                marks += `<path class="mark bar ${v < 0 ? 'neg' : ''}" data-i="${i}" d="${barPath(gx + k * (barW + gap), barW, y(0), y(v))}" style="fill:${color};--i:${i}"/>`;
             });
         });
         const xLabels = labels.map((label, i) => i % step === 0
@@ -210,12 +213,12 @@ export function lineChart(el, { labels, series, format, labelFormat = l => l, ar
                     <stop offset="0" style="stop-color:${color};stop-opacity:0.26"/>
                     <stop offset="1" style="stop-color:${color};stop-opacity:0.02"/></linearGradient>`;
                 const base = y(Math.max(lo, Math.min(0, hi)));
-                marks += `<path d="${d} L${points[points.length - 1][0]},${base} L${points[0][0]},${base} Z" fill="url(#${uid}${k})"/>`;
+                marks += `<path class="area" d="${d} L${points[points.length - 1][0]},${base} L${points[0][0]},${base} Z" fill="url(#${uid}${k})"/>`;
             }
-            marks += `<path d="${d}" fill="none" style="stroke:${color}" stroke-width="2" stroke-linejoin="round"
-                        stroke-linecap="round" ${s.dashed ? 'stroke-dasharray="5 4"' : ''}/>`;
+            marks += `<path class="${s.dashed ? 'line dashed' : 'line'}" d="${d}" fill="none" style="stroke:${color};--k:${k}" stroke-width="2" stroke-linejoin="round"
+                        stroke-linecap="round" ${s.dashed ? 'stroke-dasharray="5 4"' : 'pathLength="1"'}/>`;
             const last = points[points.length - 1];
-            marks += `<circle cx="${last[0]}" cy="${last[1]}" r="4" style="fill:${color}" stroke="#fff" stroke-width="2"/>`;
+            marks += `<circle class="end-dot" cx="${last[0]}" cy="${last[1]}" r="4" style="fill:${color};--k:${k}" stroke="#fff" stroke-width="2"/>`;
         });
         const xLabels = labels.map((label, i) => i % step === 0
             ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(labelFormat(label))}</text>` : '').join('');
@@ -279,7 +282,7 @@ export function donutChart(el, { items, format, centerValue = '', centerLabel = 
                 ? `M${p(outer, 0)} A${outer},${outer} 0 1 1 ${p(outer, Math.PI)} A${outer},${outer} 0 1 1 ${p(outer, 0)}
                    M${p(inner, 0)} A${inner},${inner} 0 1 0 ${p(inner, Math.PI)} A${inner},${inner} 0 1 0 ${p(inner, 0)} Z`
                 : `M${p(outer, a0)} A${outer},${outer} 0 ${large} 1 ${p(outer, a1)} L${p(inner, a1)} A${inner},${inner} 0 ${large} 0 ${p(inner, a0)} Z`;
-            return `<path class="mark" data-k="${k}" d="${d}" style="fill:${it.color || seriesColor(k)}"
+            return `<path class="mark arc" data-k="${k}" d="${d}" style="fill:${it.color || seriesColor(k)};--k:${k};transform-origin:${cx}px ${cy}px"
                      stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`;
         }).join('');
         const svg = `<svg viewBox="0 0 ${W} ${H}">${arcs}
@@ -341,6 +344,6 @@ export function sparkline(values, { width = 64, height = 20, color = 'var(--seri
     const last = points[points.length - 1];
     return `<svg class="sparkline" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
         ${fill ? `<path d="${d} L${last[0]},${height} L${points[0][0]},${height} Z" style="fill:${color};opacity:0.12"/>` : ''}
-        <path d="${d}" fill="none" style="stroke:${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+        <path class="line" d="${d}" pathLength="1" fill="none" style="stroke:${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
         <circle cx="${last[0]}" cy="${last[1]}" r="2.2" style="fill:${color}"/></svg>`;
 }

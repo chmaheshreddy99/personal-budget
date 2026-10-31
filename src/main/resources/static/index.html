@@ -25,6 +25,17 @@
     <link rel="stylesheet" href="css/dialogs.css">
     <link rel="stylesheet" href="css/responsive.css">
     <link rel="stylesheet" href="css/busy.css">
+    <!-- the Ocean theme (Settings → Appearance): rich open rows, brand polish and light motion; overrides only -->
+    <link rel="stylesheet" href="css/polish.css" id="theme-ocean">
+    <script>
+        // apply the chosen theme before the first paint (js/core/theme.js): Classic unless Ocean was picked
+        (function () {
+            var theme = 'classic';
+            try { theme = (JSON.parse(localStorage.getItem('pb.look') || '{}') || {}).theme === 'ocean' ? 'ocean' : 'classic'; } catch (e) { /* storage blocked */ }
+            document.documentElement.dataset.theme = theme;
+            document.getElementById('theme-ocean').disabled = theme !== 'ocean';
+        })();
+    </script>
 </head>
 <body>
 

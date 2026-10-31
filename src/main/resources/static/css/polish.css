@@ -1,0 +1,498 @@
+/* =====================================================================
+   Polish: the finishing layer of "Glacier & Ocean".
+   - a crisper brand: type, the top bar, focus rings
+   - expanded rows built from one small set of parts, the same in every list (journal entries, expenses, EMIs,
+     lent / borrowed, gifts, documents):
+       panel   the open row, on the page's own colour, a brand bar on its left
+       head    what it is and its key facts on one line, the actions on the right
+       tile    a white box for one subject, with a small caps label on top
+       line    label on the left, value on the right
+   - light motion for things that unfold or progress, and for charts as they first draw.
+     All of it is off for reduced motion.
+   Loaded last; it only refines, never changes what a page does.
+   ===================================================================== */
+
+:root {
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+
+    /* the open-row panel: the application's own background, so an open row reads as part of the page */
+    --app-bg: #eef3f7;
+    --panel-border: rgba(10, 79, 128, 0.2);
+    --panel-accent: linear-gradient(180deg, #33aee8 0%, #0b6aa6 55%, #13a89a 100%);
+    /* tiles: ocean glass, a bright gloss on top fading into a deeper blue; a header band across the top */
+    --tile-bg: linear-gradient(180deg, #f8fbfe 0%, #e9f2fa 50%, #dbe9f5 100%);
+    --tile-head: linear-gradient(180deg, #d9e9f6 0%, #c6dcee 100%);
+    --tile-border: rgba(10, 79, 128, 0.24);
+    --tile-line: rgba(10, 79, 128, 0.14);
+    --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 3px rgba(10, 46, 79, 0.1);
+    --tile-radius: 8px;
+
+    /* text inside panels: values strong, labels and secondary text readable (darker than the app's muted grey) */
+    --panel-ink: #0b1a2b;
+    --panel-value: #082a4a;
+    --panel-label: #163f63;
+    --panel-soft: #3d5570;
+
+    --debit-ink: #0a6e35;
+    --debit-bar: #3cc06b;
+    --credit-ink: #a8303a;
+    --credit-bar: #e5676b;
+}
+
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+:where(button, a, [tabindex]):focus-visible { outline: 2px solid var(--ocean-400); outline-offset: 2px; }
+::selection { background: rgba(51, 174, 232, 0.25); }
+
+/* ===================================================================== brand: top bar and menu */
+.brand-logo { transition: transform 0.35s var(--ease-spring); }
+.brand:hover .brand-logo { transform: rotate(-6deg) scale(1.06); }
+.brand-text strong { font-weight: 700; letter-spacing: -0.005em; }
+.brand-text strong em {
+    margin-left: 1px;
+    background: linear-gradient(90deg, #7de3d6, #b8ecff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.brand-text small { letter-spacing: 0.02em; }
+.menu a { position: relative; transition: background 0.18s, color 0.18s, box-shadow 0.18s; }
+.menu a svg { transition: transform 0.2s var(--ease-out); }
+.menu a:hover svg { transform: translateY(-1px); }
+.menu a.active { font-weight: 650; }
+.menu a.active svg { color: var(--ocean-600); }
+
+.btn { transition: background 0.15s, box-shadow 0.15s, border-color 0.15s, filter 0.15s, transform 0.08s; }
+.btn svg { flex-shrink: 0; }
+
+/* ===================================================================== the open row in a list */
+table.grid tbody tr.expanded > td,
+.xp-tr.expanded > td { background: rgba(11, 106, 166, 0.1); border-bottom-color: transparent; }
+table.grid tbody tr.expanded > td:first-child { box-shadow: inset 3px 0 0 var(--ocean-500); }
+table.grid tbody tr.expanded.is-claim > td:first-child { box-shadow: inset 3px 0 0 #8a7ff0; }
+.expand-caret svg { transition: transform 0.25s var(--ease-out), color 0.2s; }
+tr.expanded .expand-caret svg { color: var(--ocean-600); }
+
+tr.detail-row > td {
+    background: var(--app-bg);
+    box-shadow: inset 3px 0 0 var(--ocean-500), inset 0 -1px 0 var(--hairline);
+    border-bottom: 0;
+}
+tr.detail-row > td > * { animation: pb-reveal 0.26s var(--ease-out) backwards; }
+
+/* ===================================================================== panel */
+.entry-detail,
+tr.detail-row .xp-detail2,
+tr.detail-row .emi-panel,
+tr.detail-row .claim-panel {
+    position: relative;
+    display: flex; flex-direction: column; gap: 8px;
+    margin: 4px 10px 8px 16px;
+    padding: 8px 12px 10px 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    background: var(--app-bg);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 2px rgba(10, 46, 79, 0.05);
+    color: var(--panel-ink);
+    font-size: 12px;
+}
+tr.detail-row .xp-detail2 { display: grid; }
+.entry-detail::before,
+tr.detail-row .xp-detail2::before,
+tr.detail-row .emi-panel::before {
+    content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 3px;
+    border-radius: 10px 0 0 10px; background: var(--panel-accent);
+}
+:is(.entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, .claim-panel) :is(.muted, .small.muted) { color: var(--panel-soft); }
+:is(.entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, .claim-panel) .mono { font-variant-numeric: tabular-nums; }
+
+/* ===================================================================== head: what it is, its facts, the actions */
+.ed-head, .xd-top, tr.detail-row .claim-head {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--hairline);
+    font-size: 12px; color: var(--panel-ink);
+}
+.ed-head .kind-chip, .claim-head .chip-icon, .ce-main > .chip-icon.sm {
+    width: 28px; height: 28px; border-radius: 8px; box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(10, 46, 79, 0.12);
+}
+.ed-head .kind-chip svg, .claim-head .chip-icon svg, .ce-main > .chip-icon.sm svg { width: 15px; height: 15px; }
+.ed-head .kind-chip:not(.coral):not(.aqua):not(.gold):not(.violet):not(.red):not(.gray) { background: linear-gradient(180deg, #eef7fd, #d8ecf9); color: var(--ocean-700); }
+.ed-head { gap: 6px 10px; }
+.ed-title { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.ed-title b { font-size: 13px; font-weight: 700; color: var(--panel-value); }
+.ed-title span { color: var(--panel-label); }
+.ed-amount {
+    padding: 2px 9px; border-radius: 7px;
+    font-size: 13.5px; font-weight: 750; color: var(--panel-value);
+    background: var(--tile-bg); border: 1px solid var(--tile-border); box-shadow: var(--tile-shadow);
+}
+.ed-facts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--hairline); }
+.ed-actions, .xd-actions { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.ed-actions .btn.sm { height: 25px; font-size: 12px; }
+.ed-actions .btn.sm.icon { width: 25px; }
+tr.detail-row .claim-head .row > b { font-size: 13px; color: var(--panel-value); }
+tr.detail-row .claim-head .small { font-size: 11.5px; }
+
+/* facts: the same everywhere */
+.ed-fact, .xd-fact { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--panel-ink); white-space: nowrap; }
+.ed-fact svg, .xd-fact svg { width: 13px; height: 13px; color: var(--ocean-600); flex-shrink: 0; }
+.ed-fact b, .xd-fact b { color: var(--panel-value); font-weight: 650; }
+.ed-fact.warn { color: #7a4f00; }
+.ed-fact.warn svg { color: #b07d00; }
+.ed-fact.cn-fact { padding: 1px 8px; border-radius: 6px; }
+
+/* who recorded it: quiet, at the end */
+.ed-foot { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--panel-soft); }
+.ed-foot svg { width: 13px; height: 13px; flex-shrink: 0; }
+.ed-foot b { color: var(--panel-label); font-weight: 600; }
+
+/* ===================================================================== tile and its label */
+.ed-col, .xd-card, .cfig, .claim-timeline, .emi-sched {
+    background: var(--tile-bg); border: 1px solid var(--tile-border); border-radius: var(--tile-radius);
+    box-shadow: var(--tile-shadow);
+}
+.ed-col-label, .xd-card-head, .cfig .label, .claim-panel .section-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--panel-label);
+}
+.xd-card-head svg, .claim-panel .section-title svg { width: 12px; height: 12px; color: var(--ocean-700); }
+.xd-card-head, .claim-timeline .section-title {
+    margin: -6px -10px 4px; padding: 5px 10px; border-radius: 7px 7px 0 0;
+    background: var(--tile-head); border-bottom: 1px solid var(--tile-line);
+}
+
+/* a line: label left, value right; lines in a tile are ruled so their values line up like a table */
+.xd-line { display: flex; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.55; color: var(--panel-ink); }
+.xd-card > .xd-line { padding: 2px 0; }
+.xd-card > .xd-line + .xd-line { border-top: 1px dotted var(--tile-line); }
+.xd-line > :last-child { margin-left: auto; text-align: right; }
+.xd-line.small { font-size: 11.5px; }
+.xd-line .muted { color: var(--panel-soft); }
+.xd-line b.mono, .cfig b { color: var(--panel-value); font-weight: 700; }
+:is(.xd-line, .cfig) :is(.neg, b.neg) { color: var(--negative); }
+:is(.xd-line, .cfig) :is(.pos, b.pos) { color: var(--positive); }
+
+/* ===================================================================== journal entry: To ← From
+   Two equal halves across the panel. Each is a small table (subgrid, so every row shares the same columns):
+   Dr / Cr mark · account (and its ledger) · balance before › after · amount, under a header band; a memo spans
+   under its account. Names, balances and amounts line up across rows. */
+.ed-flow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; gap: 8px; }
+.ed-col {
+    display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-content: start; column-gap: 12px;
+    min-width: 0; padding: 0 0 2px; border-top-width: 3px;
+}
+.ed-col.dr { border-top-color: var(--debit-bar); }
+.ed-col.cr { border-top-color: var(--credit-bar); }
+.ed-col-head {
+    grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center;
+    padding: 5px 10px; background: var(--tile-head); border-bottom: 1px solid var(--tile-line);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--panel-label);
+}
+.ed-col-head > span:first-child { grid-column: 1 / 3; }
+.ed-col-head > span:not(:first-child) { justify-self: end; }
+.ed-col.dr .ed-col-head > span:first-child { color: var(--debit-ink); }
+.ed-col.cr .ed-col-head > span:first-child { color: var(--credit-ink); }
+.ed-flow .ed-arrow {
+    align-self: center; width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--tile-head); border: 1px solid var(--tile-border); color: var(--ocean-700); box-shadow: var(--tile-shadow);
+}
+.ed-flow .ed-arrow svg { width: 13px; height: 13px; animation: pb-nudge 0.9s var(--ease-out) 0.3s 2; }
+
+.ed-acct {
+    grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; row-gap: 3px;
+    padding: 6px 10px;
+}
+.ed-acct + .ed-acct { border-top: 1px dotted var(--tile-line); }
+.ed-acct > small {
+    display: grid; place-items: center; width: 24px; height: 20px; border-radius: 5px;
+    font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em;
+}
+.ed-acct.dr > small { background: #d5f0df; color: var(--debit-ink); }
+.ed-acct.cr > small { background: #f8dcdc; color: var(--credit-ink); }
+.eda-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; min-width: 0; }
+.eda-name b { font-size: 12.5px; font-weight: 650; color: var(--panel-ink); overflow-wrap: anywhere; }
+.eda-name i { font-style: normal; font-size: 11px; color: var(--panel-soft); }
+.eda-bal { justify-self: end; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--panel-soft); white-space: nowrap; }
+.eda-bal svg { width: 11px; height: 11px; color: var(--ocean-600); }
+.eda-bal b { color: var(--panel-value); font-weight: 700; }
+.eda-amt { justify-self: end; font-size: 13px; font-weight: 750; white-space: nowrap; }
+.ed-acct.dr .eda-amt { color: var(--debit-ink); }
+.ed-acct.cr .eda-amt { color: var(--credit-ink); }
+.eda-memo {
+    grid-column: 2 / -1; display: flex; align-items: flex-start; gap: 6px; padding: 3px 8px; border-radius: 6px;
+    background: #fff8e1; border: 1px solid #ecd590; font-size: 11.5px; line-height: 1.5; color: var(--panel-ink);
+}
+.eda-memo svg { width: 12px; height: 12px; margin-top: 2px; flex-shrink: 0; color: #a77400; }
+.entry-detail [data-ev-entry]:empty { display: none; }
+.entry-detail .ct-line { margin: 0; }
+
+/* a lent / borrowed entry in the journal: the same parts */
+.entry-detail.claim-entry { gap: 8px; }
+.ce-main { gap: 10px; font-size: 12px; }
+.ce-main .row { font-size: 12.5px; }
+.ce-main .row b.mono { font-size: 13px; color: var(--panel-value); }
+.ce-more { gap: 8px; padding: 0; background: none; border: 0; animation: pb-reveal 0.22s var(--ease-out); }
+.btn[data-entry-action="more"] svg { transition: transform 0.25s var(--ease-out); }
+
+/* ===================================================================== expense / gift / document / EMI panels */
+.xd-cards { gap: 8px; }
+.emi-panel .xd-cards.emi-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.xd-card { gap: 2px; padding: 6px 10px 8px; transition: border-color 0.2s, box-shadow 0.2s; }
+.xd-card:hover, .ed-col:hover { border-color: rgba(11, 106, 166, 0.3); box-shadow: var(--tile-shadow), 0 6px 14px -8px rgba(10, 46, 79, 0.35); }
+.ed-col.dr:hover { border-top-color: var(--debit-bar); }
+.ed-col.cr:hover { border-top-color: var(--credit-bar); }
+.xd-card-head { margin-bottom: 3px; padding-bottom: 4px; border-bottom: 1px solid var(--hairline); }
+
+.emi-panel .xd-bar, .xp-emis .xd-bar, .emi-side .xd-bar { height: 5px; background: #e3eaf1; }
+.emi-panel .xd-bar em, .xp-emis .xd-bar em, .emi-side .xd-bar em { border-radius: 99px; background: linear-gradient(90deg, #5fcf8a, #13a89a); }
+.emi-sched table { font-size: 12px; }
+.emi-sched thead th { background: var(--tile-head); color: var(--panel-label); border-bottom: 1px solid var(--tile-line); }
+.emi-sched td { background: transparent; }
+.emi-sched tr.emi-paid td:first-child { box-shadow: inset 3px 0 0 #3cc06b; }
+.emi-sched tr.emi-late td:first-child { box-shadow: inset 3px 0 0 var(--status-critical); }
+.emi-sched tr.emi-next td { background: rgba(51, 174, 232, 0.1); }
+.emi-sched tr.emi-next td:first-child { box-shadow: inset 3px 0 0 var(--ocean-500); }
+
+/* ===================================================================== lent / borrowed: the lifecycle panel */
+tr.detail-row .claim-panel { padding: 0 12px 10px 14px; box-shadow: none; }
+tr.detail-row .claim-panel:not(.in-row) { padding-top: 8px; }
+.claim-panel.in-row > .claim-head { margin: 0 -12px 0 -14px; padding: 8px 12px 8px 14px; border-radius: 10px 10px 0 0; background: var(--app-bg); }
+.split-bar { height: 6px; background: #e3eaf1; }
+.split-bar .seg.paid { border-radius: 999px; }
+.claim-figures { gap: 8px; }
+.cfig { position: relative; padding: 5px 10px 6px 12px; gap: 1px; }
+.cfig::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--ocean-300); }
+.cfig:has(b.pos)::before { background: #3cc06b; }
+.cfig:has(b.neg)::before, .cfig:has(.loss)::before { background: #ef6b6b; }
+.cfig:has(b.warn)::before { background: #f2c94c; }
+.cfig b { font-size: 13px; }
+.cfig small { font-size: 10.5px; color: var(--panel-soft); }
+.claim-timeline { padding: 6px 10px 8px; }
+.claim-timeline .section-title { margin-bottom: 6px; }
+
+/* the lifecycle, told in order: each step settles in turn (--d), its dot changes to its state (a done step fills with
+   teal and its tick pops), then the link down to the next step draws in the colour of that state; the current step
+   rings softly. The plain track underneath stays faint, so the coloured path reads as the item's progress. */
+.timeline > li { --d: 0s; animation: pb-rise 0.3s var(--ease-out) var(--d) backwards; }
+.timeline > li:nth-child(2) { --d: 0.14s; }
+.timeline > li:nth-child(3) { --d: 0.28s; }
+.timeline > li:nth-child(4) { --d: 0.42s; }
+.timeline > li:nth-child(5) { --d: 0.56s; }
+.timeline > li:nth-child(6) { --d: 0.7s; }
+.timeline > li:nth-child(7) { --d: 0.84s; }
+.timeline > li:nth-child(n + 8) { --d: 0.98s; }
+.timeline::before { background: rgba(16, 66, 104, 0.12); }
+.timeline > li:not(:last-child)::after {
+    content: ""; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; margin-left: 0; border-radius: 2px;
+    background: var(--tl-link, var(--ocean-400)); transform-origin: top;
+    animation: tl-link 0.32s var(--ease-out) calc(var(--d) + 0.2s) backwards;
+}
+.timeline > li.tl-done { --tl-link: #13a89a; }
+.timeline > li.tl-in { --tl-link: #13a89a; }
+.timeline > li.tl-out { --tl-link: #8a7ff0; }
+.timeline > li.tl-late { --tl-link: var(--status-critical); }
+.timeline > li.tl-current, .timeline > li.tl-due, .timeline > li.tl-gray, .timeline > li.tl-more {
+    --tl-link: repeating-linear-gradient(180deg, rgba(16, 66, 104, 0.3) 0 3px, transparent 3px 6px);
+}
+.timeline > li > .tl-body { padding: 1px 5px; border-radius: 6px; transition: background 0.15s; color: var(--panel-ink); }
+.timeline > li:hover > .tl-body { background: rgba(11, 106, 166, 0.06); }
+.tl-dot { box-shadow: 0 0 0 2px #fff; }
+.timeline > li > .tl-dot { animation: tl-dot 0.35s var(--ease-spring) calc(var(--d) + 0.05s) backwards; }
+.tl-done .tl-dot { background: linear-gradient(180deg, #2fd0bf, #10a596); border-color: #10a596; }
+.timeline > li.tl-done > .tl-dot { animation: tl-fill 0.45s var(--ease-out) calc(var(--d) + 0.05s) backwards; }
+.timeline > li.tl-done > .tl-dot svg { animation: pb-pop 0.3s var(--ease-spring) calc(var(--d) + 0.3s) backwards; }
+.timeline li.tl-current > .tl-body, .timeline .tl-sub li.current { background: linear-gradient(90deg, #fff4d4, #fffaec); box-shadow: 0 0 0 1px #f2c94c inset; }
+.timeline li.tl-current > .tl-body { animation: tl-arrive 0.6s ease-out calc(var(--d) + 0.25s) backwards; }
+.timeline li.tl-current > .tl-dot::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    border: 2px solid #f2c94c; animation: pb-ring 1.6s ease-out calc(var(--d) + 0.4s) 3 backwards; pointer-events: none;
+}
+
+/* EMI schedule: rows settle in order, the next one to pay glows once */
+.emi-sched tbody tr { animation: pb-rise 0.28s var(--ease-out) backwards; }
+.emi-sched tbody tr:nth-child(2) { animation-delay: 0.03s; } .emi-sched tbody tr:nth-child(3) { animation-delay: 0.06s; }
+.emi-sched tbody tr:nth-child(4) { animation-delay: 0.09s; } .emi-sched tbody tr:nth-child(5) { animation-delay: 0.12s; }
+.emi-sched tbody tr:nth-child(6) { animation-delay: 0.15s; } .emi-sched tbody tr:nth-child(n + 7) { animation-delay: 0.18s; }
+.emi-sched tr.emi-next td { animation: tl-arrive 0.9s ease-out 0.4s backwards; }
+.emi-sched tr.emi-paid .badge.good svg { animation: pb-pop 0.3s var(--ease-spring) 0.25s backwards; }
+.timeline .tl-sub { border: 1px solid var(--hairline); animation: pb-reveal 0.22s var(--ease-out); }
+
+/* ===================================================================== progress fills in (open panels only) */
+:is(tr.detail-row, .claim-details-modal) :is(.progress > span, .split-bar .seg, .xd-bar em, .progress-mini i) {
+    transform-origin: left center;
+    animation: pb-grow 0.6s var(--ease-out) 0.1s backwards;
+}
+
+/* ===================================================================== charts (core/charts.js)
+   On a chart's first drawing (svg.enter; a redraw on resize does not animate): the grid and labels fade in, bars grow
+   from the baseline one after another, lines draw themselves, areas rise under them, the end dots pop, donut slices
+   sweep in around the centre. Hover lifts the bar or slice under the pointer. */
+.chart svg.enter .grid-line, .chart svg.enter text { animation: chart-fade 0.5s ease-out backwards; }
+.chart svg.enter .bar {
+    transform-box: fill-box; transform-origin: 50% 100%;
+    animation: chart-bar 0.65s var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 30) * 22ms + 0.08s);
+}
+.chart svg.enter .bar.neg { transform-origin: 50% 0; }
+.chart .bar { transition: opacity 0.15s, filter 0.15s; }
+.chart .bar.hover { filter: brightness(1.08) drop-shadow(0 2px 3px rgba(10, 46, 79, 0.25)); }
+.chart svg.enter .line:not(.dashed) { stroke-dasharray: 1; animation: chart-draw 1.1s var(--ease-out) backwards; animation-delay: calc(var(--k, 0) * 0.12s + 0.1s); }
+.chart svg.enter .line.dashed { animation: chart-fade 0.8s ease-out 0.5s backwards; }
+.chart svg.enter .area { transform-box: fill-box; transform-origin: 50% 100%; animation: chart-area 0.9s var(--ease-out) 0.35s backwards; }
+.chart svg.enter .end-dot { transform-box: fill-box; transform-origin: center; animation: pb-pop 0.4s var(--ease-spring) backwards; animation-delay: calc(var(--k, 0) * 0.12s + 1s); }
+.chart .end-dot { filter: drop-shadow(0 1px 2px rgba(10, 46, 79, 0.3)); }
+.chart svg.enter .arc { animation: chart-arc 0.7s var(--ease-out) backwards; animation-delay: calc(var(--k, 0) * 70ms); }
+.chart .arc { transition: transform 0.2s var(--ease-out), opacity 0.15s, filter 0.2s; }
+.chart .arc.hover { transform: scale(1.04); filter: drop-shadow(0 3px 6px rgba(10, 46, 79, 0.25)); }
+.chart svg.enter .center-value, .chart svg.enter .center-label { animation: pb-rise 0.5s var(--ease-out) 0.45s backwards; }
+.chart .hover-dots circle { transform-box: fill-box; transform-origin: center; animation: pb-pop 0.2s var(--ease-out); }
+svg.sparkline .line { stroke-dasharray: 1; animation: chart-draw 0.9s var(--ease-out) backwards; }
+
+/* ===================================================================== keyframes */
+@keyframes chart-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes chart-bar { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes chart-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes chart-area { from { opacity: 0; transform: scaleY(0.4); } to { opacity: 1; transform: scaleY(1); } }
+@keyframes chart-arc { from { opacity: 0; transform: rotate(-24deg) scale(0.8); } to { opacity: 1; transform: none; } }
+@keyframes pb-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes pb-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pb-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes pb-pop { 0% { opacity: 0; transform: scale(0.4); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes pb-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-3px); } }
+@keyframes tl-link { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes tl-dot { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+@keyframes tl-fill { 0% { background: #fff; border-color: rgba(16, 66, 104, 0.3); transform: scale(0.6); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes tl-arrive { 0% { box-shadow: 0 0 0 1px #f2c94c inset, 0 0 0 0 rgba(242, 201, 76, 0.55); } 100% { box-shadow: 0 0 0 1px #f2c94c inset, 0 0 0 8px rgba(242, 201, 76, 0); } }
+@keyframes pb-ring { 0% { opacity: 0.9; transform: scale(0.85); } 100% { opacity: 0; transform: scale(1.7); } }
+
+/* ===================================================================== legibility
+   Text a step larger and darker, icons a size up with a slightly heavier stroke, so an open row reads at a glance. */
+:is(.entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, tr.detail-row .claim-panel) svg.icon:not(.art) { stroke-width: 2; }
+.menu a { font-size: 13px; }
+.menu a svg { width: 16px; height: 16px; stroke-width: 1.9; }
+
+.entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, tr.detail-row .claim-panel { font-size: 12.5px; }
+.ed-title b { font-size: 14px; }
+.ed-title span { font-size: 12.5px; }
+.ed-amount { font-size: 14.5px; }
+.ed-head .kind-chip, .claim-head .chip-icon, .ce-main > .chip-icon.sm { width: 30px; height: 30px; }
+.ed-head .kind-chip svg, .claim-head .chip-icon svg, .ce-main > .chip-icon.sm svg { width: 16px; height: 16px; }
+.ed-actions .btn.sm { height: 27px; font-size: 12.5px; }
+.ed-actions .btn.sm.icon { width: 27px; }
+.ed-actions .btn svg, .xd-actions .btn svg, .claim-quick .btn svg { width: 14px; height: 14px; }
+
+.ed-fact, .xd-fact { font-size: 12.5px; gap: 6px; }
+.ed-fact svg, .xd-fact svg { width: 15px; height: 15px; color: var(--ocean-700); }
+.ed-foot { font-size: 12px; }
+.ed-foot svg { width: 14px; height: 14px; }
+
+.ed-col-head, .ed-col-label, .xd-card-head, .cfig .label, .claim-panel .section-title { font-size: 10.5px; letter-spacing: 0.06em; }
+.xd-card-head svg, .claim-panel .section-title svg { width: 14px; height: 14px; }
+.ed-acct { padding: 7px 10px; }
+.ed-acct > small { width: 26px; height: 21px; font-size: 10px; }
+.ed-col { grid-template-columns: 26px minmax(0, 1fr) auto auto; }
+.eda-name b { font-size: 13.5px; }
+.eda-name i { font-size: 12px; }
+.eda-bal { font-size: 12.5px; gap: 5px; }
+.eda-bal svg { width: 13px; height: 13px; }
+.eda-amt { font-size: 14px; }
+.eda-memo { font-size: 12.5px; }
+.eda-memo svg { width: 14px; height: 14px; margin-top: 2px; }
+.ed-flow .ed-arrow { width: 28px; height: 28px; }
+.ed-flow .ed-arrow svg { width: 15px; height: 15px; }
+
+.xd-line { font-size: 12.5px; }
+.xd-line.small { font-size: 12px; }
+.cfig b { font-size: 14.5px; }
+.cfig small { font-size: 11.5px; }
+tr.detail-row .claim-head .row > b { font-size: 14px; }
+tr.detail-row .claim-head .small, .ce-main .row, .ce-main .small { font-size: 12px; }
+.ce-main .row b.mono { font-size: 14px; }
+.tl-body { font-size: 12.5px; line-height: 1.3; }
+.tl-body .small { font-size: 11.5px; }
+.tl-dot { width: 20px; height: 20px; }
+.tl-dot svg { width: 11px; height: 11px; stroke-width: 2.4; }
+.timeline::before { left: 9px; }
+.timeline > li:not(:last-child)::after { left: 9px; top: 20px; }
+.emi-sched table { font-size: 12.5px; }
+.emi-sched thead th { font-size: 10.5px; }
+:is(tr.detail-row, .claim-panel) .badge { font-size: 11px; }
+:is(tr.detail-row, .claim-panel) .badge svg { width: 12px; height: 12px; }
+
+/* ===================================================================== deep ocean & glacier
+   The open panel is washed in glacier ice; tiles are frosted glacier blue under an icy gloss; every tile's header band
+   is deep ocean with glacier-white labels, so the structure reads at once and the values stand out on the ice. */
+:root {
+    --glacier-ice: #f3f9fd;
+    --deep-ocean: linear-gradient(180deg, #1f6390 0%, #174e75 55%, #12405f 100%);
+    --deep-ocean-line: #0e3653;
+    --band-ink: #eaf6ff;
+    --band-icon: #9fdcff;
+    --tile-bg:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.18) 34%, rgba(255, 255, 255, 0) 60%),
+        linear-gradient(180deg, #e9f4fc 0%, #d6e9f6 52%, #c7dfef 100%);
+    --tile-border: rgba(8, 62, 104, 0.3);
+    --tile-line: rgba(8, 62, 104, 0.2);
+    --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 6px -2px rgba(8, 45, 76, 0.22);
+}
+
+/* the panel: glacier ice fading into the page */
+.entry-detail,
+tr.detail-row .xp-detail2,
+tr.detail-row .emi-panel,
+tr.detail-row .claim-panel {
+    background: linear-gradient(180deg, var(--glacier-ice) 0%, #e9f1f7 100%);
+    border-color: rgba(8, 62, 104, 0.24);
+}
+.claim-panel.in-row > .claim-head { background: var(--glacier-ice); }
+.ed-head, .xd-top, tr.detail-row .claim-head { border-bottom-color: rgba(8, 62, 104, 0.16); }
+
+/* header bands: deep ocean, glacier-white labels */
+.ed-col-head, .xd-card-head, .claim-timeline .section-title, .emi-sched thead th {
+    background: var(--deep-ocean); color: var(--band-ink); border-bottom-color: var(--deep-ocean-line);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+.xd-card-head svg, .claim-timeline .section-title svg { color: var(--band-icon); }
+.ed-col.dr .ed-col-head > span:first-child { color: #9df0bf; }
+.ed-col.cr .ed-col-head > span:first-child { color: #ffbcbc; }
+.ed-col.dr { border-top-color: #34c26a; }
+.ed-col.cr { border-top-color: #ec6a6e; }
+.xd-card-head, .claim-timeline .section-title { border-radius: 7px 7px 0 0; }
+
+/* values on the ice */
+.ed-amount { background: var(--deep-ocean); color: #fff; border-color: var(--deep-ocean-line); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+.ed-flow .ed-arrow { background: var(--deep-ocean); border-color: var(--deep-ocean-line); color: var(--band-ink); }
+.ed-acct.dr > small { background: #c4ebd3; color: #075c2c; }
+.ed-acct.cr > small { background: #f6cfd0; color: #962530; }
+.ed-acct.dr .eda-amt { color: #075c2c; }
+.ed-acct.cr .eda-amt { color: #962530; }
+.eda-bal svg { color: #0b5d92; }
+.eda-memo { background: #fff6d6; border-color: #e3c56d; }
+.xd-card:hover, .ed-col:hover { border-color: rgba(8, 62, 104, 0.45); }
+.emi-sched tr.emi-next td { background: rgba(31, 99, 144, 0.14); }
+.emi-sched tr + tr td, .emi-sched tbody td { border-top-color: var(--tile-line); }
+.cfig::before { background: #2f8fcf; }
+.timeline > li:hover > .tl-body { background: rgba(31, 99, 144, 0.08); }
+
+/* ===================================================================== smaller screens */
+@media (max-width: 1150px) {
+    .entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, tr.detail-row .claim-panel { margin: 4px 6px 6px 10px; }
+    tr.detail-row .xd-cards, .emi-panel .xd-cards.emi-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+}
+@media (max-width: 1100px) {
+    .ed-flow { grid-template-columns: minmax(0, 1fr); }
+    .ed-flow .ed-arrow { justify-self: center; transform: rotate(90deg); }
+}
+@media (max-width: 560px) {
+    .ed-col { grid-template-columns: 24px minmax(0, 1fr) auto; }
+    .ed-col-head > span:nth-child(2) { display: none; }
+    .eda-bal { grid-column: 2 / -1; grid-row: 2; justify-self: start; }
+}
+@media (max-width: 760px) {
+    .ed-facts { padding-left: 0; border-left: 0; flex-basis: 100%; }
+    .ed-actions { width: 100%; justify-content: flex-end; }
+    .entry-detail, tr.detail-row .xp-detail2, tr.detail-row .emi-panel, tr.detail-row .claim-panel { margin: 4px 4px 6px 6px; padding-left: 10px; padding-right: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+}
