@@ -75,10 +75,14 @@ public class ChitService {
     private final CategoryService categories;
     private final ChitReceiptAckRepository receipts;
 
+    /** Links to the chit (see ChitShareService), deleted with it. */
+    private final com.aditya.personalbudget.repository.ChitShareRepository chitShares;
+
     public ChitService(ChitRepository chits, ChitInstallmentRepository installments,
                        AccountRepository accountRepository, JournalEntryRepository entries,
                        AccountService accountService, LedgerService ledger, CategoryService categories,
-                       ChitReceiptAckRepository receipts) {
+                       ChitReceiptAckRepository receipts, com.aditya.personalbudget.repository.ChitShareRepository chitShares) {
+        this.chitShares = chitShares;
         this.categories = categories;
         this.receipts = receipts;
         this.chits = chits;
@@ -212,6 +216,7 @@ public class ChitService {
         schedule.forEach(i -> ledger.deleteForSource(LedgerService.SOURCE_CHIT_INSTALLMENT, i.getId()));
         ledger.deleteForSource(LedgerService.SOURCE_CHIT_PAYOUT, chitId);
         installments.deleteAll(schedule);
+        chitShares.deleteAll(chitShares.findByChitId(chitId));
         chits.deleteById(chitId);
     }
 

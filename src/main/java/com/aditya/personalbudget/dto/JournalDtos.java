@@ -50,17 +50,39 @@ public final class JournalDtos {
                             com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction) {
     }
 
-    /** An expense posted from the Expenses screen. {@code notes} is kept as the memo of the expense line. */
+    /**
+     * An expense posted from the Expenses screen. {@code notes} is kept as the memo of the expense line.
+     * <p>
+     * With {@code items}, one bill paid at once is split into what was bought (groceries, eggs, cosmetics ...): one
+     * expense line per item, each in its own category with the item's name as its memo, and one line for the account
+     * that paid the whole bill. {@code amount} is then the bill total (the items add up to it), {@code categoryId}
+     * is not needed and {@code notes} go on the paying line.
+     */
     public record ExpenseRequest(
             @NotNull LocalDate entryDate,
             @NotNull @Positive BigDecimal amount,
-            @NotNull Long categoryId,
+            Long categoryId,
             @NotNull Long paidFromId,
             @Size(max = 255) String narration,
             @Size(max = 100) String party,
             @Size(max = 60) String reference,
             @Size(max = 255) String notes,
-            Long version) {
+            Long version,
+            @Valid @Size(max = 60) List<ExpenseItem> items) {
+
+        public ExpenseRequest(LocalDate entryDate, BigDecimal amount, Long categoryId, Long paidFromId, String narration,
+                              String party, String reference, String notes, Long version) {
+            this(entryDate, amount, categoryId, paidFromId, narration, party, reference, notes, version, null);
+        }
+
+        /** Split into two or more items. */
+        public boolean itemized() {
+            return items != null && items.size() > 1;
+        }
+    }
+
+    /** One thing bought on an itemized bill: its category, what it cost and (optionally) what it was. */
+    public record ExpenseItem(@NotNull Long categoryId, @NotNull @Positive BigDecimal amount, @Size(max = 120) String name) {
     }
 
     /** An edit of a transfer between two of your accounts: Dr {@code toAccountId}, Cr {@code fromAccountId}. */

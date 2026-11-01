@@ -17,7 +17,7 @@ const SECTIONS = [
     { id: 'categories', label: 'Categories', iconName: 'tag', hint: 'Expense and income categories' },
     { id: 'dashboard', label: 'Dashboard', iconName: 'dashboard', hint: 'Panels, order and size' },
     { id: 'preferences', label: 'Preferences', iconName: 'settings', hint: 'How pages open' },
-    { id: 'appearance', label: 'Appearance', iconName: 'sparkles', hint: 'Theme: Classic or Ocean' },
+    { id: 'appearance', label: 'Appearance', iconName: 'sparkles', hint: 'Theme: Classic, Ocean or Breeze' },
     { id: 'shortcuts', label: 'Keyboard', iconName: 'keyboard', hint: 'Every shortcut' },
     { id: 'mobile', label: 'Phone app', iconName: 'phone', hint: 'The Android app: who, what, privacy' },
     { id: 'email', label: 'E-mail', iconName: 'mail', hint: 'Account for reminders and receipts' },

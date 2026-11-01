@@ -1494,6 +1494,11 @@ tr.cursor td:first-child { box-shadow: inset 3px 0 0 var(--brand-gold); }
 .tp-preview.ocean .tp-panel i { background: linear-gradient(180deg, #c6dcee 0 9px, #f8fbfe 9px, #dbe9f5 100%); border: 1px solid rgba(10, 79, 128, 0.24); }
 .tp-preview.ocean .tp-panel i:first-child { border-top: 2px solid #3cc06b; }
 .tp-preview.ocean .tp-panel i:last-child { border-top: 2px solid #e5676b; }
+.tp-preview.breeze { background: #f6f9fc; }
+.tp-preview.breeze .tp-bar + .tp-row { background: linear-gradient(180deg, #24597f, #1a4a6e); }
+.tp-preview.breeze .tp-panel { background: rgba(214, 230, 242, 0.5); box-shadow: inset 3px 0 0 rgba(11, 106, 166, 0.35); }
+.tp-preview.breeze .tp-panel i { flex: 0 0 34%; height: 10px; background: rgba(11, 106, 166, 0.08); border: 1px solid rgba(11, 106, 166, 0.22); }
+.tp-preview.breeze .tp-panel i:last-child { background: rgba(18, 181, 166, 0.09); border-color: rgba(18, 181, 166, 0.3); }
 
 /* ---------------------------------------------------------------- accounts: lower, planning-focused overview */
 .acct-overview { grid-template-columns: minmax(210px, 1.6fr) repeat(9, minmax(0, 1fr)); gap: 6px; }

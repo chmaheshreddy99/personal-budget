@@ -7,9 +7,11 @@
  * thumbBoxes, revenueStamp, plain (plain paper for a stamp to be stuck on), real (real stamp paper), evidence (false: leave
  * the online evidence annexure out), selfie ({ src, hash }: the live photo, as a data URL), technical (false: leave the digital
  * signature's text and key out of the annexure), copy (a label printed above the title: "Original", "Organizer's copy" ...),
- * payFrom (false: no payment reference column).
+ * payFrom (false: no payment reference column), codes (the QR codes to check it, from receiptCodes in receipt-qr.js: printed under
+ * the signatures of a signed record).
  */
 import { bondMoney, bondWhen, signatureRows, evidenceRows } from './bond.js';
+import { codesHtml } from './receipt-qr.js';
 
 const short = iso => iso ? new Date(String(iso).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 const escape = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -97,6 +99,7 @@ export function receiptDeed(r, opts = {}) {
             : [['Chit', `${r.chitName}${r.ticketNo ? ` (ticket / group no. ${r.ticketNo})` : ''}`], ['Installments', lines.map(l => `no. ${l.no}`).join(', ')],
                 ['Total received', `${bondMoney(r.totalAmount)} (${r.amountInWords || ''})`]],
         terms: r.terms, fingerprint: r.contentHash,
+        verifyHtml: done && opts.codes ? codesHtml(opts.codes, { print: true }) : '',
         footnote: r.status === 'CANCELLED' ? `WITHDRAWN on ${short(r.cancelledAt)}: ${r.cancelReason || ''}` : '',
         annexures: evidence,
     };

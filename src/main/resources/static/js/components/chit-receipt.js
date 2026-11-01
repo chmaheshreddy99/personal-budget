@@ -19,6 +19,7 @@ import { icon } from '../core/icons.js';
 import { money, date, dateTime } from '../core/format.js';
 import { qrSvg } from '../core/qr.js';
 import { bondHtml, printBond, evidenceRows, verifyEvidence, dataUrl, signatureSvg, signaturePad, downloadEvidence } from '../core/bond.js';
+import { receiptCodes, codesHtml } from '../core/receipt-qr.js';
 import { receiptDeed } from '../core/receipt-deed.js';
 
 const STATUS = {
@@ -521,6 +522,7 @@ export function openPrintSetup(chit, a) {
                 const src = await api.blob(`/chits/${chit.id}/receipts/${a.id}/files/${photo.id}`, {}).then(dataUrl).catch(() => null);
                 if (src) opts.selfie = { src, hash: photo.sha256 };
             }
+            opts.codes = await receiptCodes(full).catch(() => null);   // the QR codes to check it from the paper
             printBond(receiptDeed(full, opts), `Acknowledgement ${a.ackNo}`);
         } }],
         onOpen: m => {
@@ -636,15 +638,16 @@ export async function openReceiptDetail(ctx, listed) {
             <div class="rc-right">
                 <section class="rc-block"><h4>${icon('clock')}What happened</h4>${timeline}</section>
                 <section class="rc-block"><h4>${icon('shield')}Evidence</h4>${evidence}</section>
+                ${a.verifyCode ? `<section class="rc-block"><h4>${icon('qr')}Check it with a phone</h4><div data-rc-qr></div></section>` : ''}
             </div>
             <div data-rc-deed class="bond-preview rc-deed" hidden></div></div>`,
         actions: [
             { label: 'Print…', iconName: 'printer', left: true, onClick: () => { openPrintSetup(chit, a); return true; } },
             ...(a.digitalSignature && a.evidencePayload ? [{ label: 'Download the evidence', iconName: 'download', left: true, onClick: () => { downloadEvidence(isPayout(a) ? 'CHIT-PAYOUT-RECEIPT' : 'CHIT-RECEIPT', a.ackNo, a); return true; } }] : []),
-            { label: 'See as a document', iconName: 'file-text', left: true, onClick: m => {
+            { label: 'See as a document', iconName: 'file-text', left: true, onClick: async m => {
                 const box = m.el.querySelector('[data-rc-deed]');
                 box.hidden = !box.hidden;
-                if (!box.hidden) { box.innerHTML = bondHtml(receiptDeed(a)); box.scrollIntoView({ behavior: 'smooth' }); }
+                if (!box.hidden) { box.innerHTML = bondHtml(receiptDeed(a, { codes: await receiptCodes(a).catch(() => null) })); box.scrollIntoView({ behavior: 'smooth' }); }
                 return true;
             } },
             ...(canSign ? [{ label: 'Signed on paper…', iconName: 'edit', left: true, onClick: m => { m.close(); markSignedOnPaper(ctx, a); return true; } }] : []),
@@ -652,6 +655,12 @@ export async function openReceiptDetail(ctx, listed) {
             ...(manage && ['DISPUTED', 'REVOKED', 'CANCELLED'].includes(a.status) ? [{ label: 'Send again', iconName: 'send', kind: 'primary', onClick: m => { m.close(); sendAgain(ctx, a); return true; } }] : [{ label: 'Close', kind: 'primary' }]),
         ],
     });
+    // the QR codes to check it (printed on the document too); a warning when they point to an address only this network reaches
+    const qrBox = modal.el.querySelector('[data-rc-qr]');
+    if (qrBox) receiptCodes(a).then(codes => {
+        qrBox.innerHTML = codesHtml(codes) + (codes && !codes.reachable ? `<p class="rq-warn">${icon('alert')}These codes point to ${esc(location.host)}, which phones outside
+            this network cannot open. Print the receipt from the app's shared (public) address so anyone can scan them.</p>` : '');
+    }).catch(() => { qrBox.innerHTML = ''; });
     // scans and the selfie: thumbnails, and a click shows them large
     const fileUrl = (id, thumb) => api.blob(`/chits/${chit.id}/receipts/${a.id}/files/${id}`, thumb ? { thumb: true } : {}).then(b => URL.createObjectURL(b));
     modal.el.querySelectorAll('[data-rc-thumb]').forEach(img => fileUrl(img.dataset.rcThumb, true).then(u => { img.src = u; }).catch(() => {}));

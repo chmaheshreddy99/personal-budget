@@ -357,3 +357,17 @@
 .bond-pay.foot td { border-top: 1.5px solid #8a7d58; }
 .bp-body .bond-pay { font-size: 10pt; } .bp-body .bond-pay th { font-size: 8pt; }
 .bp-blk:has(> table.bond-pay:last-child) { padding-bottom: 0; } .bp-blk:has(> .bond-pay-note) { padding-bottom: 0.45em; }
+
+/* ---- QR codes to check a signed receipt (receipt-qr.js): on the deed, the receipt page and the app */
+.rq-codes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; break-inside: avoid; page-break-inside: avoid; }
+.rq-code { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; margin: 0; padding: 8px; border: 1px solid #c9d6e2; border-radius: 10px; background: #fff; }
+.rq-img { line-height: 0; }
+.rq-img svg { display: block; width: 132px; height: 132px; }
+.rq-code figcaption { display: grid; gap: 3px; font-size: 11.5px; line-height: 1.35; color: #3d5570; }
+.rq-code figcaption b { font-size: 12.5px; color: #0b1a2b; }
+.rq-note { margin: 0; align-self: center; font-size: 11px; color: #5a6773; }
+.rq-codes.print { gap: 8px; }
+.rq-codes.print .rq-code { border-color: #999; border-radius: 4px; }
+.rq-codes.print .rq-code:last-child .rq-img svg { width: 150px; height: 150px; }
+.rq-warn { margin: 6px 0 0; font-size: 11.5px; color: #a06d00; }
+@media (max-width: 520px) { .rq-code { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; } }

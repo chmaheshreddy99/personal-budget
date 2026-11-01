@@ -46,7 +46,11 @@ public class ReportService {
     private final ChitTrailService trails;
     private final ConstructionTagService projectTags;
 
-    public ReportService(LedgerService ledger, ChitTrailService trails, ConstructionTagService projectTags) {
+    private final CounterpartyService counterparties;
+
+    public ReportService(LedgerService ledger, ChitTrailService trails, ConstructionTagService projectTags,
+                         CounterpartyService counterparties) {
+        this.counterparties = counterparties;
         this.projectTags = projectTags;
         this.trails = trails;
         this.ledger = ledger;
@@ -161,7 +165,8 @@ public class ReportService {
                 lAndE, assets.total().compareTo(lAndE) == 0,
                 liquid, Money.percent(liabilities.total(), assets.total()), Money.percent(liabilities.total(), netWorth),
                 ratio(liquid, shortTerm), ratio(liquid, avgExpense), avgExpense, Money.percent(investments, assets.total()),
-                shortTerm, longTerm, mix(assetRows, chitBook), mix(liabilityRows, chitBook), netWorthTrend(books, asOf));
+                shortTerm, longTerm, mix(assetRows, chitBook), mix(liabilityRows, chitBook), netWorthTrend(books, asOf),
+                counterparties.breakdown(books, asOf, compareDate, now, before));
     }
 
     /**

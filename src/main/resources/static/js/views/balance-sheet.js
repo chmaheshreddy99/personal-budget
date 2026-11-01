@@ -3,6 +3,12 @@
  * compact cards on top (assets and liabilities with their parts, net worth with how it is funded). Groups holding a single account show as one row,
  * the asset / liability mix fills the space under equity, and a slim right-hand pane holds suggestions,
  * the net-worth trend, health ratios, dues profile and the biggest movers.
+ *
+ * Receivables and Payables open into the people behind them: who owes you (and whom you owe) how much, the change since
+ * the comparison date, what is overdue and since when, and under each person the items (money lent, paid for them,
+ * borrowed, bills to pay), each opening in Expenses. Entries not made for a person (an expense paid later, a transfer)
+ * are matched oldest first with the payments; what is still open shows under the shop named on it, or in a group
+ * "Not linked to a person". Anything left over (paid ahead) is a line of its own, so the parts add up to the account.
  */
 import { api } from '../core/api.js';
 import { showPageRoute, routeHash, fromAddress } from '../core/route.js';
@@ -21,7 +27,13 @@ const COMPARE = {
     custom: { label: 'Custom', date: () => view.compareTo },
 };
 
-const view = { asOf: isoDate(), compare: 'month', compareTo: '', showPrevious: false, collapsed: new Set() };
+const view = { asOf: isoDate(), compare: 'month', compareTo: '', showPrevious: false, collapsed: new Set(),
+    // receivable / payable accounts whose people are shown (folded by default), people whose items are open, accounts showing every person
+    peopleOpen: new Set(), openPeople: new Set(), allPeople: new Set() };
+/** The people behind each receivable / payable account of the balance sheet shown, by account id. */
+let PEOPLE = new Map();
+/** People listed before "Show all". */
+const PEOPLE_SHOWN = 6;
 
 export async function render(container, _params, isCurrent) {
     const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
@@ -39,6 +51,7 @@ export async function render(container, _params, isCurrent) {
     ]);
     if (!isCurrent()) return;
     view.compareTo = bs.compareDate;
+    PEOPLE = new Map((bs.counterparties || []).map(c => [c.accountId, c]));
     const query = { asOf: view.asOf === isoDate() ? null : view.asOf, compare: view.compare === 'month' ? null : view.compare, to: view.compare === 'custom' ? view.compareTo : null };
     showPageRoute('balance-sheet', routeHash('balance-sheet', query), Object.values(query).join('|'), { routed: fromAddress(_params) });
     const reload = () => render(container, [], isCurrent);
@@ -124,6 +137,24 @@ export async function render(container, _params, isCurrent) {
     });
     container.querySelector('#bs-prev').addEventListener('change', e => { view.showPrevious = e.target.checked; reload(); });
     container.querySelector('.bs-columns').addEventListener('click', e => {
+        // the people of an account, a person's items, every person: redrawn in place
+        const redraw = id => {
+            const block = container.querySelector(`.bs-people[data-people="${id}"]`);
+            if (block) block.outerHTML = peopleHtml(PEOPLE.get(Number(id)));
+        };
+        const toggle = (set, key) => (set.has(key) ? set.delete(key) : set.add(key));
+        const accountToggle = e.target.closest('[data-people-toggle]');
+        if (accountToggle) {
+            const id = Number(accountToggle.dataset.peopleToggle);
+            toggle(view.peopleOpen, id);
+            accountToggle.classList.toggle('open', view.peopleOpen.has(id));
+            redraw(id);
+            return;
+        }
+        const person = e.target.closest('[data-person]');
+        if (person) { toggle(view.openPeople, person.dataset.person); redraw(person.dataset.person.split('|')[0]); return; }
+        const more = e.target.closest('[data-people-all]');
+        if (more) { toggle(view.allPeople, Number(more.dataset.peopleAll)); redraw(more.dataset.peopleAll); return; }
         const head = e.target.closest('[data-group]');
         if (!head) return;
         const key = head.dataset.group;
@@ -136,13 +167,22 @@ export async function render(container, _params, isCurrent) {
         const rows = [];
         [bs.assets, bs.liabilities, bs.equity].forEach(s => s.groups.forEach(g => g.accounts.forEach(a =>
             rows.push([s.label, g.label, a.name, a.previous ?? '', Number(a.amount), Number(a.amount) - Number(a.previous || 0)]))));
+        const people = [];
+        PEOPLE.forEach(c => {
+            c.parties.forEach(pt => pt.items.forEach(i => people.push([c.accountName, pt.party, i.kindLabel, i.narration || '', i.startDate, i.dueDate || '',
+                Number(i.previous), Number(i.amount), i.overdue ? 'Overdue' : ''])));
+            if (Number(c.unlinked) || Number(c.unlinkedPrevious)) people.push([c.accountName, 'Not linked to a person', '', '', '', '', Number(c.unlinkedPrevious), Number(c.unlinked), '']);
+        });
         return {
             title: `Balance sheet as of ${date(bs.asOf)}`, subtitle: `Compared with ${date(bs.compareDate)}`, filename: `balance-sheet-${bs.asOf}`,
             summary: [['Net worth', Number(bs.netWorth)], ['Change', Number(bs.netWorthChange)]],
             sheets: [{ name: 'Balance sheet', columns: [{ label: 'Section' }, { label: 'Group' }, { label: 'Account' },
                 { label: date(bs.compareDate), type: 'money' }, { label: date(bs.asOf), type: 'money' }, { label: 'Change', type: 'money' }],
                 rows: rows.map(r => [r[0], r[1], r[2], r[3] === '' ? '' : Number(r[3]), r[4], r[5]]),
-                totals: ['Net worth', '', '', Number(bs.previousNetWorth), Number(bs.netWorth), Number(bs.netWorthChange)] }],
+                totals: ['Net worth', '', '', Number(bs.previousNetWorth), Number(bs.netWorth), Number(bs.netWorthChange)] },
+                ...(people.length ? [{ name: 'Receivables & payables', columns: [{ label: 'Account' }, { label: 'Person' }, { label: 'Kind' }, { label: 'What' },
+                    { label: 'Since', type: 'date' }, { label: 'Due', type: 'date' }, { label: date(bs.compareDate), type: 'money' }, { label: date(bs.asOf), type: 'money' }, { label: 'Status' }],
+                    rows: people }] : [])],
         };
     });
 }
@@ -252,12 +292,14 @@ function singleRow(g, a, share, isLiability) {
         <div class="bs-single">
             <span class="chip-icon xs ${t.tone}">${icon(t.name)}</span>
             <span class="a-name ellipsis" title="${esc(a.code || '')} ${esc(a.name)}"><b>${esc(a.name)}</b> <span class="g-tag">${esc(g.label)}</span></span>
+            ${peopleChip(a)}
             ${Math.abs(change) < 0.5 ? '' : `<span class="a-delta ${good ? 'pos' : 'neg'}" title="Change since the comparison date">${change > 0 ? '+' : '−'}${moneyShort(Math.abs(change))}</span>`}
             <span class="g-share" title="${percent(share, 1)}"><i style="width:${Math.min(100, Math.abs(share))}%"></i></span>
             <span class="g-pct">${percent(share, 0)}</span>
             ${view.showPrevious ? `<span class="g-prev">${moneyShort(a.previous ?? 0)}</span>` : ''}
             <b class="g-total ${Number(a.amount) < 0 ? 'neg' : ''}">${money(a.amount)}</b>
         </div>
+        ${PEOPLE.has(a.accountId) ? peopleHtml(PEOPLE.get(a.accountId)) : ''}
     </div>`;
 }
 
@@ -270,10 +312,126 @@ function accountRow(a, isLiability) {
     return `<div class="bs-acct">
         <span class="chip-icon xs ${t.tone}">${icon(t.name)}</span>
         <span class="a-name ellipsis" title="${esc(a.code || '')} ${esc(a.name)}">${esc(a.name)}</span>
+        ${peopleChip(a)}
         ${delta}
         ${view.showPrevious ? `<span class="a-prev">${money(a.previous ?? 0)}</span>` : ''}
         <span class="a-amt ${Number(a.amount) < 0 ? 'neg' : ''}">${money(a.amount)}</span>
+    </div>${PEOPLE.has(a.accountId) && a.accountType !== 'CHIT_FUND' ? peopleHtml(PEOPLE.get(a.accountId)) : ''}`;
+}
+
+// ===================================================================== who owes you, whom you owe
+
+const KIND = { LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],
+    BILL_DUE: ['gold', 'receipt', 'Bill'], ENTRY: ['gray', 'journal', null] };
+const owing = p => Number(p.amount) !== 0;
+
+/** On a receivable / payable account row: how many people make it up, which folds them away or shows them. */
+function peopleChip(a) {
+    const c = a.accountType === 'CHIT_FUND' ? null : PEOPLE.get(a.accountId);
+    if (!c) return '';
+    const n = c.parties.filter(p => owing(p) && p.named).length;
+    const entries = c.parties.find(p => !p.named && owing(p))?.openItems || 0;
+    const overdue = c.parties.filter(p => p.overdue).length;
+    // people when there are any, else the open entries without a name
+    const what = n ? `${n} ${n === 1 ? 'person' : 'people'}${entries ? ` and ${entries} open entr${entries === 1 ? 'y' : 'ies'}` : ''}` : `${entries} open entr${entries === 1 ? 'y' : 'ies'}`;
+    return `<button type="button" class="bp-toggle ${view.peopleOpen.has(c.accountId) ? 'open' : ''} ${overdue ? 'warn' : ''}" data-people-toggle="${c.accountId}"
+        title="${what}${overdue ? `, ${overdue} overdue` : ''} · click to ${view.peopleOpen.has(c.accountId) ? 'fold' : 'show'} them">
+        ${icon(n ? 'users' : 'list')}<b>${n || entries}</b>${overdue ? `<i>${icon('alert')}${overdue}</i>` : ''}${icon('chevron-down')}</button>`;
+}
+
+/**
+ * The people of an account: a summary line (how many, overdue, the oldest), then each person (largest first) with the
+ * kinds of items, how long it is open, the change since the comparison date, their share of the account and the
+ * amount; their items under them on a click. Then what is not linked to a person, and who settled since.
+ */
+function peopleHtml(c) {
+    if (!view.peopleOpen.has(c.accountId)) return `<div class="bs-people closed" data-people="${c.accountId}"></div>`;
+    const shown = c.parties.filter(p => owing(p) || view.showPrevious);
+    const settled = c.parties.filter(p => !owing(p)).length;
+    const list = view.allPeople.has(c.accountId) ? shown : shown.slice(0, PEOPLE_SHOWN);
+    const total = Math.abs(c.parties.reduce((s, p) => s + Number(p.amount), 0) + Number(c.unlinked)) || 1;
+    const overdue = c.parties.filter(p => p.overdue);
+    const oldest = c.parties.filter(owing).map(p => p.oldest).filter(Boolean).sort()[0];
+    const unlinked = Number(c.unlinked), unlinkedBefore = Number(c.unlinkedPrevious);
+    const n = c.parties.filter(p => owing(p) && p.named).length;
+    const loose = c.parties.find(p => !p.named && owing(p));
+    return `
+    <div class="bs-people ${c.payable ? 'payable' : 'receivable'}" data-people="${c.accountId}">
+        <div class="bp-sum">
+            <span>${icon(c.payable ? 'arrow-in' : 'hand')}${n ? `<b>${n}</b> ${n === 1 ? 'person' : 'people'} ${c.payable ? 'you owe' : 'owe you'}` : ''}${loose
+                ? `${n ? ' <span class="muted">+</span> ' : ''}<b>${loose.openItems}</b> open entr${loose.openItems === 1 ? 'y' : 'ies'}${n ? ' without a name' : ` ${c.payable ? 'to pay' : 'to receive'}, not linked to a person`}` : ''}</span>
+            ${overdue.length ? `<span class="bp-flag" title="${esc(overdue.map(p => p.party).join(', '))}">${icon('alert')}${overdue.length} overdue · ${moneyShort(overdue.reduce((s, p) => s + Number(p.amount), 0))}</span>` : ''}
+            ${oldest ? `<span class="muted" title="The oldest item still open, since ${date(oldest)}">oldest ${ageOf(oldest)}</span>` : ''}
+            <span class="spacer"></span>
+            <a class="link-btn" href="#/expenses/${c.payable ? 'owe' : 'collect'}" title="Record a payment, send a reminder, see the history">${c.payable ? 'Pay in Expenses' : 'Collect in Expenses'}${icon('chevron-right')}</a>
+        </div>
+        ${list.map(p => personHtml(c, p, total)).join('')}
+        ${shown.length > list.length || view.allPeople.has(c.accountId) && shown.length > PEOPLE_SHOWN
+            ? `<button type="button" class="link-btn bp-more" data-people-all="${c.accountId}">${view.allPeople.has(c.accountId) ? 'Show fewer' : `Show all ${shown.length}`}</button>` : ''}
+        ${unlinked || unlinkedBefore ? `
+        <a class="bp-person bp-unlinked" href="#/accounts/${c.accountId}" title="What the open items and entries do not account for on ${esc(c.accountName)}: payments made ahead, adjustments. Open the account's statement">
+            <span class="bp-avatar muted">${icon('layers')}</span>
+            <span class="bp-name"><b>${unlinked < 0 ? 'Paid ahead' : 'Other'}</b><small>not matched to an item · open the statement</small></span>
+            ${delta(unlinked - unlinkedBefore, c.payable)}
+            ${view.showPrevious ? `<span class="a-prev">${money(unlinkedBefore)}</span>` : ''}
+            <b class="bp-amt ${unlinked < 0 ? 'neg' : ''}">${money(unlinked)}</b><span class="bp-caret"></span></a>` : ''}
+        ${settled && !view.showPrevious ? `<div class="bp-note">${icon('check')}${settled} settled since ${date(view.compareTo)} · turn on the previous column to see them</div>` : ''}
     </div>`;
+}
+
+function personHtml(c, p, total) {
+    const key = `${c.accountId}|${p.party}`;
+    const open = view.openPeople.has(key);
+    const kinds = [...new Set(p.items.filter(i => Number(i.amount) !== 0).map(i => (KIND[i.kind] || [])[2] || i.kindLabel))];
+    const what = p.named ? kinds.join(' · ') : (c.payable ? 'expenses paid later, transfers' : 'entries') + ' · payments settle the oldest first';
+    const share = (Math.abs(Number(p.amount)) / total) * 100;
+    const settledNow = !owing(p);
+    return `
+    <div class="bp-person-wrap ${open ? 'open' : ''}">
+        <button type="button" class="bp-person ${p.overdue ? 'overdue' : ''} ${settledNow ? 'settled' : ''}" data-person="${esc(key)}" title="${open ? 'Fold' : 'Show'} the items">
+            <span class="bp-avatar ${p.named ? '' : 'muted'}">${p.named ? esc(initials(p.party)) : icon('layers')}</span>
+            <span class="bp-name"><b class="ellipsis">${esc(p.party)}</b>
+                <small class="ellipsis" title="${esc(what)}">${settledNow ? `settled · was ${money(p.previous)}` : `${esc(what)} · ${p.openItems} item${p.openItems === 1 ? '' : 's'}${p.oldest ? ` · ${ageOf(p.oldest)}` : ''}`}</small></span>
+            ${p.overdue ? `<span class="bp-flag">${icon('alert')}overdue</span>` : ''}
+            ${delta(Number(p.amount) - Number(p.previous), c.payable)}
+            <span class="g-share" title="${percent(share, 1)} of ${esc(c.accountName)}"><i style="width:${Math.min(100, share)}%"></i></span>
+            ${view.showPrevious ? `<span class="a-prev">${money(p.previous)}</span>` : ''}
+            <b class="bp-amt">${money(p.amount)}</b>
+            <span class="bp-caret">${icon('chevron-down')}</span>
+        </button>
+        ${open ? `<div class="bp-items">${p.items.map(i => itemHtml(i, c.payable)).join('')}</div>` : ''}
+    </div>`;
+}
+
+function itemHtml(i, payable) {
+    const k = KIND[i.kind] || ['gray', 'tag', i.kindLabel];
+    const href = i.claimId ? `#/expenses/claim/${i.claimId}` : `#/entry/${i.entryId}`;
+    return `<a class="bp-item ${i.overdue ? 'overdue' : ''} ${Number(i.amount) === 0 ? 'settled' : ''}" href="${href}"
+        title="${i.claimId ? 'Open it in Expenses: payments, interest, history' : 'Open the entry (what is still open of it, after the payments made oldest first)'}">
+        <span class="chip-icon xs ${k[0]}">${icon(k[1])}</span>
+        <span class="bp-name"><b class="ellipsis">${esc(i.narration || i.kindLabel)}</b>
+            <small class="ellipsis">${esc(i.kindLabel)} · ${date(i.startDate)}${i.dueDate ? ` · <span class="${i.overdue ? 'neg' : ''}">${i.overdue ? 'was due' : 'due'} ${date(i.dueDate)}</span>` : ''}${Number(i.amount) === 0 ? ' · settled' : ''}</small></span>
+        ${delta(Number(i.amount) - Number(i.previous), payable)}
+        ${view.showPrevious ? `<span class="a-prev">${money(i.previous)}</span>` : ''}
+        <b class="bp-amt">${money(i.amount)}</b><span class="bp-caret">${icon('chevron-right')}</span></a>`;
+}
+
+/** Change since the comparison date: owed to you going up is good, what you owe going down is. */
+function delta(change, payable) {
+    if (Math.abs(change) < 0.5) return '';
+    const good = payable ? change < 0 : change > 0;
+    return `<span class="a-delta ${good ? 'pos' : 'neg'}" title="Change since ${date(view.compareTo)}">${change > 0 ? '+' : '−'}${moneyShort(Math.abs(change))}</span>`;
+}
+
+const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+
+/** How long ago, short: "12 days", "3 months", "1.5 years" (to the balance sheet date). */
+function ageOf(iso) {
+    const days = Math.round((new Date(view.asOf + 'T00:00:00') - new Date(iso + 'T00:00:00')) / 86400000);
+    if (days < 1) return 'today';
+    if (days < 45) return `${days} day${days === 1 ? '' : 's'}`;
+    if (days < 545) return `${Math.round(days / 30.4)} months`;
+    return `${(days / 365).toFixed(1)} years`;
 }
 
 // ===================================================================== right pane

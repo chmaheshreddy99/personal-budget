@@ -36,6 +36,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceBadge, evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { openSubmissions } from '../components/submissions.js';
+import { isOcean } from '../core/theme.js';
 import { emiPanelHtml, bindEmiPanel, emiBadge, emiSideHtml } from '../components/emi.js';
 
 /** Periods, in toolbar order; the first four are always visible, the rest sit behind "More". */
@@ -127,6 +128,7 @@ const EXPENSE_STATUS = [
     { key: 'reversed', label: 'Reversed', iconName: 'undo', test: r => r.status === 'REVERSED' },
     { key: 'charges', label: 'Has linked charges', iconName: 'link', test: r => r.raw?.linked?.length > 0 },
     { key: 'charge', label: 'Is a linked charge', iconName: 'split', test: r => Boolean(r.raw?.parentEntryId) },
+    { key: 'bill', label: 'Split into items', iconName: 'list', test: r => Boolean(r.raw?.itemized) },
     { key: 'evidence', label: 'With bill / proof', iconName: 'paperclip', test: r => r.raw?.attachmentCount > 0 },
     { key: 'noevidence', label: 'No bill yet', iconName: 'camera', test: r => !r.raw?.attachmentCount },
 ];
@@ -222,8 +224,9 @@ function queryMatches(r, q) {
         if (flag === 'refunded' && !['REFUNDED', 'PARTLY_REFUNDED'].includes(r.raw?.status)) return false;
         if (flag === 'reversed' && r.raw?.status !== 'REVERSED') return false;
         if ((flag === 'linked' || flag === 'fee') && !(r.raw?.linked?.length || r.raw?.parentEntryId)) return false;
+        if ((flag === 'split' || flag === 'bill' || flag === 'items') && !r.raw?.itemized) return false;
     }
-    const hay = [r.description, r.party, r.reference, r.category, r.entryNo, r.notes, r.paidFrom, r.raw?.parentEntryNo].filter(Boolean).join(' ').toLowerCase();
+    const hay = [r.description, r.bill, r.party, r.reference, r.category, r.entryNo, r.notes, r.paidFrom, r.raw?.parentEntryNo].filter(Boolean).join(' ').toLowerCase();
     return q.text.every(t => hay.includes(t));
 }
 
@@ -327,7 +330,7 @@ export async function render(container, params, isCurrent) {
     }
     if (view.focusEntry) {
         const focus = all.EXPENSE.find(r => r.raw.entryId === view.focusEntry);
-        if (focus) { view.open = focus.key; view.flash = focus.key; }
+        if (focus) { view.open = focus.raw.itemized ? `b${focus.raw.entryId}` : focus.key; view.flash = view.open; }
         else if (emiByEntry.has(view.focusEntry)) view.focusEmi = emiByEntry.get(view.focusEntry).plan.id;
         view.focusEntry = null;
     }
@@ -557,7 +560,7 @@ export async function render(container, params, isCurrent) {
         sheets: [
             { name: 'Transactions', columns: [{ label: 'Date', type: 'date' }, { label: 'Kind' }, { label: 'Category' }, { label: 'Description' },
                 { label: 'Shop / person' }, { label: 'Paid from' }, { label: 'Reference' }, { label: 'Notes' }, { label: 'Charge of' }, { label: 'Amount', type: 'money' }, { label: 'Outstanding', type: 'money' }],
-              rows: list.map(r => [r.date, r.typeLabel, r.claim ? '' : r.category, r.description, r.party || '', r.paidFrom || '', r.reference || '',
+              rows: list.map(r => [r.date, r.typeLabel, r.claim ? '' : r.category, r.bill ? `${r.bill} · ${r.description}` : r.description, r.party || '', r.paidFrom || '', r.reference || '',
                   r.notes || '', r.raw?.parentEntryNo || '', r.amount, r.claim ? Number(r.claim.outstanding) : '']),
               totals: ['Total', '', '', '', '', '', '', '', '', sum(list), ''] },
             { name: 'By category', columns: [{ label: 'Category' }, { label: 'Items', type: 'number' }, { label: 'Spent', type: 'money' }, { label: 'Share', type: 'percent' }],
@@ -568,6 +571,7 @@ export async function render(container, params, isCurrent) {
 
     // ---- rows: click expands in place
     const listEl = container.querySelector('#xp-list');
+    const rowOf = key => list.find(x => x.key === key) || BILLS.get(key);
     listEl.addEventListener('click', async e => {
         const head = e.target.closest('th[data-sort]');
         if (head) {
@@ -592,6 +596,19 @@ export async function render(container, params, isCurrent) {
             });
             return;
         }
+        const billFold = e.target.closest('[data-xb-fold]');
+        if (billFold) {
+            e.stopPropagation();
+            const id = Number(billFold.dataset.xbFold);
+            const folded = !billFolded(id);
+            toggleBillFold(id, folded);
+            billFold.classList.toggle('open', !folded);
+            listEl.querySelectorAll(`tr[data-bill="${id}"]`).forEach(tr => {
+                tr.classList.toggle('xl-folded', folded);
+                if (folded && tr.nextElementSibling?.classList.contains('detail-row')) { tr.nextElementSibling.remove(); tr.classList.remove('expanded'); }
+            });
+            return;
+        }
         const fc = e.target.closest('[data-row-filter-category]'), fp = e.target.closest('[data-row-filter-payer]');
         if (fc || fp) {
             e.stopPropagation();
@@ -603,10 +620,12 @@ export async function render(container, params, isCurrent) {
         const action = e.target.closest('[data-xp-action]');
         if (action) {
             e.stopPropagation();
-            const r = list.find(x => x.key === action.dataset.key);
+            const r = rowOf(action.dataset.key);
             try {
                 if (action.dataset.xpAction === 'edit') openExpenseDialog({ expense: r.raw, onSaved: reload });
                 if (action.dataset.xpAction === 'copy') openExpenseDialog({ expense: r.raw, copy: true, onSaved: reload });
+                if (action.dataset.xpAction === 'split') openExpenseDialog({ expense: r.raw, split: true, onSaved: () => { view.open = `b${r.raw.entryId}`; reload(); } });
+                if (action.dataset.xpAction === 'item-refund') openRefundDialog(r, reload, Number(action.dataset.line));
                 if (action.dataset.xpAction === 'journal') location.hash = '#/transactions';
                 if (action.dataset.xpAction === 'emi-plan') { view.type = 'emi'; view.open = `m${action.dataset.plan}`; reload(); }
                 if (action.dataset.xpAction === 'refund') openRefundDialog(r, reload);
@@ -652,7 +671,7 @@ export async function render(container, params, isCurrent) {
                     const tr = target && listEl.querySelector(`tr[data-key="${target.key}"]`);
                     if (tr?.classList.contains('xl-folded')) listEl.querySelector(`[data-xl-fold="${tr.dataset.parent}"]`)?.click();   // unfold its group first
                     if (tr) {
-                        await toggleRow(tr, list.find(x => x.key === target.key));
+                        await toggleRow(tr, rowOf(target.key));
                         tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
                         tr.classList.add('flash');
                         setTimeout(() => tr.classList.remove('flash'), 2600);
@@ -660,6 +679,11 @@ export async function render(container, params, isCurrent) {
                     else openEntryDetail(entryId, { onChanged: reload });   // outside this period or filtered out
                 }
                 if (action.dataset.xpAction === 'open-refund') openEntryDetail(Number(action.dataset.entry), { onChanged: reload });
+                if (action.dataset.xpAction === 'open-bill') {   // an item listed on its own: show its whole bill
+                    clearFilters();
+                    Object.assign(view, { q: '', open: `b${r.raw.entryId}`, flash: `b${r.raw.entryId}` });
+                    reload();
+                }
                 if (action.dataset.xpAction === 'undo-refund') {
                     const f = r.raw.refunds.find(x => String(x.entryId) === action.dataset.refund);
                     if (f && await confirmDialog(`Undo the ${f.reversal ? 'reversal' : 'refund'} of ${money(f.amount)} (${f.entryNo})? The expense counts again.`)) {
@@ -668,7 +692,9 @@ export async function render(container, params, isCurrent) {
                         reload();
                     }
                 }
-                if (action.dataset.xpAction === 'delete' && await confirmDialog(`Delete "${r.description}" (${money(r.amount)})?${r.raw.parentEntryId ? ` It is a charge of ${r.raw.parentEntryNo}; that expense stays.` : ''}`)) {
+                if (action.dataset.xpAction === 'delete' && await confirmDialog(r.raw.itemized
+                    ? `Delete the bill "${r.raw.narration}" with its ${r.raw.items.length} items (${money(r.raw.billAmount)})?`
+                    : `Delete "${r.description}" (${money(r.amount)})?${r.raw.parentEntryId ? ` It is a charge of ${r.raw.parentEntryNo}; that expense stays.` : ''}`)) {
                     await api.del(`/expenses/${r.raw.entryId}`);
                     toast('Expense deleted');
                     reload();
@@ -678,7 +704,7 @@ export async function render(container, params, isCurrent) {
         }
         const tr = e.target.closest('tr[data-key]');
         if (!tr || e.target.closest('.detail-row')) return;
-        toggleRow(tr, list.find(x => x.key === tr.dataset.key));
+        toggleRow(tr, rowOf(tr.dataset.key));
     });
 
     async function toggleRow(tr, r) {
@@ -707,7 +733,7 @@ export async function render(container, params, isCurrent) {
         items: () => [...listEl.querySelectorAll('tr.xp-tr')],
         selected: cursor,
         select: el => { listEl.querySelectorAll('tr.cursor').forEach(x => x.classList.remove('cursor')); el.classList.add('cursor'); },
-        open: el => toggleRow(el, list.find(x => x.key === el.dataset.key)),
+        open: el => toggleRow(el, rowOf(el.dataset.key)),
     });
     setPageKeys(e => {
         if (nav(e)) return true;
@@ -720,12 +746,17 @@ export async function render(container, params, isCurrent) {
         return false;
     });
 
-    // keep the previously opened row open after a reload (e.g. after recording a repayment)
+    // keep the previously opened row open after a reload (e.g. after recording a repayment); a bill not drawn as one
+    // (only one of its items listed) opens on that item
+    if (view.open?.startsWith('b') && !listEl.querySelector(`tr[data-key="${view.open}"]`)) {
+        const item = list.find(x => x.raw?.itemized && `b${x.raw.entryId}` === view.open);
+        if (item) { if (view.flash === view.open) view.flash = item.key; view.open = item.key; }
+    }
     const reopen = view.open && listEl.querySelector(`tr[data-key="${view.open}"]`);
     if (reopen) {
         const flash = view.flash === view.open;   // opened from a link elsewhere: show where it is
         view.flash = null;
-        toggleRow(reopen, list.find(x => x.key === view.open)).then(() => {
+        toggleRow(reopen, rowOf(view.open)).then(() => {
             if (!reopen.classList.contains('is-claim')) reopen.scrollIntoView({ block: flash ? 'center' : 'nearest', behavior: flash ? 'smooth' : 'auto' });
             if (flash) { reopen.classList.add('flash'); setTimeout(() => reopen.classList.remove('flash'), 2600); }
         });
@@ -941,11 +972,16 @@ function chargesLine(expenses, total) {
 
 // ===================================================================== rows
 
+/** The key of an expense row: an item of a bill by its line (a bill can hold two items of one category). */
+const expenseKey = r => (r.itemized ? `x${r.entryId}-l${r.lineId}` : `x${r.entryId}-${r.categoryId}`);
+
 function expenseRow(r) {
     return {
-        key: `x${r.entryId}-${r.categoryId}`, sortId: r.entryId, type: 'EXPENSE', typeLabel: 'Expense', raw: r,
+        key: expenseKey(r), sortId: r.entryId, type: 'EXPENSE', typeLabel: 'Expense', raw: r,
         date: r.date, entryNo: r.entryNo, category: r.categoryName, categoryId: r.categoryId,
-        description: r.narration, party: r.party, reference: r.reference, notes: r.memo,
+        // an item of a bill: what it was (or its category), with the bill it is on
+        description: r.itemized ? (r.memo || r.categoryName) : r.narration, bill: r.itemized ? r.narration : null,
+        party: r.party, reference: r.reference, notes: r.itemized ? r.billNotes : r.memo,
         paidFrom: r.paidFrom, paidFromId: r.paidFromId, paidFromType: r.paidFromType,
         // what the expense costs now: the original less refunds (0 once reversed)
         amount: Number(r.netAmount ?? r.amount), gross: Number(r.amount), status: r.status,
@@ -1025,7 +1061,22 @@ function th(key, label, cls) {
         <span>${label}</span>${on ? `<i class="sort-arrow">${sort.dir === 'asc' ? '▲' : '▼'}</i>` : ''}</th>`;
 }
 
+/**
+ * Whether a bill's items are folded away under its row. Ocean: folded until opened (a bill is one row, as tall as any
+ * other); Classic: shown until folded. The folded (Classic) and unfolded (Ocean) bills are kept as negative entry ids.
+ */
+const unfoldedBills = new Set();
+const billFolded = id => (isOcean() ? !unfoldedBills.has(id) : view.collapsed.has(-id));
+function toggleBillFold(id, fold) {
+    if (isOcean()) { if (fold) unfoldedBills.delete(id); else unfoldedBills.add(id); return; }
+    if (fold) view.collapsed.add(-id); else view.collapsed.delete(-id);
+}
+
+/** The bills drawn over their items in the list just drawn, by key (b<entry id>): opened like any row. */
+const BILLS = new Map();
+
 function tableHtml(rows, filtered = false) {
+    BILLS.clear();
     if (!rows.length) return emptyState(view.type === 'collect' ? 'Nobody owes you anything right now.'
         : view.type === 'owe' ? 'You owe nobody right now. Press B to record money borrowed or a bill to pay later.'
         : view.type === 'emi' ? 'Nothing on EMI. Add an expense and pick “On EMI”: a card EMI or a loan from a finance company.'
@@ -1042,7 +1093,7 @@ function tableHtml(rows, filtered = false) {
     const head = `<thead><tr>${heads.join('')}<th class="c-caret"></th></tr></thead>`;
     const cols = heads.filter(Boolean).length + 1;
     const cls = `grid xp-table ${claims ? 'xp-claims' : 'xp-expenses'}`;
-    const line = r => (claims ? claimRowHtml(r, !grouped) : rowHtml(r, !grouped));
+    const line = r => (claims ? claimRowHtml(r, !grouped) : r.isBill ? billRowHtml(r, !grouped) : rowHtml(r, !grouped));
     // the total of what is listed, as the last line: amount (and, for lent / borrowed, what is still owed)
     const owed = rows.reduce((s, r) => s + (r.claim && isOpenClaim(r.claim) ? Number(r.claim.outstanding) : 0), 0);
     const foot = `<tfoot>${listTotalRow({ count: rows.length, span: cols - (claims ? 3 : 2), filtered,
@@ -1063,23 +1114,60 @@ function tableHtml(rows, filtered = false) {
 /**
  * Puts each linked charge right under the expense it came with, whatever the sort, marked as the middle or last
  * branch so the rows draw as a small tree. A charge whose expense is not in the list stays where it is.
+ * The items of a bill listed together are gathered under one head row for the bill (where its first item would be),
+ * in the order they were recorded; its charges follow them. A single item listed on its own stays a row of its own.
  */
 function nestLinked(rows) {
     const shown = new Map(rows.filter(r => r.raw).map(r => [r.raw.entryId, r]));
     const children = new Map();
+    const billItems = new Map();
     rows.forEach(r => {
         const parent = r.raw?.parentEntryId;
         if (parent && shown.has(parent)) children.set(parent, [...(children.get(parent) || []), r]);
+        if (r.raw?.itemized) billItems.set(r.raw.entryId, [...(billItems.get(r.raw.entryId) || []), r]);
     });
-    if (!children.size) return rows;
+    const bills = [...billItems.values()].filter(g => g.length > 1);
+    if (!children.size && !bills.length) return rows;
+    const drawn = new Set();
     const out = [];
     rows.forEach(r => {
         if (r.raw?.parentEntryId && shown.has(r.raw.parentEntryId)) return;   // drawn with its expense
-        const kids = (children.get(r.raw?.entryId) || []).sort((a, b) => a.date.localeCompare(b.date) || a.sortId - b.sortId);
-        out.push(kids.length ? { ...r, kidsShown: kids.length } : r);
-        kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid', parentRow: r }));
+        const id = r.raw?.entryId;
+        const group = r.raw?.itemized && billItems.get(id)?.length > 1 ? billItems.get(id) : null;
+        if (group && drawn.has(id)) return;   // drawn with its bill
+        const kids = (children.get(id) || []).sort((a, b) => a.date.localeCompare(b.date) || a.sortId - b.sortId);
+        let parent = r;
+        if (group) {
+            drawn.add(id);
+            parent = billHead(group);
+            if (kids.length) parent.kidsShown = kids.length;
+            BILLS.set(parent.key, parent);
+            out.push(parent);
+            const ordered = [...group].sort((a, b) => lineNoOf(a) - lineNoOf(b));
+            ordered.forEach((g, i) => out.push({ ...g, item: i === ordered.length - 1 && !kids.length ? 'last' : 'mid', billRow: parent }));
+        } else out.push(kids.length ? { ...r, kidsShown: kids.length } : r);
+        kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid', parentRow: parent }));
     });
     return out;
+}
+
+const lineNoOf = r => r.raw.items.find(i => i.lineId === r.raw.lineId)?.lineNo ?? 0;
+
+/**
+ * The head row of a bill over its items: the whole bill (what it costs now, less refunds), its description, shop and
+ * account; the categories it is spread over. {@code shown} says how many of its items are listed.
+ */
+function billHead(group) {
+    const e = group[0].raw;
+    const net = e.items.reduce((s, i) => s + Number(i.netAmount), 0);
+    const statuses = e.items.map(i => i.status);
+    const status = statuses.every(x => x === 'REVERSED') ? 'REVERSED' : statuses.every(x => x === 'REFUNDED') ? 'REFUNDED'
+        : statuses.some(Boolean) ? 'PARTLY_REFUNDED' : null;
+    return {
+        ...group[0], key: `b${e.entryId}`, isBill: true, shown: group.length,
+        category: `${e.items.length} items`, categoryId: null, description: e.narration, bill: null, notes: e.billNotes,
+        amount: net, gross: Number(e.billAmount), status,
+    };
 }
 
 /** What kind of charge a linked expense is, from the start of its description (as the Add charge dialog writes it). */
@@ -1175,25 +1263,64 @@ function rowHtml(r, withDate) {
     const partyHtml = r.nested
         ? `<span class="xd-party xl-share" title="Of ${esc(r.raw.parentNarration)} (${esc(r.raw.parentEntryNo)})">${parentAmount ? `${percent(r.amount / parentAmount * 100, 1)} of ` : 'on '}${esc(r.raw.parentEntryNo)}</span>`
         : party ? `<span class="xd-party" title="${r.claim ? 'Person' : 'Paid to'}: ${esc(r.party)}">${party}</span>` : '';
-    const folded = r.nested && view.collapsed.has(r.raw.parentEntryId);
+    const folded = (r.nested && view.collapsed.has(r.raw.parentEntryId)) || (r.item && billFolded(r.raw.entryId));
+    const billAmount = Number(r.raw?.billAmount || 0);
+    const itemParty = r.item
+        ? `<span class="xd-party xb-share" title="Of the bill ${esc(r.raw.narration)} (${esc(r.raw.entryNo)}, ${money(billAmount)})">${billAmount ? percent(r.gross / billAmount * 100, 0) : ''}</span>`
+        : r.raw?.itemized ? `<button type="button" class="xl-chip bill" data-xp-action="open-bill" data-key="${r.key}"
+            title="${esc(`An item of the bill ${r.raw.narration} (${r.raw.entryNo}): ${r.raw.items.length} items, ${money(billAmount)} · open the bill`)}">${icon('list')}<span class="ellipsis">${esc(r.raw.narration)}</span><b>${r.raw.items.length}</b></button>` : '';
     return `
-    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${r.kidsShown ? 'xp-parent' : ''} ${folded ? 'xl-folded' : ''}"
-        data-key="${r.key}" ${r.nested ? `data-parent="${r.raw.parentEntryId}"` : ''}>
-        ${withDate ? `<td class="c-date ${old ? 'old' : ''}" title="${old ? `Before the selected period, still open · ${ageOf(r.date)}` : dayName(r.date)}"><b>${date(r.date)}</b>${old ? icon('clock') : ''}</td>` : ''}
+    <tr class="xp-tr ${r.claim ? 'is-claim' : ''} ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.nested ? `xp-child nest-${r.nested}` : ''} ${r.item ? `xp-item item-${r.item}` : ''} ${r.kidsShown ? 'xp-parent' : ''} ${folded ? 'xl-folded' : ''}"
+        data-key="${r.key}" ${r.nested ? `data-parent="${r.raw.parentEntryId}"` : r.item ? `data-bill="${r.raw.entryId}"` : ''}>
+        ${withDate ? `<td class="c-date ${old ? 'old' : ''}" title="${old ? `Before the selected period, still open · ${ageOf(r.date)}` : dayName(r.date)}">${r.item ? '' : `<b>${date(r.date)}</b>`}${old ? icon('clock') : ''}</td>` : ''}
         <td class="c-cat"><div class="xd-cat">${category}</div></td>
         <td class="c-desc"><div class="xd-cell">
             <span class="xd-text">${kind ? `<span class="xl-kind ${kind.tone}" title="${esc(kind.label)}">${icon(kind.iconName)}${esc(kind.short)}</span>` : ''}<b class="ellipsis" title="${esc(r.description)}">${esc(title)}</b>${evidenceBadge(r.raw?.attachmentCount)}
                 ${refundPill(r.status, r.gross - r.amount, r.raw?.refunds)}
                 ${r.claim ? claimBadge(r.claim) : ''}
-                ${linkFlags(r)}
+                ${r.item ? '' : linkFlags(r)}
                 ${r.emiOf ?`<span class="mini-flag aqua emi" title="${esc(`${r.emiOf.what === 'purchase' ? 'Bought on EMI' : `Interest of ${r.emiOf.what}`} · ${r.emiOf.plan.narration}`)}">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'EMI' : esc(r.emiOf.what.replace('EMI ', ''))}</span>` : ''}
                 ${r.reference ? `<span class="xp-ico" title="Reference: ${esc(r.reference)}">${icon('tag')}</span>` : ''}
                 ${r.notes ? `<span class="xp-ico" title="${esc(r.notes)}">${icon('info')}</span>` : ''}</span>
-            ${partyHtml}</div></td>
-        <td class="c-pay">${r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
+            ${r.item || r.raw?.itemized ? itemParty : partyHtml}</div></td>
+        <td class="c-pay">${r.item ? '' : r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
             title="${r.type === 'BORROWED' ? 'Into' : 'Paid from'} ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button>` : '<span class="muted">—</span>'}</td>
-        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : r.nested ? 'xl-amt' : 'neg'}">${r.nested ? '+' : ''}${money(r.amount)}</b>${extra
+        <td class="r c-amt" ${owed ? `title="${money(Math.round(Number(r.claim.settlementAmount)))} payable now with interest"` : ''}>${r.status ? `<s class="muted small mono" title="Original amount">${money(r.gross)}</s> ` : ''}<b class="mono ${r.claim ? 'claim-amt' : r.status === 'REVERSED' ? 'muted' : r.nested ? 'xl-amt' : r.item ? 'xb-amt' : 'neg'}">${r.nested ? '+' : ''}${money(r.amount)}</b>${extra
             ? `<span class="xl-allin" title="${money(r.amount)} + charges ${money(extra)}${chargesBack ? ` (after ${money(chargesBack)} refunded on them)` : ''}">all-in ${money(r.amount + extra)}</span>` : ''}</td>
+        <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
+    </tr>`;
+}
+
+/**
+ * The head of a bill over its items: date · the categories it is spread over · its description (shop on the right) ·
+ * the account that paid it all · what it costs now. A chip folds the items away (or shows them again).
+ */
+function billRowHtml(r, withDate) {
+    const e = r.raw;
+    const payer = accountTypeIcon(r.paidFromType);
+    const cats = [...new Map(e.items.map(i => [i.categoryId, i])).values()];
+    const extra = e.linked?.length ? e.linked.reduce((s, l) => s + Number(l.netAmount), 0) : 0;
+    const folded = billFolded(e.entryId);
+    const tip = e.items.map(i => `${i.name || i.categoryName} · ${i.categoryName} · ${money(i.amount)}`).join('\n');
+    return `
+    <tr class="xp-tr xp-bill ${r.status ? `xp-${r.status.toLowerCase().replace('_', '-')}` : ''} ${r.kidsShown ? 'xp-parent' : ''}" data-key="${r.key}">
+        ${withDate ? `<td class="c-date" title="${dayName(r.date)}"><b>${date(r.date)}</b></td>` : ''}
+        <td class="c-cat"><div class="xd-cat xb-cats" title="${esc(cats.map(c => c.categoryName).join(', '))}">
+            <span class="xb-icons">${cats.slice(0, 3).map(c => { const ci = categoryIcon(c.categoryName); return `<span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>`; }).join('')}</span>
+            <span class="ellipsis">${cats.length === 1 ? esc(cats[0].categoryName) : `${cats.length} categories`}</span></div></td>
+        <td class="c-desc"><div class="xd-cell">
+            <span class="xd-text"><b class="ellipsis" title="${esc(r.description)}">${esc(r.description)}</b>${evidenceBadge(e.attachmentCount)}
+                ${refundPill(r.status, r.gross - r.amount, e.refunds)}
+                <button type="button" class="xl-chip bill ${folded ? '' : 'open'}" data-xb-fold="${e.entryId}" title="${esc(`${e.items.length} items${r.shown < e.items.length ? ` (${r.shown} listed)` : ''}:\n${tip}\nclick to ${folded ? 'show' : 'fold'} them`)}">
+                    ${icon('list')}<b>${r.shown < e.items.length ? `${r.shown}/${e.items.length}` : e.items.length}</b><span>items</span>${icon('chevron-down')}</button>
+                ${linkFlags(r)}
+                ${r.reference ? `<span class="xp-ico" title="Reference: ${esc(r.reference)}">${icon('tag')}</span>` : ''}
+                ${r.notes ? `<span class="xp-ico" title="${esc(r.notes)}">${icon('info')}</span>` : ''}</span>
+            ${r.party ? `<span class="xd-party" title="Paid to: ${esc(r.party)}">${esc(r.party)}</span>` : ''}</div></td>
+        <td class="c-pay">${r.paidFrom ? `<button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}"
+            title="Paid from ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button>` : '<span class="muted">—</span>'}</td>
+        <td class="r c-amt">${r.status ? `<s class="muted small mono" title="The bill">${money(r.gross)}</s> ` : ''}<b class="mono ${r.status === 'REVERSED' ? 'muted' : 'neg'}">${money(r.amount)}</b>${extra
+            ? `<span class="xl-allin" title="${money(r.amount)} + charges ${money(extra)}">all-in ${money(r.amount + extra)}</span>` : ''}</td>
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
     </tr>`;
 }
@@ -1254,6 +1381,18 @@ async function expenseDetail(r, ctx = {}) {
     const spentCat = sameCat.reduce((s, x) => s + x.amount, 0);
     const limit = line && line.monthlyLimit !== null ? Number(line.monthlyLimit) : null;
     const used = limit && inBudgetMonth ? Number(line.spent) / limit * 100 : null;
+    const actions = `
+                ${manage && (e.editable || e.viaJournal) ? `<button class="btn xs primary" data-xp-action="edit" data-key="${r.key}">${icon('edit')}${e.itemized ? 'Edit bill' : 'Edit'}</button>` : ''}
+                ${manage && e.editable && !r.emiOf ? `<button class="btn xs" data-xp-action="split" data-key="${r.key}" title="${e.itemized
+                    ? 'Something else was on this bill: add it as an item' : 'One payment, several things bought: split it into items, each in its own category'}">${icon(e.itemized ? 'plus' : 'split')}${e.itemized ? 'Add items' : 'Split into items'}</button>` : ''}
+                ${r.emiOf ? `<button class="btn xs primary" data-xp-action="emi-plan" data-plan="${r.emiOf.plan.id}" data-key="${r.key}" title="Pay, undo or pay off this EMI">${icon('calendar')}EMI plan</button>` : ''}
+                ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
+                ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
+                    <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
+                ${manage && e.convertible && !r.emiOf ? `<button class="btn xs" data-xp-action="paid-for" data-key="${r.key}" title="You paid this for someone who will pay you back: track it under Paid for">${icon('users')}Paid for…</button>` : ''}
+                ${manage && e.editable && !e.linked?.length ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
+`;
+    if (isOcean()) return oceanExpenseHtml(r, { e, entry, manage, actions, line, inBudgetMonth, sameCat, samePlace, account, spentCat, limit, used, ctx, refundEntry });
     const fact = (ico, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ico)}${text}</span>`;
     return `
     <div class="xp-detail2">
@@ -1265,23 +1404,18 @@ async function expenseDetail(r, ctx = {}) {
             ${fact('history', `${dateTime(entry.createdAt)} · ${esc(e.createdBy)}`, 'Recorded')}
             ${e.viaJournal ? fact('layers', `part of a ${entry.lines.length}-line voucher`) : ''}
             <span class="spacer"></span>
-            <span class="xd-actions">
-                ${manage && (e.editable || e.viaJournal) ? `<button class="btn xs primary" data-xp-action="edit" data-key="${r.key}">${icon('edit')}Edit</button>` : ''}
-                ${r.emiOf ? `<button class="btn xs primary" data-xp-action="emi-plan" data-plan="${r.emiOf.plan.id}" data-key="${r.key}" title="Pay, undo or pay off this EMI">${icon('calendar')}EMI plan</button>` : ''}
-                ${manage && !r.emiOf ? `<button class="btn xs" data-xp-action="copy" data-key="${r.key}" title="Record it again">${icon('copy')}Again</button>` : ''}
-                ${manage && e.refundable ? `<button class="btn xs" data-xp-action="refund" data-key="${r.key}" title="Money came back: a return, a cancelled order, a cashback">${icon('arrow-in')}Refund</button>
-                    <button class="btn xs" data-xp-action="reverse" data-key="${r.key}" title="Recorded by mistake or never charged: cancel it with a reversing entry">${icon('undo')}Reverse</button>` : ''}
-                ${manage && e.convertible && !r.emiOf ? `<button class="btn xs" data-xp-action="paid-for" data-key="${r.key}" title="You paid this for someone who will pay you back: track it under Paid for">${icon('users')}Paid for…</button>` : ''}
-                ${manage && e.editable && !e.linked?.length ? `<button class="btn xs ghost icon danger" data-xp-action="delete" data-key="${r.key}" title="Delete">${icon('trash')}</button>` : ''}
-            </span>
+            <span class="xd-actions">${actions}</span>
         </div>
-        <div class="xd-cards">
+        ${e.itemized ? billItemsHtml(r, manage) : ''}
+        <div class="xd-cards ${e.itemized ? 'xb-cards' : ''}">
             <div class="xd-card">
                 <div class="xd-card-head">${icon('journal')}Posting</div>
-                ${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span><span class="ellipsis">${esc(l.accountName)}${l.categoryId && l.categoryId === e.categoryId ? ` <span class="muted">· ${esc(e.categoryName)}</span>` : ''}</span>
+                ${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span><span class="ellipsis">${esc(l.accountName)}${e.itemized
+                    ? (l.memo && Number(l.debit) ? ` <span class="muted">· ${esc(l.memo)}</span>` : '')
+                    : l.categoryId && l.categoryId === e.categoryId ? ` <span class="muted">· ${esc(e.categoryName)}</span>` : ''}</span>
                     <b class="mono ${Number(l.debit) ? '' : 'muted'}">${money(Number(l.debit) || Number(l.credit))}</b></div>`).join('')}
             </div>
-            <div class="xd-card">
+            ${e.itemized ? '' : `<div class="xd-card">
                 <div class="xd-card-head">${icon('tag')}${esc(e.categoryName)}</div>
                 ${used !== null ? `<div class="xd-line"><span>Budget ${esc(ctx.monthLabel || '')}</span><b class="mono ${used > 100 ? 'neg' : ''}">${money(line.spent)} / ${moneyShort(limit)}</b></div>
                     <i class="xd-bar ${used > 100 ? 'over' : used > 80 ? 'warn' : ''}"><em style="width:${Math.min(used, 100)}%"></em></i>
@@ -1289,7 +1423,7 @@ async function expenseDetail(r, ctx = {}) {
                     : `<div class="xd-line"><span class="muted">${inBudgetMonth ? 'No budget set' : 'Budget'}</span><span class="muted">${inBudgetMonth ? '—' : 'other month'}</span></div>`}
                 <div class="xd-line small"><span class="muted">In this list</span><span>${sameCat.length}× · <b class="mono">${moneyShort(spentCat)}</b></span></div>
                 <div class="xd-line small"><span class="muted">This one</span><span>${spentCat ? percent(r.amount / spentCat * 100, 0) : '—'} of it</span></div>
-            </div>
+            </div>`}
             <div class="xd-card">
                 <div class="xd-card-head">${icon(e.party ? 'user' : 'wallet')}${e.party ? esc(e.party) : 'Paid from'}</div>
                 ${e.party ? `<div class="xd-line small"><span class="muted">Here in this list</span><span>${samePlace.length}× · <b class="mono">${moneyShort(samePlace.reduce((s, x) => s + x.amount, 0))}</b></span></div>
@@ -1298,15 +1432,265 @@ async function expenseDetail(r, ctx = {}) {
                 ${account ? `<div class="xd-line small"><span class="muted">${account.accountType === 'CREDIT_CARD' ? 'Card owes now' : 'Balance now'}</span><b class="mono">${money(account.balance)}</b></div>` : ''}
             </div>
         </div>
-        ${e.memo ? `<div class="xd-note">${icon('info')}<span>${esc(e.memo)}</span></div>` : ''}
+        ${(e.itemized ? e.billNotes : e.memo) ? `<div class="xd-note">${icon('info')}<span>${esc(e.itemized ? e.billNotes : e.memo)}</span></div>` : ''}
         ${refundsHtml(e, manage, refundEntry)}
         ${await linkedHtml(r, ctx, manage)}
         <div class="xp-evidence" data-ev-entry="${e.entryId}" data-ev-count="${e.attachmentCount || 0}"></div>
     </div>`;
 }
 
+/**
+ * An expense opened in the Ocean theme: a head (what, where, when, the actions), four figures that answer the questions
+ * one asks of an expense (what it cost, how its category stands this month, what budget is left and what that allows a
+ * day, what the paying account stands at), then the category at a glance (this month against last month, the 3-month
+ * average and the budget, with this expense marked) beside what the books say about it (a possible duplicate, how it
+ * compares with the usual, whether it repeats, the posting), then the items, refunds and charges as before.
+ */
+async function oceanExpenseHtml(r, { e, entry, manage, actions, sameCat, samePlace, account, ctx, refundEntry }) {
+    const [x, cats] = await Promise.all([api.get(`/transactions/${e.entryId}/insights`).catch(() => null), categoriesOf('EXPENSE').catch(() => [])]);
+    const rupees = v => money(Math.round(Number(v)));
+    const ci = categoryIcon(e.itemized ? 'Groceries' : e.categoryName);
+    const gross = Number(e.itemized ? e.billAmount : e.amount);
+    const net = e.itemized ? e.items.reduce((s, i) => s + Number(i.netAmount), 0) : Number(e.netAmount ?? e.amount);
+    const ins = x?.categories?.find(c => c.categoryId === e.categoryId) || x?.categories?.[0] || null;   // the entry's month
+    const cv = cats.find(c => c.id === (ins?.categoryId ?? e.categoryId));
+    const catName = ins?.name || e.categoryName;
+    const entryMonth = e.date.slice(0, 7);
+    const current = entryMonth === isoDate().slice(0, 7);
+    const monthLabel = new Date(e.date + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short' });
+    const monthTotal = Number(ins?.monthTotal ?? 0);
+    const budget = ins?.budget != null ? Number(ins.budget) : null;
+    const left = budget != null ? budget - monthTotal : null;
+    const today = new Date(isoDate() + 'T00:00:00');
+    const daysLeft = current ? new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate() - today.getDate() + 1 : 0;
+    const last = cv ? Number(cv.lastMonth) : null;
+    const avg3 = cv ? Number(cv.averageLast3Months) : null;
+    const vsLast = current && last ? ((monthTotal - last) / last) * 100 : null;
+    const fig = (label, value, sub = '', tone = '') => `<div class="cfig"><span class="label">${label}</span><b class="${tone}">${value}</b><small>${sub}</small></div>`;
+
+    // ---- a bill split into items: every category on it, each with its items, and the bill's total
+    const bill = e.itemized ? billGlance(r, { x, cats, monthLabel, current, manage, rupees, net, gross }) : null;
+
+    // ---- the four figures
+    const figs = bill ? bill.figs : [
+        fig(net !== gross ? 'Counts now' : 'This expense', money(net),
+            net !== gross ? `paid ${money(gross)} · ${money(gross - net)} came back` : monthTotal ? `${percent(net / monthTotal * 100, 0)} of ${esc(catName)} in ${monthLabel}` : esc(catName), net !== gross ? 'pos' : ''),
+        fig(`${esc(catName)} · ${monthLabel}`, rupees(monthTotal),
+            vsLast != null ? `<span class="${vsLast > 0 ? 'neg' : 'pos'}">${vsLast > 0 ? '▲' : '▼'} ${Math.abs(Math.round(vsLast))}%</span> vs last month (${rupees(last)})` : `${ins?.usualCount ?? sameCat.length} expense${(ins?.usualCount ?? sameCat.length) === 1 ? '' : 's'} usual size ${ins?.usual ? rupees(ins.usual) : '—'}`),
+        budget != null
+            ? fig('Budget left', left >= 0 ? rupees(left) : `−${rupees(-left)}`,
+                left < 0 ? `over ${rupees(budget)} budget` : current && daysLeft ? `≈ ${rupees(left / daysLeft)} a day for ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : `of ${rupees(budget)}`,
+                left < 0 ? 'neg' : monthTotal / budget >= (ins?.alertPercent || 80) / 100 ? 'warn' : 'pos')
+            : fig('Budget', '—', `none set for ${esc(catName)}`),
+        fig(account?.accountType === 'CREDIT_CARD' ? 'Card owes now' : `${esc(e.paidFrom)} now`, account ? money(Math.abs(Number(account.balance))) : '—',
+            `paid from ${esc(e.paidFrom)}`, account && account.accountType !== 'CREDIT_CARD' && Number(account.balance) < 0 ? 'neg' : ''),
+    ];
+    if (bill) figs.push(fig(account?.accountType === 'CREDIT_CARD' ? 'Card owes now' : `${esc(e.paidFrom)} now`, account ? money(Math.abs(Number(account.balance))) : '—',
+        `paid from ${esc(e.paidFrom)}`, account && account.accountType !== 'CREDIT_CARD' && Number(account.balance) < 0 ? 'neg' : ''));
+
+    // ---- the category at a glance: a bar each, this expense marked in this month
+    const bars = [
+        [current ? 'This month' : monthLabel, monthTotal, 'now'],
+        ...(current && last != null ? [['Last month', last, '']] : []),
+        ...(avg3 ? [['3-month average', avg3, 'avg']] : []),
+        ...(budget != null ? [['Budget', budget, 'budget']] : []),
+    ];
+    const top = Math.max(...bars.map(b => b[1]), 1);
+    const glance = `<div class="xo-bars">${bars.map(([label, v, cls]) => `<div class="xo-bar ${cls}"><span>${label}</span>
+        <i>${cls === 'now' ? `<em class="other" style="width:${Math.max(0, (v - net) / top * 100)}%"></em><em class="this" style="width:${Math.min(v, net) / top * 100}%" title="This expense"></em>` : `<em style="width:${v / top * 100}%"></em>`}</i>
+        <b class="mono">${rupees(v)}</b></div>`).join('')}</div>
+        <div class="xo-legend"><span><i class="this"></i>this expense</span><span><i class="other"></i>rest of ${monthLabel}</span></div>`;
+    const placeTotal = samePlace.reduce((s, y) => s + y.amount, 0);
+    const minis = [
+        ['In this list', `${sameCat.length}×`, esc(catName)],
+        ['Average here', sameCat.length ? moneyShort(sameCat.reduce((s, y) => s + y.amount, 0) / sameCat.length) : '—', 'per expense'],
+        e.party ? [`At ${esc(e.party)}`, `${samePlace.length || 1}×`, samePlace.length ? moneyShort(placeTotal) : 'first time'] : ['Recorded', shortDate(String(entry.createdAt).slice(0, 10)), `by ${esc(e.createdBy)}`],
+    ];
+
+    // ---- what the books say
+    const rows = [];
+    const row = (ico, title, detail, cls = '') => rows.push(`<div class="ed2-row ${cls}">${icon(ico)}<span class="ed2-row-main"><b>${title}</b>${detail ? `<small>${detail}</small>` : ''}</span></div>`);
+    (x?.duplicates || []).forEach(d => row('alert', `Possibly recorded twice · <a href="#/entry/${d.entryId}">${esc(d.entryNo)}</a>`, `${date(d.date)} · ${rupees(d.amount)} · ${esc(d.reason)}`, 'warn'));
+    const ratio = !e.itemized && ins?.ratio != null ? Number(ins.ratio) : null;
+    // a bill: each of its categories against the usual expense there
+    if (e.itemized) (x?.categories || []).forEach(c => {
+        const k = c.ratio != null ? Number(c.ratio) : null;
+        row(k == null ? 'tag' : k >= 1.3 ? 'trending' : k <= 0.7 ? 'trending-down' : 'check',
+            `${esc(c.name)} ${rupees(c.amount)} <span class="ed2-dim">${k == null ? 'first few' : k >= 1.3 ? `${k.toFixed(1)}× usual` : k <= 0.7 ? `${Math.round((1 - k) * 100)}% under usual` : 'about usual'}</span>`,
+            k == null ? 'not enough history to compare' : `usual ${rupees(c.usual)} · ${c.usualCount} in the last 12 months`, k != null && k >= 1.3 ? 'over' : '');
+    });
+    if (ratio != null) row(ratio >= 1.3 ? 'trending' : ratio <= 0.7 ? 'trending-down' : 'check', ratio >= 1.3 ? `${ratio.toFixed(1)}× your usual ${esc(catName)} expense` : ratio <= 0.7 ? `${Math.round((1 - ratio) * 100)}% below your usual` : 'About your usual size',
+        `usual ${rupees(ins.usual)} · from ${ins.usualCount} in the last 12 months`, ratio >= 1.3 ? 'over' : '');
+    const p = x?.pattern;
+    if (p) row('repeat', `${{ WEEKLY: 'Repeats every week', MONTHLY: 'Repeats every month', QUARTERLY: 'Repeats every quarter', YEARLY: 'Repeats every year' }[p.cadence] || 'Seen before'}`,
+        `${p.count}× since ${date(p.first)} · ${rupees(p.total)} in all${p.nextExpected ? ` · next ~<b>${date(p.nextExpected)}</b>` : ''}`);
+    row('journal', `${esc(e.entryNo)} · ${esc(entry.voucherLabel)}`, e.itemized
+        ? `${entry.lines.length} lines · Dr ${new Set(e.items.map(i => i.categoryId)).size} categories ${money(gross)} · Cr ${esc(e.paidFrom)} ${money(gross)}`
+        : entry.lines.map(l => `${Number(l.debit) ? 'Dr' : 'Cr'} ${esc(l.accountName)} ${money(Number(l.debit) || Number(l.credit))}`).join(' · '));
+    const note = (e.itemized ? e.billNotes : e.memo) || '';
+    if (note || e.reference) row('info', e.reference ? `Ref ${esc(e.reference)}` : 'Note', esc(note));
+    row('history', 'Recorded', `${dateTime(entry.createdAt)} by ${esc(e.createdBy)}`);
+
+    return `
+    <div class="claim-panel xo-panel">
+        <div class="claim-head">
+            <span class="chip-icon ${ci.tone}">${icon(e.itemized ? 'list' : ci.name)}</span>
+            <div class="grow">
+                <div class="row"><b>${esc(e.narration)}</b>${refundPill(e.status, gross - net, e.refunds)}<span class="tag">${esc(e.itemized ? `${e.items.length} items` : catName)}</span>
+                    ${r.emiOf ? `<span class="tag aqua">${icon('calendar')}${r.emiOf.what === 'purchase' ? 'on EMI' : esc(r.emiOf.what)}</span>` : ''}
+                    ${e.parentEntryId ? `<span class="tag">${icon('link')}charge of ${esc(e.parentEntryNo)}</span>` : ''}</div>
+                <div class="small muted">${[e.party, `${date(e.date)} · ${dayName(e.date)}`, `${e.entryNo} · ${entry.voucherLabel}`].filter(Boolean).map(esc).join(' · ')}</div>
+            </div>
+            <div class="claim-quick">${actions}</div>
+        </div>
+        ${bill ? `
+        <div class="claim-timeline xo-glance xo-bill-only">
+            ${bill.html}
+            <div data-ev-entry="${e.entryId}" data-ev-count="${e.attachmentCount || 0}"></div>
+        </div>
+        <details class="xo-more">
+            <summary>${icon('chevron-right')}<b>Details</b><span class="xo-more-facts">${bill.summary}</span></summary>
+            <div class="claim-figures">${figs.join('')}</div>
+            <section class="xo-insights"><div class="section-title">${icon('sparkles')} What the books say</div>${rows.join('')}</section>
+        </details>` : `
+        <div class="claim-figures">${figs.join('')}</div>
+        <div class="claim-body">
+            <div class="claim-timeline xo-glance">
+                <div class="section-title">${icon('pie')} ${esc(catName)} at a glance</div>
+                ${glance}
+                <div class="xo-period">${minis.map(([l, v, s]) => `<span><small>${l}</small><b>${v}</b><em>${s}</em></span>`).join('')}</div>
+                <div data-ev-entry="${e.entryId}" data-ev-count="${e.attachmentCount || 0}"></div>
+            </div>
+            <div class="claim-side">
+                <section class="xo-insights"><div class="section-title">${icon('sparkles')} What the books say</div>${rows.join('')}</section>
+            </div>
+        </div>`}
+        ${refundsHtml(e, manage, refundEntry)}
+        ${await linkedHtml(r, ctx, manage)}
+    </div>`;
+}
+
+/**
+ * A bill split into items, at a glance: a bar of the categories' shares, then each category (its part of the bill and
+ * share, how it stands this month and against its budget) with its items under it (each with its own refund action),
+ * and the bill's total at the foot: what was paid, what came back, what it counts for now. Its four figures: the bill,
+ * its biggest part, how the categories stand against their budgets, and the account that paid.
+ */
+function billGlance(r, { x, cats, monthLabel, current, manage, rupees, net, gross }) {
+    const e = r.raw;
+    const focus = r.isBill ? null : e.lineId;
+    const groups = [];
+    e.items.forEach(it => {
+        let g = groups.find(y => y.categoryId === it.categoryId);
+        if (!g) groups.push(g = { categoryId: it.categoryId, name: it.categoryName, items: [], amount: 0, net: 0 });
+        g.items.push(it); g.amount += Number(it.amount); g.net += Number(it.netAmount);
+    });
+    groups.sort((a, b) => b.amount - a.amount);
+    const shades = ['#0b7fa3', '#13a89a', '#5b8def', '#e0a740', '#8a7ff0', '#e07a7a', '#4fc3b4'];
+    const insOf = id => x?.categories?.find(c => c.categoryId === id);
+    const back = gross - net;
+    const states = groups.map(g => {
+        const c = insOf(g.categoryId);
+        const pct = c?.budgetPercent != null ? Number(c.budgetPercent) : null;
+        return { g, c, pct, tone: pct == null ? '' : pct > 100 ? 'over' : pct >= (c.alertPercent || 80) ? 'warn' : 'ok' };
+    });
+    const over = states.filter(s => s.tone === 'over'), near = states.filter(s => s.tone === 'warn'), budgeted = states.filter(s => s.pct != null);
+    const fig = (label, value, sub = '', tone = '') => `<div class="cfig"><span class="label">${label}</span><b class="${tone}">${value}</b><small>${sub}</small></div>`;
+    const biggest = groups[0];
+    const figs = [
+        fig(back > 0.004 ? 'Bill counts now' : 'This bill', money(net), back > 0.004 ? `paid ${money(gross)} · ${money(back)} came back` : `${e.items.length} items · ${groups.length} categor${groups.length === 1 ? 'y' : 'ies'}`, back > 0.004 ? 'pos' : ''),
+        fig('Biggest part', esc(biggest.name), `${money(biggest.amount)} · ${percent(biggest.amount / gross * 100, 0)} of the bill`),
+        fig(`Budgets · ${monthLabel}`, !budgeted.length ? '—' : over.length ? `${over.length} over` : near.length ? `${near.length} near` : 'All within',
+            !budgeted.length ? 'none set for these categories' : over.length ? over.map(s => esc(s.g.name)).join(', ') : near.length ? near.map(s => esc(s.g.name)).join(', ') : `${budgeted.length} of ${groups.length} have a budget`,
+            over.length ? 'neg' : near.length ? 'warn' : budgeted.length ? 'pos' : ''),
+    ];
+    const bar = `<div class="xb-mix" role="img" aria-label="Each category's share of the bill">${groups.map((g, i) => `<i style="width:${g.amount / gross * 100}%;background:${shades[i % shades.length]}"
+        title="${esc(`${g.name} · ${money(g.amount)} · ${percent(g.amount / gross * 100, 0)}`)}"></i>`).join('')}</div>`;
+    const catRow = (s, i) => {
+        const { g, c, pct, tone } = s;
+        const cv = cats.find(y => y.id === g.categoryId);
+        const last = current && cv ? Number(cv.lastMonth) : null;
+        const vs = last && c ? ((Number(c.monthTotal) - last) / last) * 100 : null;
+        const ci = categoryIcon(g.name);
+        return `<div class="xb-cat ${tone}">
+            <div class="xb-cat-head"><i class="xb-sw" style="background:${shades[i % shades.length]}"></i>
+                <span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>
+                <b class="ellipsis">${esc(g.name)}</b><span class="xb-share">${percent(g.amount / gross * 100, 0)}</span>
+                <b class="mono xb-amt">${money(g.net)}</b></div>
+            <div class="xb-cat-month"><span>${c ? `${monthLabel} ${rupees(c.monthTotal)}${vs != null ? ` <span class="${vs > 0 ? 'neg' : 'pos'}">${vs > 0 ? '▲' : '▼'}${Math.abs(Math.round(vs))}%</span>` : ''}${pct != null
+                ? ` · ${Math.round(pct)}% of ${rupees(c.budget)}${pct > 100 ? ` <span class="neg">${rupees(Number(c.monthTotal) - Number(c.budget))} over</span>` : ''}` : ' · no budget'}` : ''}</span>
+                ${pct != null ? `<i class="ed2-meter ${tone}"><em style="width:${Math.min(100, pct)}%"></em></i>` : ''}</div>
+            ${g.items.map(it => `<div class="xb-item ${it.lineId === focus ? 'focus' : ''}">
+                <span class="ellipsis">${esc(it.name || 'Item')}</span>
+                ${refundPill(it.status, Number(it.refunded || 0)) || '<span></span>'}
+                <b class="mono">${Number(it.refunded) ? `<s>${money(it.amount)}</s> ` : ''}${money(it.netAmount)}</b>
+                <span class="xb-act">${manage && e.refundable && Number(it.netAmount) > 0 ? `<button type="button" class="btn xs ghost icon" data-xp-action="item-refund" data-line="${it.lineId}" data-key="${r.key}"
+                    title="${esc(`Money came back on ${it.name || g.name}`)}">${icon('arrow-in')}</button>` : ''}</span></div>`).join('')}
+        </div>`;
+    };
+    const html = `<div class="section-title">${icon('list')} The bill · ${e.items.length} items in ${groups.length} categor${groups.length === 1 ? 'y' : 'ies'}
+            ${manage && e.editable ? `<button type="button" class="link-btn xb-add" data-xp-action="split" data-key="${r.key}">${icon('plus')}Add items</button>` : ''}</div>
+        ${bar}
+        <div class="xb-cats">${states.map(catRow).join('')}</div>
+        <div class="xb-total">
+            ${back > 0.004 ? `<span>Paid <b class="mono">${money(gross)}</b></span><span class="pos">Back <b class="mono">−${money(back)}</b></span>` : `<span>${e.items.length} items</span>`}
+            <span class="xb-total-main">Total <b class="mono">${money(net)}</b></span></div>`;
+    // the folded details in one line: budgets, the biggest part, the paying account
+    const summary = [over.length ? `<span class="neg">${over.length} over budget</span>` : near.length ? `<span class="warn-text">${near.length} near budget</span>` : budgeted.length ? 'budgets fine' : '',
+        `biggest ${esc(biggest.name)} ${percent(biggest.amount / gross * 100, 0)}`, `paid from ${esc(e.paidFrom)}`,
+        x?.duplicates?.length ? '<span class="warn-text">possible duplicate</span>' : ''].filter(Boolean).join(' · ');
+    return { figs, html, summary };
+}
+
 /** Colours of the parts of a cost breakdown: the expense first, then each charge. */
 const PART_COLORS = ['var(--ocean-600)', '#e0795f', '#e8b64a', '#2fae7a', '#7b5cd6', '#13a89a', '#d65c8f', '#5b8def'];
+
+/**
+ * The items of a bill: one bar split into them (what came back on an item hatched at its end), then a line per item
+ * (category, what it was, refund, share of the bill, amount) with a refund action, and the bill in the foot. The item
+ * opened from the list is highlighted.
+ */
+function billItemsHtml(r, manage) {
+    const e = r.raw;
+    const focus = r.isBill ? null : e.lineId;
+    const total = Number(e.billAmount) || 1;
+    const net = e.items.reduce((s, i) => s + Number(i.netAmount), 0);
+    const back = Number(e.billAmount) - net;
+    const color = i => PART_COLORS[i % PART_COLORS.length];
+    const label = it => it.name || it.categoryName;
+    const bar = `<div class="xl-bar" role="img" aria-label="Items of the bill">${e.items.map((it, i) => `
+        <i class="${it.lineId === focus ? 'focus' : ''}" style="width:${(Number(it.amount) / total) * 100}%" title="${esc(`${label(it)} · ${it.categoryName} · ${money(it.netAmount)} · ${percent(Number(it.amount) / total * 100, 0)}`)}">
+            <em style="width:${Number(it.amount) ? (Number(it.netAmount) / Number(it.amount)) * 100 : 0}%;background:${color(i)}"></em></i>`).join('')}</div>`;
+    const line = (it, i) => {
+        const ci = categoryIcon(it.categoryName);
+        const itemBack = Number(it.refunded || 0);
+        return `<div class="xl-part ${it.lineId === focus ? 'focus' : ''}">
+            <i class="xl-swatch" style="background:${color(i)}"></i>
+            <span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>
+            <span class="xl-what"><b class="ellipsis">${esc(label(it))}</b><small class="muted ellipsis">${esc(it.categoryName)}${it.lineId === focus ? ' · <b class="xl-this">this item</b>' : ''}</small></span>
+            ${refundPill(it.status, itemBack) || '<span></span>'}
+            <span class="xl-pct">${percent(Number(it.amount) / total * 100, 0)}</span>
+            <span class="xl-money">${itemBack > 0.004 ? `<s class="mono" title="Paid">${money(it.amount)}</s>` : ''}<b class="mono">${money(it.netAmount)}</b></span>
+            <span class="xl-acts">${manage && e.refundable && Number(it.netAmount) > 0 ? `<button type="button" class="btn xs ghost icon" data-xp-action="item-refund" data-line="${it.lineId}" data-key="${r.key}"
+                title="${esc(`Money came back on ${label(it)}`)}">${icon('arrow-in')}</button>` : ''}</span>
+        </div>`;
+    };
+    return `
+    <div class="xl-card xb-card">
+        <div class="xl-head">
+            <span class="chip-icon xs aqua">${icon('list')}</span>
+            <div class="grow min-0"><b>Bill · ${e.items.length} items</b>
+                <small class="muted">${esc(e.entryNo)} · one payment of ${money(e.billAmount)} from ${esc(e.paidFrom)}${r.isBill || !focus ? '' : ' · this row is one item'}</small></div>
+            ${manage && e.editable ? `<button type="button" class="btn xs" data-xp-action="split" data-key="${r.key}" title="Something else was on this bill">${icon('plus')}Add items</button>` : ''}
+        </div>
+        ${bar}
+        <div class="xl-parts">${e.items.map(line).join('')}</div>
+        <div class="xl-foot">
+            ${back > 0.004 ? `<span class="xl-flow"><span>Paid <b class="mono">${money(e.billAmount)}</b></span><span class="xr-back">${icon('arrow-in')}back <b class="mono">−${money(back)}</b></span></span>` : ''}
+            <span class="xl-label">Bill${back > 0.004 ? ' now' : ''}</span><b class="mono">${money(net)}</b>
+            <span class="muted">${new Set(e.items.map(i => i.categoryId)).size} categories, each counted in its own budget</span></div>
+    </div>`;
+}
 
 /**
  * How an expense and its charges hang together, as a cost breakdown: one bar split into the expense and each charge
@@ -1423,9 +1807,11 @@ function breakdownHtml({ root, charges, focusId = null, manage, key, linkable = 
  */
 function refundsHtml(e, manage, entries = new Map()) {
     if (!e.refunds?.length) return '';
-    const gross = Number(e.amount), back = Number(e.refunded), net = Number(e.netAmount);
+    const net = e.itemized ? e.items.reduce((s, i) => s + Number(i.netAmount), 0) : Number(e.netAmount);
+    const gross = Number(e.itemized ? e.billAmount : e.amount), back = e.itemized ? gross - net : Number(e.refunded);
+    const categoryName = id => (e.itemized ? e.items.find(i => i.categoryId === id)?.categoryName : id === e.categoryId ? e.categoryName : null);
     const reversed = e.status === 'REVERSED';
-    const key = `x${e.entryId}-${e.categoryId}`;
+    const key = expenseKey(e);
     return `
     <div class="xp-refunds">
         <div class="xr-head">
@@ -1443,7 +1829,7 @@ function refundsHtml(e, manage, entries = new Map()) {
         <div class="xp-refund ${f.reversal ? 'is-reversal' : ''}">
             <span class="chip-icon xs ${f.reversal ? 'gray' : 'aqua'}">${icon(f.reversal ? 'undo' : 'arrow-in')}</span>
             <div class="grow min-0">
-                <div class="xr-title"><b>${f.reversal ? 'Reversal' : 'Refund'}</b><b class="mono xr-amt">−${money(f.amount)}</b>
+                <div class="xr-title"><b>${f.reversal ? 'Reversal' : 'Refund'}${e.itemized && f.categoryId ? ` · ${esc(categoryName(f.categoryId) || '')}` : ''}</b><b class="mono xr-amt">−${money(f.amount)}</b>
                     <span class="muted small">${date(f.date)} · ${dayName(f.date)}</span></div>
                 <div class="xr-facts">
                     <span class="xd-fact" title="Entry number">${icon('journal')}<b>${esc(f.entryNo)}</b>${entry ? ` ${esc(entry.voucherLabel)}` : ''}</span>
@@ -1452,7 +1838,7 @@ function refundsHtml(e, manage, entries = new Map()) {
                     ${entry ? `<span class="xd-fact" title="Recorded">${icon('history')}${dateTime(entry.createdAt)} · ${esc(entry.createdBy || '')}</span>` : ''}
                 </div>
                 ${entry ? `<div class="xr-posting">${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span>
-                    <span class="ellipsis">${esc(l.accountName)}${l.categoryId && l.categoryId === e.categoryId ? ` <span class="muted">· ${esc(e.categoryName)}</span>` : ''}</span>
+                    <span class="ellipsis">${esc(l.accountName)}${l.categoryId && categoryName(l.categoryId) && !e.itemized ? ` <span class="muted">· ${esc(categoryName(l.categoryId))}</span>` : ''}</span>
                     <b class="mono ${Number(l.debit) ? '' : 'muted'}">${money(Number(l.debit) || Number(l.credit))}</b></div>`).join('')}</div>` : ''}
                 <div data-ev-entry="${f.entryId}" data-ev-count="${f.attachmentCount || 0}"></div></div>
             <span class="xr-acts">
@@ -1464,28 +1850,50 @@ function refundsHtml(e, manage, entries = new Map()) {
 }
 
 /** Money back on an expense: how much, when, into which account (the payer by default), with the receipt. */
-async function openRefundDialog(r, reload) {
+async function openRefundDialog(r, reload, lineId = null) {
     const e = r.raw;
     const accounts = await loadAccounts();
-    const left = Number(e.netAmount);
+    // a bill: the money comes back on one of its items (the one asked for, the row opened, or the first with money left)
+    const open = e.itemized ? e.items.filter(i => Number(i.netAmount) > 0) : [];
+    let item = e.itemized ? open.find(i => i.lineId === (lineId ?? (r.isBill ? null : e.lineId))) || open[0] : null;
+    const leftOf = () => Number(item ? item.netAmount : e.netAmount);
+    const left = leftOf();
+    const chips = v => [1, 0.5].map(f => `<button type="button" class="date-chip" data-fill="${Math.round(v * f * 100) / 100}">${f === 1 ? 'All' : 'Half'} ${moneyShort(v * f)}</button>`).join('');
     const modal = openModal({
         title: `Refund · ${e.narration}`, iconName: 'arrow-in',
         body: `<form class="form-grid two">
-            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.categoryName)}</b><span class="spacer"></span><b>${money(e.amount)}</b></div>
-                <div class="small muted">${date(e.date)} · paid from ${esc(e.paidFrom)}${Number(e.refunded) ? ` · ${money(e.refunded)} already refunded` : ''}</div></div>
+            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.itemized ? `${e.items.length} items` : e.categoryName)}</b><span class="spacer"></span><b>${money(e.itemized ? e.billAmount : e.amount)}</b></div>
+                <div class="small muted">${date(e.date)} · paid from ${esc(e.paidFrom)}${!e.itemized && Number(e.refunded) ? ` · ${money(e.refunded)} already refunded` : ''}</div></div>
+            ${e.itemized ? `<label class="field span-2"><span>Came back on *</span><select name="lineId" data-plain>${open.map(i => `<option value="${i.lineId}" ${i === item ? 'selected' : ''}>
+                ${esc(i.name || i.categoryName)} · ${esc(i.categoryName)} · ${money(i.netAmount)}${Number(i.refunded) ? ` left of ${money(i.amount)}` : ''}</option>`).join('')}</select></label>` : ''}
             <label class="field"><span>Amount back *</span><input name="amount" type="number" step="any" min="0.01" max="${left}" value="${left}" required data-plain>
-                <span class="chips">${[1, 0.5].map(f => `<button type="button" class="date-chip" data-fill="${Math.round(left * f * 100) / 100}">${f === 1 ? 'All' : 'Half'} ${moneyShort(left * f)}</button>`).join('')}</span></label>
+                <span class="chips" data-fills>${chips(left)}</span></label>
             ${field({ label: 'Received on', name: 'date', type: 'date', value: isoDate(), required: true, attrs: `min="${e.date}"` })}
             <label class="field span-2"><span>Back into</span><select name="accountId">${accountOptions(accounts,
                 a => (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY') && a.accountType !== 'CHIT_FUND', e.paidFromId)}</select></label>
             ${field({ label: 'Note', name: 'notes', placeholder: 'e.g. Returned one pair, order cancelled, cashback', span: 'span-2' })}
             <div class="span-2">${evidenceFieldHtml({ label: 'Refund proof', hint: 'Credit note, refund SMS or screenshot' })}</div>
-            <p class="span-2 hint" style="margin:0">The refund lowers ${esc(e.categoryName)} spending in the month it comes back${e.paidFromType === 'CREDIT_CARD' ? ' and what you owe on the card' : ''}.</p>
+            <p class="span-2 hint" style="margin:0" data-refund-hint></p>
         </form>`,
-        onOpen: m => m.el.querySelector('form').addEventListener('click', ev => {
-            const b = ev.target.closest('[data-fill]');
-            if (b) m.el.querySelector('[name=amount]').value = b.dataset.fill;
-        }),
+        onOpen: m => {
+            const form = m.el.querySelector('form');
+            const hint = () => {
+                form.querySelector('[data-refund-hint]').textContent = `The refund lowers ${item ? item.categoryName : e.categoryName} spending in the month it comes back${e.paidFromType === 'CREDIT_CARD' ? ' and what you owe on the card' : ''}.`;
+            };
+            hint();
+            form.addEventListener('click', ev => {
+                const b = ev.target.closest('[data-fill]');
+                if (b) form.amount.value = b.dataset.fill;
+            });
+            form.lineId?.addEventListener('change', () => {
+                item = open.find(i => i.lineId === Number(form.lineId.value));
+                const v = leftOf();
+                form.amount.max = v;
+                form.amount.value = v;
+                form.querySelector('[data-fills]').innerHTML = chips(v);
+                hint();
+            });
+        },
         actions: [{ label: 'Cancel' }, {
             label: 'Record refund', kind: 'primary', iconName: 'check',
             onClick: async m => {
@@ -1493,7 +1901,7 @@ async function openRefundDialog(r, reload) {
                 if (!form.reportValidity()) return true;
                 const d = readForm(form);
                 const saved = await api.post(`/expenses/${e.entryId}/refunds`, { date: d.date, amount: d.amount,
-                    accountId: d.accountId ? Number(d.accountId) : null, notes: d.notes });
+                    accountId: d.accountId ? Number(d.accountId) : null, notes: d.notes, lineId: item ? item.lineId : null });
                 await proof.uploadTo(saved.id);
                 toast(`${money(saved.amount)} refunded on ${e.entryNo} · ${saved.entryNo}`);
                 reload();
@@ -1506,11 +1914,12 @@ async function openRefundDialog(r, reload) {
 /** Cancels an expense with a mirror entry; both stay in the books, linked, and the expense counts for nothing. */
 async function openReverseDialog(r, reload) {
     const e = r.raw;
+    const left = e.itemized ? e.items.reduce((s, i) => s + Number(i.netAmount), 0) : Number(e.netAmount);
     openModal({
         title: `Reverse · ${e.narration}`, iconName: 'undo',
         body: `<form class="form-grid two">
-            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.categoryName)}</b><span class="spacer"></span><b>${money(e.netAmount)}</b></div>
-                <div class="small muted">${money(e.netAmount)} goes back to ${esc(e.paidFrom)} and comes off ${esc(e.categoryName)}.
+            <div class="span-2 post-summary"><div class="row"><b>${esc(e.entryNo)} · ${esc(e.itemized ? `${e.items.length} items` : e.categoryName)}</b><span class="spacer"></span><b>${money(left)}</b></div>
+                <div class="small muted">${money(left)} goes back to ${esc(e.paidFrom)} and comes off ${e.itemized ? 'each item’s own category: the whole bill is reversed' : esc(e.categoryName)}.
                     Both entries stay in the books, linked, so the history is kept; the expense shows as <b>Reversed</b>.
                     ${Number(e.refunded) ? `Refunds of ${money(e.refunded)} stay as they are.` : ''}</div></div>
             ${field({ label: 'Reversal date', name: 'date', type: 'date', value: e.date, required: true, attrs: `min="${e.date}"`,

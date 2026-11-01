@@ -18,6 +18,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { showRoute } from '../core/route.js';
+import { openChitShareDialog } from '../components/chit-link.js';
 import { openReceiptSend, openPayoutSend, receiptsTabHtml, handleReceiptClick, ackByInstallment, ackBadge, isFinal } from '../components/chit-receipt.js';
 
 const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
@@ -360,7 +361,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     const payoutReady = paidOut && toCome === 0;   // the whole payout is in: the organizer can be asked to confirm it
 
     // The banner keeps what is done most (pay, the next step of the chit, edit); the rest sits in a "More" menu
-    const menu = [];
+    const menu = [{ act: 'share', icon: 'link', label: 'Share chit…', hint: 'A link that expires: what is paid, what is left, the payout and when' }];
     if (anyPaid) menu.push({ act: 'ack', icon: 'shield', label: 'Acknowledge payments', hint: 'Ask the organizer to sign for what you paid' });
     if (payoutReady) menu.push({ act: 'payout-ack', icon: 'gift', label: 'Payout receipt', hint: 'Organizer confirms the payout; earlier acknowledgements are cancelled' });
     const step = closed ? null : toCome ? 'payout-part' : c.closable ? 'close' : !paidOut ? 'payout' : null;
@@ -502,6 +503,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
         if (!btn) return;
         try {
             if (btn.dataset.ack) openReceiptSend(c, installments, acks, [Number(btn.dataset.ack)], loadAcks);
+            else if (btn.dataset.act === 'share') openChitShareDialog(c);
             else if (btn.dataset.act === 'ack') openReceiptSend(c, installments, acks, [], showReceipts);
             else if (btn.dataset.act === 'payout-ack') openPayoutSend({ chit: c, installments, payoutReceipts, acks }, showReceipts);
             else if (btn.dataset.pay) openPayForm(c, installments.find(i => i.id === Number(btn.dataset.pay)), reload);

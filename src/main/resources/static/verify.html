@@ -26,15 +26,38 @@
         pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
         dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; } dt { color: var(--muted); } dd { margin: 0; min-width: 0; }
         details summary { cursor: pointer; font-weight: 600; }
+        /* a receipt checked from its QR code */
+        .status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 16px; border-radius: 16px; }
+        .status .mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; font-size: 28px; font-weight: 800; color: #fff; }
+        .status b { display: block; font-size: 19px; line-height: 1.25; }
+        .status small { display: block; margin-top: 3px; font-size: 13.5px; opacity: 0.92; }
+        .status.ok { background: var(--okbg); color: var(--ok); } .status.ok .mark { background: #0b7a3b; }
+        .status.warn { background: #fff4dc; color: #8a5b00; } .status.warn .mark { background: #c98a00; }
+        .status.bad { background: var(--badbg); color: var(--bad); } .status.bad .mark { background: #b42828; }
+        .status.wait { background: var(--card); color: var(--muted); border: 1px solid var(--line); } .status.wait .mark { background: var(--line); }
+        @media (prefers-color-scheme: dark) { .status.warn { background: #3a2c0c; color: #ffd27a; } }
+        .amount { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .checks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+        .checks li { display: flex; gap: 8px; align-items: flex-start; } .checks li::before { content: attr(data-mark); font-weight: 800; }
+        .checks li.ok { color: var(--ok); } .checks li.bad { color: var(--bad); } .checks li.wait { color: var(--muted); }
     </style>
 </head>
 <body>
 <main>
-    <h1>Check a digital signature</h1>
-    <p>This page checks, in your own browser, that a record was signed with the key it names and has not been changed since. It sends nothing anywhere and does not need the
+    <section id="qr-out" hidden>
+        <div id="qr-status" class="status wait"><span class="mark">…</span><div><b>Checking…</b></div></div>
+        <section class="card" id="qr-card" hidden style="margin-top:14px">
+            <div id="qr-amount"></div>
+            <dl id="qr-facts" style="margin-top:8px"></dl>
+            <ul class="checks" id="qr-checks"></ul>
+        </section>
+    </section>
+
+    <h1 id="title">Check a digital signature</h1>
+    <p data-file-only>This page checks, in your own browser, that a record was signed with the key it names and has not been changed since. It sends nothing anywhere and does not need the
         application the record came from: the file you open holds the signed text, the signature and the public key. You can save this page and use it offline.</p>
 
-    <section class="card">
+    <section class="card" data-file-only>
         <h2>1. Open the evidence file</h2>
         <div class="row">
             <label class="btn">Choose the evidence file (.json)<input type="file" id="file" accept=".json,application/json"></label>
@@ -109,6 +132,100 @@ print("valid")   # raises InvalidSignature if anything differs</pre></details>
             $('out').hidden = false;
             show($('result'), false, e.message || 'The file could not be read.', 'Open the .json file exported from the record.');
         }
+    }
+
+    // ---------------------------------------------------------------- a chit receipt checked from its QR code
+    // #r=<number>&c=<code>: the record is looked up (by its number and the code of its signed text) for whether it still
+    // stands; #e=<deflated JSON>: the signed text, signature and key travel in the code itself and are checked here.
+    const b64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+    const toB64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const codeOf = async text => toB64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+    const rupees = (v, cur) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur || 'INR', maximumFractionDigits: 2 }).format(Number(v || 0));
+    const dayOf = iso => iso ? new Date(String(iso).length === 10 ? iso + 'T00:00:00' : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    function status(tone, mark, title, sub) {
+        $('qr-out').hidden = false;
+        $('qr-status').className = `status ${tone}`;
+        $('qr-status').innerHTML = `<span class="mark">${mark}</span><div><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+    }
+    const check = (tone, text) => `<li class="${tone}" data-mark="${tone === 'ok' ? '✓' : tone === 'bad' ? '✗' : '•'}">${esc(text)}</li>`;
+
+    async function lookup(no, code) {
+        const r = await fetch('/api/public/verify/chit-receipt', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ no, code }) });
+        if (!r.ok) throw new Error('The check could not be done right now');
+        return r.json();
+    }
+
+    function showRecord(v) {
+        const payout = v.kind === 'PAYOUT';
+        $('qr-card').hidden = false;
+        $('qr-amount').innerHTML = `<small style="color:var(--muted)">${payout ? 'Payout received by' : 'Received by the organizer'}</small>
+            <div class="amount">${esc(rupees(v.totalAmount, v.currency))}</div><small style="color:var(--muted)">${esc(v.amountInWords || '')}</small>`;
+        $('qr-facts').innerHTML = [['Receipt', v.ackNo], ['Chit', `${v.chitName}${v.ticketNo ? ` · ticket ${v.ticketNo}` : ''}`],
+            [payout ? 'Paid by (organizer)' : 'Paid by', payout ? v.organizerName : v.payerName], [payout ? 'Received by' : 'Organizer', payout ? v.payerName : v.organizerName],
+            ['Installments', (v.installmentNos || []).join(', ')],
+            ['Signed by', `${v.signedBy || ''}${v.signedAt ? `, ${v.onPaper ? 'on paper' : 'online'} on ${dayOf(v.signedAt)}` : ''}`],
+            ['Issued through', v.household]]
+            .filter(([, x]) => x).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join('');
+    }
+
+    async function fromCheckCode(no, code) {
+        $('title').textContent = 'Check the signature yourself';
+        status('wait', '…', `Checking receipt ${no}…`, '');
+        let v;
+        try { v = await lookup(no, code); } catch (e) { status('bad', '!', e.message, 'Check your connection and scan again.'); return; }
+        if (v.result === 'NOT_FOUND') {
+            status('bad', '✗', 'Not a genuine receipt', `No receipt ${no} with these details was issued here. It may have been changed, or the code is from another document.`);
+            return;
+        }
+        const [tone, mark, title, sub] = {
+            GENUINE: ['ok', '✓', 'Genuine and valid', `Receipt ${v.ackNo} was signed${v.signedBy ? ` by ${v.signedBy}` : ''} and still stands.`],
+            WITHDRAWN: ['warn', '!', 'Withdrawn: no longer valid', `${v.ackNo} was signed, then withdrawn on ${dayOf(v.withdrawnAt)}${v.withdrawnReason ? `: “${v.withdrawnReason}”` : ''}.`],
+            REPLACED: ['warn', '↻', 'Replaced by a later receipt', `${v.ackNo} is cancelled: the payout receipt ${v.replacedBy} restates these installments. Check that one instead.`],
+        }[v.result] || ['bad', '?', v.result, ''];
+        status(tone, mark, title, sub);
+        showRecord(v);
+        const checks = [check(v.result === 'GENUINE' ? 'ok' : 'bad', v.result === 'GENUINE' ? 'Found in the issuer\'s records, still standing' : 'Found in the issuer\'s records, but no longer standing')];
+        if (crypto?.subtle) {
+            const same = await codeOf(v.evidencePayload) === code;
+            checks.push(check(same ? 'ok' : 'bad', same ? 'The signed text matches the code printed on this receipt' : 'The signed text does not match the printed code'));
+        }
+        $('qr-checks').innerHTML = checks.join('');
+        if (v.evidencePayload) load(JSON.stringify({ kind: 'Chit receipt', number: v.ackNo, signedText: v.evidencePayload, signature: v.digitalSignature, publicKey: v.publicKey, keyFingerprint: v.keyFingerprint }));
+    }
+
+    async function fromProofCode(packed) {
+        $('title').textContent = 'The signature, checked';
+        status('wait', '…', 'Reading the signed text from the code…', '');
+        let b;
+        try {
+            if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot read this code. Open it in a recent Chrome, Safari or Firefox.');
+            const json = await new Response(new Blob([b64url(packed)]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+            b = JSON.parse(json);
+            if (!b.t || !b.s || !b.k) throw new Error('The code does not hold a signed record.');
+        } catch (e) { status('bad', '✗', 'This code cannot be read', e.message || 'It may be damaged or cut short.'); return; }
+        await load(JSON.stringify({ kind: 'Chit receipt', number: b.n, signedText: b.t, signature: b.s, publicKey: b.k }));
+        const ok = $('result').querySelector('.result.ok') !== null;
+        status(ok ? 'ok' : 'bad', ok ? '✓' : '✗', ok ? 'The signed text is unchanged' : 'The signature does not match',
+            ok ? `Receipt ${b.n || ''} reads exactly as it was signed. Compare the key fingerprint below with the issuer's.` : 'Something in the record was changed after it was signed. Do not rely on it.');
+        // with a connection, whether it still stands (not withdrawn or replaced) is asked as well
+        if (!ok || !b.n || !crypto?.subtle) return;
+        try {
+            const v = await lookup(b.n, await codeOf(b.t));
+            if (v.result === 'NOT_FOUND') return;
+            showRecord(v);
+            $('qr-checks').innerHTML = [check('ok', 'Signature checked on this phone, from the code alone'),
+                check(v.result === 'GENUINE' ? 'ok' : 'bad', v.result === 'GENUINE' ? 'The issuer\'s records say it still stands'
+                    : v.result === 'REPLACED' ? `The issuer's records say it was replaced by ${v.replacedBy}` : `The issuer's records say it was withdrawn on ${dayOf(v.withdrawnAt)}`)].join('');
+            if (v.result !== 'GENUINE') status('warn', '!', v.result === 'REPLACED' ? 'Unchanged, but replaced by a later receipt' : 'Unchanged, but withdrawn since', v.withdrawnReason || '');
+        } catch { $('qr-card').hidden = false; $('qr-checks').innerHTML = check('wait', 'Offline: whether it was withdrawn since could not be asked. Scan "Check this receipt" when connected.'); }
+    }
+
+    const qr = new URLSearchParams(location.hash.slice(1));
+    if ((qr.get('r') && qr.get('c')) || qr.get('e')) {
+        document.querySelectorAll('[data-file-only]').forEach(el => { el.hidden = true; });   // opened from a code: no file to choose
+        document.querySelector('#out h2').textContent = 'The digital signature';
+        if (qr.get('e')) fromProofCode(qr.get('e')); else fromCheckCode(qr.get('r'), qr.get('c'));
     }
 
     $('file').addEventListener('change', async e => { const f = e.target.files?.[0]; if (f) load(await f.text()); });

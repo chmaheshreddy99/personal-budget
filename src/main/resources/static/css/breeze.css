@@ -1,0 +1,309 @@
+/* =====================================================================
+   Breeze: Classic, alive (Settings → Appearance).
+   Classic's pages and sizes, loaded last and only overriding (plus a few richer parts drawn when js/core/theme.js
+   isBreeze()), so switching back to Classic is just this sheet turned off:
+   - column headers that read as headers: a deep ocean band (Classic's height), and day / group
+     heads tinted with a brand bar, so a heading is never mistaken for a transaction line
+   - open rows in the brand's tones (ocean, aqua, violet, gold): an expense's cards each in its own, a journal
+     entry's actions labelled and grouped, an entry of money lent or borrowed shown whole with its lifecycle
+   - live motion: charts draw themselves and their latest point breathes, progress bars fill in and carry a soft
+     sheen, lifecycles light up step by step up to where the item stands, which keeps pulsing.
+   All motion is off for reduced motion.
+   ===================================================================== */
+
+:root {
+    --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+
+    /* column headers: a deep ocean band, the same height as Classic's */
+    --bz-th-bg: linear-gradient(180deg, #24597f, #1a4a6e);
+    --bz-th-ink: #eaf4fb;
+    --bz-th-rule: #0e3554;
+
+    /* the brand's tones for open rows: each a clear ink, a tint to fill with and a line to edge with */
+    --bz-wash: linear-gradient(180deg, #e9f2fa, #f2f7fc);
+    --bz-ocean: #0b6aa6;  --bz-ocean-tint: rgba(11, 106, 166, 0.11);  --bz-ocean-line: rgba(11, 106, 166, 0.3);
+    --bz-aqua: #0b8f83;   --bz-aqua-tint: rgba(18, 181, 166, 0.13);   --bz-aqua-line: rgba(18, 168, 154, 0.36);
+    --bz-violet: #5446c4; --bz-violet-tint: rgba(104, 90, 220, 0.11); --bz-violet-line: rgba(91, 79, 201, 0.3);
+    --bz-gold: #9a6a08;   --bz-gold-tint: rgba(232, 172, 50, 0.15);   --bz-gold-line: rgba(214, 154, 40, 0.42);
+    --bz-red: #c2363a;    --bz-red-tint: rgba(208, 59, 59, 0.09);     --bz-red-line: rgba(208, 59, 59, 0.3);
+    --bz-value: #0a2e4f;
+}
+
+/* one tone, picked by class: the cards and buttons below read --bz-tone / --bz-tint / --bz-line */
+.bz-tone-ocean { --bz-tone: var(--bz-ocean); --bz-tint: var(--bz-ocean-tint); --bz-line: var(--bz-ocean-line); }
+.bz-tone-aqua { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
+.bz-tone-violet { --bz-tone: var(--bz-violet); --bz-tint: var(--bz-violet-tint); --bz-line: var(--bz-violet-line); }
+
+/* ===================================================================== headers
+   Only colour changes, never size: the padding and the 1px rule stay Classic's, so the sticky day / group heads still
+   sit right under the header. The darker rule is an inset shadow, which takes no room. */
+table.grid th,
+.accounts-page .p-ledger table.grid thead th,
+.chits-page .chit-tab-body table.grid thead th,
+.emi-sched thead th {
+    background: var(--bz-th-bg);
+    color: var(--bz-th-ink);
+    border-bottom-color: var(--bz-th-rule);
+    box-shadow: inset 0 -2px 0 var(--bz-th-rule);
+}
+table.grid th .muted, table.grid th small { color: rgba(234, 244, 251, 0.72); }
+table.grid th a, table.grid th .link-btn { color: #bfe3fa; }
+table.grid th svg, .ms2-matrix thead th svg { color: #9fd3f5; }
+.xp-table th.sortable:hover { color: #ffffff; }
+.xp-table th.sorted { color: #ffd98a; }
+
+/* the day and group heads: a branded tint and a bar on the left, so they never read as a transaction line */
+.day-head-inner { background: linear-gradient(90deg, rgba(11, 106, 166, 0.13), rgba(11, 106, 166, 0.05)); box-shadow: inset 3px 0 0 var(--bz-ocean); }
+.day-date b { color: var(--ocean-900); }
+.grp-head { background: linear-gradient(90deg, rgba(11, 106, 166, 0.13), rgba(11, 106, 166, 0.05)); }
+.report-content tr.group-row td { background: rgba(11, 106, 166, 0.08); color: var(--ocean-900); }
+table.grid tr.group td { background: rgba(11, 106, 166, 0.1); }
+
+/* ===================================================================== open rows: the panel
+   Sizes stay Classic's; the accents are inset shadows, so nothing moves. */
+tr.detail-row > td { background: var(--bz-wash); }
+tr.detail-row > td > * { animation: bz-reveal 0.26s var(--ease-out) backwards; }
+.xp-detail2, tr.detail-row .entry-detail { box-shadow: inset 3px 0 0 var(--bz-ocean); }
+
+/* ===================================================================== an open expense, each part in its brand tone
+   the posting ocean, the category aqua, the payer violet, the note gold; the facts on top each with its own colour */
+.xd-fact { color: #35506a; }
+.xd-fact b { color: var(--bz-value); }
+.xd-top > .xd-fact:nth-child(1) svg { color: var(--bz-ocean); }
+.xd-top > .xd-fact:nth-child(2) svg { color: var(--bz-aqua); }
+.xd-top > .xd-fact:nth-child(3) svg { color: var(--bz-violet); }
+.xd-top > .xd-fact:nth-child(4) svg { color: var(--bz-gold); }
+.xd-card { --bz-tone: var(--bz-ocean); --bz-tint: var(--bz-ocean-tint); --bz-line: var(--bz-ocean-line); }
+.xd-cards > .xd-card:nth-child(3n + 2) { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
+.xd-cards > .xd-card:nth-child(3n) { --bz-tone: var(--bz-violet); --bz-tint: var(--bz-violet-tint); --bz-line: var(--bz-violet-line); }
+.xd-card, .bz-claim-card {
+    background: linear-gradient(180deg, var(--bz-tint), rgba(255, 255, 255, 0.7) 70%), #fbfdff;
+    border-color: var(--bz-line);
+    box-shadow: inset 0 3px 0 var(--bz-tone), 0 1px 3px rgba(10, 46, 79, 0.06);
+}
+.xd-card-head { color: var(--bz-tone); font-weight: 750; }
+.xd-card-head svg { color: var(--bz-tone); }
+.xd-card b.mono { color: var(--bz-value); }
+.xd-card .muted { color: #5f7488; }
+.xd-side { color: var(--bz-tone); opacity: 0.8; }
+.xd-bar { background: rgba(10, 79, 128, 0.12); }
+.xd-bar em { background: linear-gradient(90deg, #36c9b8, #0fa08f); }
+.xd-bar.warn em { background: linear-gradient(90deg, #f6cf6a, #e3a21a); }
+.xd-bar.over em { background: linear-gradient(90deg, #f08a8a, #d03b3b); }
+.xd-note { background: var(--bz-gold-tint); border-color: var(--bz-gold-line); color: #5a4108; }
+.xd-note svg { color: var(--bz-gold); }
+.xr-posting { background: var(--bz-ocean-tint); }
+.xl-node, .xl-parent { background: rgba(255, 255, 255, 0.75); }
+
+/* an open journal entry: the debit and credit pills in the brand's tints */
+.ed-pill.dr { background: rgba(18, 181, 166, 0.1); border-color: var(--bz-aqua-line); }
+.ed-pill.cr { background: rgba(11, 106, 166, 0.08); border-color: var(--bz-ocean-line); }
+.ed-fact svg { color: var(--bz-ocean); }
+.ed-fact b { color: var(--bz-value); }
+
+/* ===================================================================== actions in an open row
+   Labelled, in groups (change it · go to it or undo it · delete), each kind in its tone: Edit is the one solid
+   button; the rest are tinted pills that fill with their colour on hover. Close is a quiet round button. */
+.bz-acts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-left: auto; }
+.bz-group { display: inline-flex; align-items: center; gap: 4px; }
+.bz-group + .bz-group { padding-left: 8px; border-left: 1px solid var(--hairline-strong); }
+.btn.bz-act, .xd-actions .btn {
+    --bz-tone: var(--bz-ocean); --bz-tint: var(--bz-ocean-tint); --bz-line: var(--bz-ocean-line);
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px; border-radius: 999px;
+    font-weight: 650; text-decoration: none; color: var(--bz-tone); background: var(--bz-tint); border: 1px solid var(--bz-line);
+    box-shadow: none; transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.xd-actions .btn { height: 22px; padding: 0 9px; }
+.xd-actions .btn.icon { width: 24px; padding: 0; }
+.btn.bz-act svg, .xd-actions .btn svg { width: 12px; height: 12px; color: currentColor; }
+.btn.bz-act:hover, .xd-actions .btn:hover {
+    color: #fff; background: var(--bz-tone); border-color: var(--bz-tone);
+    box-shadow: 0 3px 8px color-mix(in srgb, var(--bz-tone) 32%, transparent); transform: translateY(-1px);
+}
+.btn.bz-act:active, .xd-actions .btn:active { transform: none; box-shadow: none; }
+.btn.bz-act:focus-visible, .xd-actions .btn:focus-visible { outline: 2px solid var(--bz-tone); outline-offset: 2px; }
+.btn.bz-edit, .xd-actions .btn.primary {
+    color: #fff; background: linear-gradient(180deg, #1882c4, #0b6aa6); border-color: #0a5f96;
+    box-shadow: 0 1px 2px rgba(10, 46, 79, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.btn.bz-edit:hover, .xd-actions .btn.primary:hover { background: linear-gradient(180deg, #1d8fd6, #0b72b3); }
+.btn.bz-manage, .xd-actions [data-xp-action="refund"] { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
+.btn.bz-reverse, .xd-actions [data-xp-action="reverse"] { --bz-tone: var(--bz-gold); --bz-tint: var(--bz-gold-tint); --bz-line: var(--bz-gold-line); }
+.xd-actions [data-xp-action="paid-for"] { --bz-tone: var(--bz-violet); --bz-tint: var(--bz-violet-tint); --bz-line: var(--bz-violet-line); }
+.btn.bz-delete, .xd-actions [data-xp-action="delete"] { --bz-tone: var(--bz-red); --bz-tint: var(--bz-red-tint); --bz-line: var(--bz-red-line); }
+.btn.bz-close { width: 24px; height: 24px; padding: 0; border-radius: 50%; color: var(--text-secondary); }
+.btn.bz-close:hover { color: var(--bz-value); background: rgba(10, 79, 128, 0.1); }
+.ed-bar .btn.sm.bz-act, .ed-bar .btn.sm.bz-close { height: 24px; }
+
+/* ===================================================================== an entry of money lent or borrowed, all of it
+   (entry-inline.js): this entry beside where the item stands, then its lifecycle across the width */
+.entry-detail.bz-claim { gap: 8px; padding-bottom: 8px; }
+.bz-claim .ce-main { align-items: center; }
+.bz-claim .ce-main .row b.mono { color: var(--bz-value); font-size: 13px; }
+.bz-claim-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 8px; }
+.bz-claim-card { display: grid; gap: 6px; align-content: start; min-width: 0; padding: 7px 10px 8px; border: 1px solid var(--bz-line); border-radius: 9px; }
+.bz-claim-card.bz-wide { grid-column: 1 / -1; }
+.bz-card-head { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--bz-tone); }
+.bz-card-head svg { width: 12px; height: 12px; }
+.bz-card-head b { font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--bz-value); }
+.bz-claim-card .cc-figs { gap: 6px 18px; }
+.bz-claim-card .cc-fig small { color: #5f7488; }
+.bz-claim-card .cc-fig b { color: var(--bz-value); }
+.bz-claim-card .timeline { max-height: none; }
+@media (max-width: 860px) {
+    .bz-claim-grid { grid-template-columns: minmax(0, 1fr); }
+    .bz-acts { margin-left: 0; }
+}
+
+/* ===================================================================== progress: fills in, then a soft sheen runs over it */
+:is(.progress > span, .xd-bar em, .progress-mini i, .grp-bar i, .h-meter i, .xs-bar em, .cs-bar em, .cr-bar em, .in-bar em,
+    .cg-bar em, .ck-bar em, .co-ybar i, .xr-bar em, .bn-bar em, .onc-bar em, .ov-meter em, .payout-meter em, .cd-bar i,
+    .ca-spot-meter em, .hc-alloc-bar em, .hc-lg-bar em, .cn-bar em, .bar-fill, .co-bar em, .cat-bar .bar-fill) {
+    transform-origin: left center;
+    animation: bz-grow 0.75s var(--ease-out) 0.1s backwards;
+}
+/* bars made of several parts wipe in together */
+:is(.split-bar, .age-bar, .ef-bar, .gp-bar, .mix-bar, .eq-bar, .ca-spotbar) { animation: bz-wipe 0.8s var(--ease-out) 0.1s backwards; }
+.ba-bar i { transform-origin: 50% 100%; animation: bz-rise-bar 0.7s var(--ease-out) backwards; }
+.ba-bar:nth-child(2) i { animation-delay: 0.04s; } .ba-bar:nth-child(3) i { animation-delay: 0.08s; }
+.ba-bar:nth-child(4) i { animation-delay: 0.12s; } .ba-bar:nth-child(n + 5) i { animation-delay: 0.16s; }
+
+:is(.progress > span, .xd-bar em, .progress-mini i, .grp-bar i, .h-meter i, .xs-bar em, .cs-bar em, .cr-bar em, .in-bar em,
+    .cg-bar em, .ck-bar em, .xr-bar em, .bn-bar em, .onc-bar em, .ov-meter em, .payout-meter em, .ca-spot-meter em,
+    .hc-lg-bar em, .cn-bar em) { position: relative; overflow: hidden; }
+:is(.bar-fill, .co-bar em) { overflow: hidden; }
+:is(.progress > span, .xd-bar em, .progress-mini i, .grp-bar i, .h-meter i, .xs-bar em, .cs-bar em, .cr-bar em, .in-bar em,
+    .cg-bar em, .ck-bar em, .xr-bar em, .bn-bar em, .onc-bar em, .ov-meter em, .payout-meter em, .ca-spot-meter em,
+    .hc-lg-bar em, .cn-bar em, .bar-fill, .co-bar em)::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(100deg, transparent 0 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65% 100%) -150% 0 / 60% 100% no-repeat;
+    animation: bz-sheen 3.4s ease-in-out 1s infinite;
+}
+
+/* ===================================================================== charts (core/charts.js)
+   On a chart's first drawing (svg.enter; a redraw on resize does not animate): the grid and labels fade in, bars grow
+   from the baseline one after another, lines draw themselves, areas rise under them, donut slices sweep in. Then it
+   stays live: the latest point of each line breathes, and the bar or slice under the pointer lifts. */
+.chart svg.enter .grid-line, .chart svg.enter text { animation: bz-fade 0.5s ease-out backwards; }
+.chart svg.enter .bar {
+    transform-box: fill-box; transform-origin: 50% 100%;
+    animation: bz-bar 0.7s var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 30) * 24ms + 0.08s);
+}
+.chart svg.enter .bar.neg { transform-origin: 50% 0; }
+.chart .bar { transition: opacity 0.15s, filter 0.15s; }
+.chart .bar.hover { filter: brightness(1.08) drop-shadow(0 2px 3px rgba(10, 46, 79, 0.25)); }
+.chart svg.enter .line:not(.dashed) { stroke-dasharray: 1; animation: bz-draw 1.2s var(--ease-out) backwards; animation-delay: calc(var(--k, 0) * 0.12s + 0.1s); }
+.chart svg.enter .line.dashed { animation: bz-fade 0.8s ease-out 0.5s backwards; }
+.chart svg.enter .area { transform-box: fill-box; transform-origin: 50% 100%; animation: bz-area 0.9s var(--ease-out) 0.35s backwards; }
+.chart .end-dot { transform-box: fill-box; transform-origin: center; animation: bz-breathe 2.4s ease-in-out 1.4s infinite; }
+.chart svg.enter .end-dot {
+    animation: bz-pop 0.4s var(--ease-spring) backwards, bz-breathe 2.4s ease-in-out 1.6s infinite;
+    animation-delay: calc(var(--k, 0) * 0.12s + 1s), calc(var(--k, 0) * 0.12s + 1.6s);
+}
+.chart svg.enter .arc { animation: bz-arc 0.7s var(--ease-out) backwards; animation-delay: calc(var(--k, 0) * 70ms); }
+.chart .arc { transition: transform 0.2s var(--ease-out), opacity 0.15s, filter 0.2s; }
+.chart .arc.hover { transform: scale(1.04); filter: drop-shadow(0 3px 6px rgba(10, 46, 79, 0.25)); }
+.chart svg.enter .center-value, .chart svg.enter .center-label { animation: bz-rise 0.5s var(--ease-out) 0.45s backwards; }
+.chart .hover-dots circle { transform-box: fill-box; transform-origin: center; animation: bz-pop 0.2s var(--ease-out); }
+svg.sparkline .line { stroke-dasharray: 1; animation: bz-draw 0.9s var(--ease-out) backwards; }
+
+/* ===================================================================== lifecycles
+   Told in order: each step settles in turn (--d), its dot takes its state (a done step fills, its tick pops), then
+   the link down to the next step draws in that state's colour; the current step rings. */
+.timeline > li { --d: 0s; animation: bz-rise 0.3s var(--ease-out) var(--d) backwards; }
+.timeline > li:nth-child(2) { --d: 0.14s; }
+.timeline > li:nth-child(3) { --d: 0.28s; }
+.timeline > li:nth-child(4) { --d: 0.42s; }
+.timeline > li:nth-child(5) { --d: 0.56s; }
+.timeline > li:nth-child(6) { --d: 0.7s; }
+.timeline > li:nth-child(7) { --d: 0.84s; }
+.timeline > li:nth-child(n + 8) { --d: 0.98s; }
+.timeline::before { background: rgba(16, 66, 104, 0.1); }
+.timeline > li:not(:last-child)::after {
+    content: ""; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; border-radius: 2px;
+    background: var(--tl-link, var(--ocean-400)); transform-origin: top;
+    animation: bz-link 0.32s var(--ease-out) calc(var(--d) + 0.2s) backwards;
+}
+.timeline > li.tl-done, .timeline > li.tl-in { --tl-link: #13a89a; }
+.timeline > li.tl-out { --tl-link: #8a7ff0; }
+.timeline > li.tl-late { --tl-link: var(--status-critical); }
+.timeline > li.tl-current, .timeline > li.tl-due, .timeline > li.tl-gray, .timeline > li.tl-more {
+    --tl-link: repeating-linear-gradient(180deg, rgba(16, 66, 104, 0.3) 0 3px, transparent 3px 6px);
+}
+.tl-dot { box-shadow: 0 0 0 2px #fff; }
+.timeline > li > .tl-dot { animation: bz-dot 0.35s var(--ease-spring) calc(var(--d) + 0.05s) backwards; }
+.tl-done .tl-dot { background: linear-gradient(180deg, #2fd0bf, #10a596); border-color: #10a596; }
+.timeline > li.tl-done > .tl-dot svg { animation: bz-pop 0.3s var(--ease-spring) calc(var(--d) + 0.3s) backwards; }
+.timeline > li > .tl-body { border-radius: 6px; transition: background 0.15s; }
+.timeline > li:hover > .tl-body { background: rgba(11, 106, 166, 0.05); }
+.timeline li.tl-current > .tl-dot::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none;
+    border: 2px solid #f2c94c; animation: bz-ring 1.8s ease-out calc(var(--d) + 0.4s) infinite backwards;
+}
+.timeline .tl-sub { animation: bz-reveal 0.22s var(--ease-out); }
+
+/* a dated lifecycle (claim-panel.js), alive up to where the item stands: the steps that happened light up one after
+   the other with a glint running down the line between them, again and again, and stop at the latest one (now),
+   which keeps pulsing; what is still to come stays dashed and quiet. */
+.timeline.dated { --tl-step: 0.42s; --tl-cycle: calc(var(--n, 1) * var(--tl-step) + 1.4s); }
+.timeline.dated > li:not(:last-child)::after { left: calc(var(--tl-w) + 16px); }
+.timeline.dated > li.tl-past { --tl-solid: #2f86c4; }
+.timeline.dated > li.tl-past.tl-in, .timeline.dated > li.tl-past.tl-done { --tl-solid: #13a89a; }
+.timeline.dated > li.tl-past.tl-out { --tl-solid: #8a7ff0; }
+.timeline.dated > li.tl-past:not(:last-child)::after {
+    background: linear-gradient(180deg, transparent 0, rgba(255, 255, 255, 0.95) 50%, transparent 100%) 0 -24px / 100% 24px no-repeat, var(--tl-solid);
+    animation: bz-link 0.32s var(--ease-out) calc(var(--d) + 0.2s) backwards, bz-glint var(--tl-cycle) linear calc(var(--i, 0) * var(--tl-step)) infinite;
+}
+.timeline.dated > li.tl-now:not(:last-child)::after,
+.timeline.dated > li.tl-ahead:not(:last-child)::after {
+    background: repeating-linear-gradient(180deg, #cbd5e1 0 3px, transparent 3px 6px);
+}
+.timeline.dated > li.tl-past > .tl-dot {
+    animation: bz-dot 0.35s var(--ease-spring) calc(var(--d) + 0.05s) backwards, bz-light var(--tl-cycle) ease-out calc(var(--i, 0) * var(--tl-step)) infinite;
+}
+.timeline.dated > li.tl-now > .tl-dot { position: relative; z-index: 1; animation: bz-now 1.8s ease-out calc(var(--i, 0) * var(--tl-step)) infinite; }
+.timeline.dated > li.tl-now.tl-late > .tl-dot { animation-name: bz-now-late; }
+.timeline.dated > li.tl-ahead > .tl-dot { opacity: 0.75; }
+.timeline.dated > li.tl-ahead > .tl-body { color: var(--text-muted); }
+
+/* EMI schedule: rows settle in order, the next one to pay glows */
+.emi-sched tbody tr { animation: bz-rise 0.28s var(--ease-out) backwards; }
+.emi-sched tbody tr:nth-child(2) { animation-delay: 0.03s; } .emi-sched tbody tr:nth-child(3) { animation-delay: 0.06s; }
+.emi-sched tbody tr:nth-child(4) { animation-delay: 0.09s; } .emi-sched tbody tr:nth-child(5) { animation-delay: 0.12s; }
+.emi-sched tbody tr:nth-child(6) { animation-delay: 0.15s; } .emi-sched tbody tr:nth-child(n + 7) { animation-delay: 0.18s; }
+.emi-sched tr.emi-next td { animation: bz-arrive 2s ease-out 0.4s infinite; }
+
+/* ===================================================================== keyframes */
+@keyframes bz-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bz-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes bz-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes bz-pop { 0% { opacity: 0; transform: scale(0.4); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes bz-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes bz-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes bz-rise-bar { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes bz-sheen { 0% { background-position: -150% 0; } 45%, 100% { background-position: 250% 0; } }
+@keyframes bz-bar { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes bz-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes bz-area { from { opacity: 0; transform: scaleY(0.4); } to { opacity: 1; transform: scaleY(1); } }
+@keyframes bz-arc { from { opacity: 0; transform: rotate(-24deg) scale(0.8); } to { opacity: 1; transform: none; } }
+@keyframes bz-breathe {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(11, 139, 208, 0)); }
+    50% { transform: scale(1.3); filter: drop-shadow(0 0 4px rgba(11, 139, 208, 0.6)); }
+}
+@keyframes bz-link { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes bz-dot { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+@keyframes bz-ring { 0% { opacity: 0.9; transform: scale(0.85); } 100% { opacity: 0; transform: scale(1.7); } }
+@keyframes bz-glint { 0% { background-position: 0 -24px, 0 0; } 22%, 100% { background-position: 0 calc(100% + 24px), 0 0; } }
+@keyframes bz-light {
+    0% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(47, 134, 196, 0.45); transform: scale(1); }
+    8% { transform: scale(1.12); }
+    20%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 7px rgba(47, 134, 196, 0); transform: scale(1); }
+}
+@keyframes bz-now { 0% { box-shadow: 0 0 0 2px #fff, 0 0 0 0 rgba(20, 163, 139, 0.5); } 70%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 9px rgba(20, 163, 139, 0); } }
+@keyframes bz-now-late { 0% { box-shadow: 0 0 0 2px #fff, 0 0 0 0 rgba(226, 86, 106, 0.55); } 70%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 9px rgba(226, 86, 106, 0); } }
+@keyframes bz-arrive { 0% { box-shadow: inset 0 0 0 1px #f2c94c, inset 0 0 0 0 rgba(242, 201, 76, 0.35); } 60%, 100% { box-shadow: inset 0 0 0 1px #f2c94c, inset 0 0 0 6px rgba(242, 201, 76, 0); } }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+}

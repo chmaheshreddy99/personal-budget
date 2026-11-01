@@ -27,3 +27,4 @@
 .cr-paid b { display: block; font-size: 13px; margin-bottom: 6px; }
 .cr-paid dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; } .cr-paid dt { color: #5f6b77; } .cr-paid dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 .cr-paid small { display: block; margin-top: 6px; color: #5f6b77; font-size: 12px; }
+.cr-qr-h { margin: 14px 0 0; font-size: 14px; color: var(--ocean-900); }

@@ -93,7 +93,7 @@ public class DemoDataGenerator {
         long groceries = expense("Groceries");
         long utilities = expense("Utilities");
         long mobile = expense("Mobile & Internet");
-        long fuel = expense("Fuel & Transport");
+        long fuel = expense("Fuel");
         long dining = expense("Dining Out");
         long medical = expense("Medical & Health");
         long education = expense("Education");

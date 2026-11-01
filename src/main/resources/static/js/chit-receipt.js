@@ -11,6 +11,7 @@
 import { trackedFetch } from './core/busy.js';
 import { printBond, signaturePad, signatureSvg, deviceInfo, locate, openCamera, verifyEvidence, bondHtml, addEvidenceButton } from './core/bond.js';
 import { receiptDeed } from './core/receipt-deed.js';
+import { receiptCodes, codesHtml } from './core/receipt-qr.js';
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -45,11 +46,13 @@ function draw() {
     if (r.step === 'VERIFY') { main.innerHTML = gateHtml(); bindGate(); return; }
     main.innerHTML = r.step === 'OPEN' ? openHtml() : r.step === 'DISPUTED' ? disputedHtml() : doneHtml();
     if (r.step === 'OPEN') bindOpen(); else if (r.step === 'DONE') checkSignature();
-    $('cr-print')?.addEventListener('click', () => printBond(receiptDeed(r), `Acknowledgement ${r.ackNo}`));
-    $('cr-preview')?.addEventListener('click', () => {
+    const codes = r.step === 'DONE' ? receiptCodes(r).catch(() => null) : Promise.resolve(null);
+    codes.then(c => { if ($('cr-qr') && c) $('cr-qr').innerHTML = `<h3 class="cr-qr-h">Check it later with a phone</h3>${codesHtml(c)}`; });
+    $('cr-print')?.addEventListener('click', async () => printBond(receiptDeed(r, { codes: await codes }), `Acknowledgement ${r.ackNo}`));
+    $('cr-preview')?.addEventListener('click', async () => {
         const box = $('cr-deed');
         box.hidden = !box.hidden;
-        if (!box.hidden) box.innerHTML = bondHtml(receiptDeed(r));
+        if (!box.hidden) box.innerHTML = bondHtml(receiptDeed(r, { codes: await codes }));
     });
 }
 
@@ -262,6 +265,7 @@ function doneHtml() {
             ${r.acknowledgementSeal ? `<small>Seal (SHA-256) <code>${esc(r.acknowledgementSeal)}</code></small>` : ''}
             ${r.digitalSignature ? '<div class="cs-sig-status wait" id="cr-sig"><b>Checking the digital signature…</b></div>' : ''}</div>
         <div class="cs-terms">${esc(r.terms)}</div>
+        <div id="cr-qr"></div>
         <div class="cs-print-row"><button type="button" class="cs-print" id="cr-preview">See it as a document</button><button type="button" class="cs-print" id="cr-print">Print view (A4)</button></div>
         <div id="cr-deed" class="bond-preview" hidden></div>
         <p class="cs-hash">Fingerprint of this acknowledgement (SHA-256) <code>${esc(r.contentHash)}</code></p>

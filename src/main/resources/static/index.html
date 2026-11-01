@@ -27,13 +27,17 @@
     <link rel="stylesheet" href="css/busy.css">
     <!-- the Ocean theme (Settings → Appearance): rich open rows, brand polish and light motion; overrides only -->
     <link rel="stylesheet" href="css/polish.css" id="theme-ocean">
+    <!-- the Breeze theme: Classic with bolder headers, thin colours in an open expense and live motion; overrides only -->
+    <link rel="stylesheet" href="css/breeze.css" id="theme-breeze">
     <script>
-        // apply the chosen theme before the first paint (js/core/theme.js): Classic unless Ocean was picked
+        // apply the chosen theme before the first paint (js/core/theme.js): Classic unless Ocean or Breeze was picked
         (function () {
             var theme = 'classic';
-            try { theme = (JSON.parse(localStorage.getItem('pb.look') || '{}') || {}).theme === 'ocean' ? 'ocean' : 'classic'; } catch (e) { /* storage blocked */ }
+            try { theme = (JSON.parse(localStorage.getItem('pb.look') || '{}') || {}).theme; } catch (e) { /* storage blocked */ }
+            if (theme !== 'ocean' && theme !== 'breeze') theme = 'classic';
             document.documentElement.dataset.theme = theme;
             document.getElementById('theme-ocean').disabled = theme !== 'ocean';
+            document.getElementById('theme-breeze').disabled = theme !== 'breeze';
         })();
     </script>
 </head>

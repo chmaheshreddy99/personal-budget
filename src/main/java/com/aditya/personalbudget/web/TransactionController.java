@@ -33,8 +33,10 @@ import java.util.List;
 public class TransactionController {
 
     private final TransactionService transactions;
+    private final com.aditya.personalbudget.service.EntryInsightService insights;
 
-    public TransactionController(TransactionService transactions) {
+    public TransactionController(TransactionService transactions, com.aditya.personalbudget.service.EntryInsightService insights) {
+        this.insights = insights;
         this.transactions = transactions;
     }
 
@@ -54,6 +56,13 @@ public class TransactionController {
     @RequiresPermission(Permission.VIEW)
     public EntryView get(@PathVariable Long id) {
         return transactions.get(id);
+    }
+
+    /** What the entry means beyond its lines: its categories' month and budget, whether it repeats, a possible duplicate. */
+    @GetMapping("/{id}/insights")
+    @RequiresPermission(Permission.VIEW)
+    public com.aditya.personalbudget.service.EntryInsightService.EntryInsights insights(@PathVariable Long id) {
+        return insights.insights(id);
     }
 
     @PostMapping("/quick")

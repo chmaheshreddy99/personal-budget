@@ -103,7 +103,7 @@ export function claimPanelHtml(c, { evidence = true, readOnly = false, highlight
         </div>
         ${open ? payableHtml(c) : ''}
 
-        <div class="claim-body">
+        <div class="claim-body ${open ? '' : 'is-closed'}">
             <div class="claim-timeline">
                 <div class="section-title">${icon('history')} Lifecycle</div>
                 ${timelineHtml(c)}
@@ -113,8 +113,7 @@ export function claimPanelHtml(c, { evidence = true, readOnly = false, highlight
             <div class="claim-side">
                 ${c.interestRate ? postingHtml(c, manage) : ''}
                 ${open && manage ? repayFormHtml(c) : ''}
-                ${!open ? `<div class="claim-done">${icon('check-circle')}<div><b>${c.status === 'WRITTEN_OFF' ? 'Closed with a write-off' : 'Fully settled'}</b>
-                    <div class="small muted">${c.repayments.length} payment${c.repayments.length === 1 ? '' : 's'} · ${c.daysOutstanding} days from start to finish${Number(c.interestReceived) ? ` · interest earned ${money(c.interestReceived)}` : ''}</div></div></div>` : ''}
+                ${!open ? closedHtml(c, meta) : ''}
             </div>
         </div>
         ${c.schedule.length ? scheduleHtml(c) : ''}
@@ -304,6 +303,15 @@ function postingHtml(c, manage) {
 const postingLabel = p => p.firstPeriod && p.firstPeriod < p.periodNo ? `Months ${p.firstPeriod}–${p.periodNo}` : `Month ${p.periodNo}`;
 
 /**
+ * The item's lifecycle on its own, read-only, with one entry marked (an open journal entry in Breeze). The folds
+ * ([data-tl-more], [data-tl-toggle]) are for the host to open.
+ */
+export function claimLifecycleHtml(c, highlight = null) {
+    opts = { manage: false, highlight: highlight === null ? null : Number(highlight) };
+    return timelineHtml(c);
+}
+
+/**
  * The lifecycle, kept short: consecutive "interest posted" months fold into one line (click to unfold),
  * and a long history shows its first event and the latest four, with the rest one click away.
  */
@@ -316,41 +324,92 @@ function timelineHtml(c) {
         else items.push(e);
     }
     const hit = e => opts.highlight !== null && e.journalEntryId === opts.highlight;
-    const html = items.map(it => {
-        if (!it.group) return eventHtml(it);
-        if (it.events.length === 1) return eventHtml(it.events[0]);
+    // where the item stands: the steps that happened, the latest of them (now), and what is still to come
+    const happened = it => !['DUE', 'OVERDUE'].includes((it.group ? it.events[0] : it).type);
+    const nowAt = items.reduce((at, it, i) => (happened(it) ? i : at), -1);
+    const stateOf = i => (i < nowAt ? 'tl-past' : i === nowAt ? 'tl-now' : 'tl-ahead');
+    const step = i => `style="--i:${Math.max(0, Math.min(i, nowAt))}"`;
+    const html = items.map((it, i) => {
+        if (!it.group) return eventHtml(it, stateOf(i), step(i));
+        if (it.events.length === 1) return eventHtml(it.events[0], stateOf(i), step(i));
         const total = it.events.reduce((s, e) => s + Number(e.amount || 0), 0);
         const first = it.events[0], last = it.events[it.events.length - 1];
         const open = it.events.some(hit);   // the month being looked at: unfolded and marked
-        return `<li class="tl-due tl-group ${open ? 'tl-current' : ''}" data-tl-toggle>
+        return `<li class="tl-due tl-group ${stateOf(i)} ${open ? 'tl-current' : ''}" ${step(i)} data-tl-toggle>
+            <span class="tl-when">${shortDate(first.date)}<small>to ${shortDate(last.date)}</small></span>
             <span class="tl-dot">${icon('percent')}</span>
-            <div class="tl-body"><div class="row"><b>${esc(first.title)} · ${it.events.length} months</b><b class="mono">${money(total)}</b>
-                <span class="spacer"></span><span class="small muted">${shortDate(first.date)} – ${shortDate(last.date)}</span></div>
+            <div class="tl-body"><div class="row"><b>${esc(first.title)} · ${it.events.length} months</b><b class="mono">${money(total)}</b></div>
                 <div class="small muted">${esc(first.detail.split(' · ')[0])} to ${esc(last.detail.split(' · ')[0]).toLowerCase()} · <span class="link-btn">${open ? 'hide months' : 'show months'}</span></div>
                 <ol class="tl-sub" ${open ? '' : 'hidden'}>${it.events.map(e => `<li class="${hit(e) ? 'current' : ''}"><span>${esc(e.detail)}</span><span class="small muted">${shortDate(e.date)}</span><b class="mono">${money(e.amount)}</b></li>`).join('')}</ol>
             </div></li>`;
     });
     const long = html.length > 6 && !c.timeline.some(hit);   // never hide the entry being looked at
     const hidden = long ? html.slice(1, html.length - 4) : [];
-    return `<ol class="timeline ${long ? 'compact' : ''}">
-        ${long ? `${html[0]}<li class="tl-more" data-tl-more><span class="tl-dot">${icon('more')}</span>
+    return `<ol class="timeline dated ${long ? 'compact' : ''}" style="--n:${nowAt + 1}">
+        ${long ? `${html[0]}<li class="tl-more tl-past" data-tl-more><span class="tl-when"></span><span class="tl-dot">${icon('more')}</span>
             <div class="tl-body"><span class="link-btn">${hidden.length} earlier event${hidden.length === 1 ? '' : 's'}</span></div></li>
             <div class="tl-hidden" hidden>${hidden.join('')}</div>${html.slice(-4).join('')}` : html.join('')}
     </ol>`;
 }
 
-function eventHtml(e) {
+/** One step of the lifecycle: its date in the first column, its mark, what happened; state: tl-past, tl-now or tl-ahead. */
+function eventHtml(e, state = '', step = '') {
     const tone = { CREATED: 'out', REPAID: 'in', WRITTEN_OFF: 'gray', SETTLED: 'done', DUE: 'due', OVERDUE: 'late', INTEREST_POSTED: 'due' }[e.type] || '';
     const ico = { CREATED: 'arrow-out', REPAID: 'arrow-in', WRITTEN_OFF: 'x', SETTLED: 'check', DUE: 'calendar', OVERDUE: 'alert', INTEREST_POSTED: 'percent' }[e.type] || 'info';
     const current = opts.highlight !== null && e.journalEntryId === opts.highlight;
-    return `<li class="tl-${tone} ${current ? 'tl-current' : ''}">
+    const d = e.date ? new Date(String(e.date).slice(0, 10) + 'T00:00:00') : null;
+    return `<li class="tl-${tone} ${state} ${current ? 'tl-current' : ''}" ${step}>
+        <span class="tl-when">${d ? `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}<small>${d.getFullYear()}</small>` : ''}</span>
         <span class="tl-dot">${icon(ico)}</span>
-        <div class="tl-body"><div class="row"><b>${esc(e.title)}</b>${e.amount !== null && e.amount !== undefined ? `<b class="mono">${money(e.amount)}</b>` : ''}
-            <span class="spacer"></span><span class="small muted">${date(e.date)}</span></div>
+        <div class="tl-body"><div class="row"><b>${esc(e.title)}</b>${e.amount !== null && e.amount !== undefined ? `<b class="mono">${money(e.amount)}</b>` : ''}</div>
             <div class="small muted">${esc(e.detail || '')}</div></div>
         ${opts.manage && (e.type === 'REPAID' || e.type === 'WRITTEN_OFF') ? `<button type="button" class="btn ghost icon sm" title="Undo this ${e.type === 'REPAID' ? 'repayment' : 'write-off'}"
             data-claim-action="undo" data-entry="${e.journalEntryId}">${icon('undo')}</button>` : ''}
     </li>`;
+}
+
+/**
+ * A closed item, on the whole side: how it ended (settled or written off, in how many days, against the due date), the
+ * figures (given, back, interest, payments), each payment's share of what came back as one bar, and the payments.
+ */
+function closedHtml(c, meta) {
+    const writeOff = c.status === 'WRITTEN_OFF';
+    const pays = c.repayments.filter(r => !r.writeOff);
+    const off = c.repayments.filter(r => r.writeOff).reduce((s, r) => s + Number(r.total), 0);
+    const back = pays.reduce((s, r) => s + Number(r.total), 0);
+    const interest = Number(c.interestReceived || 0);
+    const days = Number(c.daysOutstanding || 0);
+    const end = c.lastPaymentDate || c.repayments[c.repayments.length - 1]?.paidDate;
+    const lateBy = c.dueDate && end ? Math.round((new Date(end + 'T00:00:00') - new Date(c.dueDate + 'T00:00:00')) / 86400000) : null;
+    const timing = lateBy === null ? ['muted', 'No due date was set']
+        : lateBy > 0 ? ['neg', `${lateBy} day${lateBy === 1 ? '' : 's'} after the due date`]
+        : lateBy === 0 ? ['pos', 'On the due date'] : ['pos', `${-lateBy} day${lateBy === -1 ? '' : 's'} before the due date`];
+    const yearly = interest > 0 && days > 0 ? (interest / Number(c.amount)) * (365 / days) * 100 : null;
+    const shades = ['#2f86c4', '#13a89a', '#7dbbe6', '#5b7fd6', '#4fc3b4', '#0b6aa6', '#8fb3d1'];
+    const kpi = (label, value, sub = '', tone = '') => `<div class="cd-kpi"><small>${label}</small><b class="${tone}">${value}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
+    return `
+    <section class="claim-closed ${writeOff ? 'is-off' : ''}">
+        <div class="cd-head">
+            <span class="cd-mark">${icon(writeOff ? 'x' : 'check')}</span>
+            <div class="grow min-0"><b>${writeOff ? 'Closed with a write-off' : 'Fully settled'}</b>
+                <small>${days ? `in ${days} day${days === 1 ? '' : 's'} · ` : ''}${date(c.startDate)} → ${end ? date(end) : '—'}</small></div>
+            <span class="cd-timing ${timing[0]}">${timing[1]}</span>
+        </div>
+        <div class="cd-kpis">
+            ${kpi(meta.given, money(c.amount), shortDateYear(c.startDate))}
+            ${kpi(meta.payable ? 'Paid back' : 'Got back', money(back), `${pays.length} payment${pays.length === 1 ? '' : 's'}`, 'pos')}
+            ${kpi('Interest', money(interest), yearly ? `about ${yearly.toFixed(1)}% a year` : 'none charged')}
+            ${off ? kpi(meta.payable ? 'Waived' : 'Written off', money(off), 'not recovered', 'neg') : kpi('Average payment', pays.length ? money(Math.round(back / pays.length)) : '—', pays.length > 1 ? `largest ${money(Math.max(...pays.map(r => Number(r.total))))}` : '')}
+        </div>
+        ${c.repayments.length ? `<div class="cd-bar" role="img" aria-label="Each payment's share">${c.repayments.map((r, i) => `<i style="width:${(Number(r.total) / ((back + off) || 1)) * 100}%;background:${r.writeOff ? 'repeating-linear-gradient(135deg,#e2566a 0 4px,#f6c7cd 4px 8px)' : shades[i % shades.length]}"
+            title="${esc(`${date(r.paidDate)} · ${money(r.total)}${r.writeOff ? ' written off' : ''}`)}"></i>`).join('')}</div>
+        <table class="cd-pays"><thead><tr><th>Date</th><th>${meta.payable ? 'Paid' : 'Received'}</th><th>Principal · interest</th><th class="r">Left after</th></tr></thead>
+            <tbody>${c.repayments.map((r, i) => `<tr class="${r.writeOff ? 'off' : ''}">
+                <td><i class="cd-sw" style="background:${r.writeOff ? '#e2566a' : shades[i % shades.length]}"></i>${date(r.paidDate)}</td>
+                <td><b class="mono">${money(r.total)}</b>${r.writeOff ? ' <span class="tag">write-off</span>' : ''}<small>${esc(r.accountName || '')}</small></td>
+                <td class="small">${money(r.principal)}${Number(r.interest) ? ` · ${money(r.interest)}` : ''}</td>
+                <td class="r mono">${Number(r.outstandingAfter) ? money(r.outstandingAfter) : '<span class="pos">cleared</span>'}</td></tr>`).join('')}</tbody></table>` : ''}
+    </section>`;
 }
 
 /** A short, polite reminder: amount, interest if any, and the due date. */

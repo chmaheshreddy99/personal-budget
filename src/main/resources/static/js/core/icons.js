@@ -95,7 +95,21 @@ const PATHS = {
     cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.5L22 8H6"/>',
     /** A meal card: a card with a fork and spoon on it. */
     'meal-card': '<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 9.5h20"/><path d="M8 12.5v4M6.8 12.5v1.6a1.2 1.2 0 0 0 2.4 0v-1.6"/><path d="M12.5 16.5v-4m0 0c1.2 0 1.6.9 1.6 1.6s-.4 1.4-1.6 1.4"/><path d="M16.5 13h2.5M16.5 15.5h1.6"/>',
-    /** Meat, fish & eggs: a drumstick, with a small fish. */
+    /** Eggs: an egg with a gloss on its side. */
+    egg: '<path d="M12 3c-3.6 0-6.5 5.3-6.5 9.6A6.5 6.5 0 0 0 12 21a6.5 6.5 0 0 0 6.5-6.4C18.5 8.3 15.6 3 12 3z"/><path d="M9.3 14.4a2.9 2.9 0 0 0 2.3 2.7"/>',
+    /** Fruits: an apple with its stalk and a leaf. */
+    apple: '<path d="M12 7.6c-1.6-1.2-4.6-1.5-6.3.6-2.1 2.6-1.3 7.6 1.2 10.6 1.4 1.7 2.9 2.3 4.3 1.6.5-.2 1.1-.2 1.6 0 1.4.7 2.9.1 4.3-1.6 2.5-3 3.3-8 1.2-10.6-1.7-2.1-4.7-1.8-6.3-.6z"/><path d="M12 7.6c0-2 .7-3.6 2.3-4.6"/><path d="M12.8 5.4c1.3-.4 2.7 0 3.5.9-1.3.5-2.6.3-3.5-.9z"/>',
+    /** Dry fruits: an almond with its seam. */
+    nut: '<path d="M12 2.8c3.4 2.4 5.6 6.5 5.6 10.4 0 4.3-2.5 7.8-5.6 7.8s-5.6-3.5-5.6-7.8c0-3.9 2.2-8 5.6-10.4z"/><path d="M12 6.6c-1 2.7-1.2 6.5 0 10.4"/>',
+    /** Vegetables: a carrot with its greens. */
+    carrot: '<path d="M2.5 21.5s8.6-2.7 12.1-6.2a4.3 4.3 0 0 0-6-6C5.2 12.9 2.5 21.5 2.5 21.5z"/><path d="m8.6 15.4-2-2M11.4 13.1l-1.5-1.5"/><path d="M15 9c.7-1.9 2.4-3.4 4.6-3.6M15 9c1.9-.7 3.4-2.4 3.6-4.6M15 9l4.5-4.5"/>',
+    /** Millets: a stalk of grain, the seeds on both sides. */
+    grain: '<path d="M12 22V8"/><path d="M12 8c0-2.2 1.2-4 2.8-5-.2 2.3-1 4-2.8 5zM12 8c0-2.2-1.2-4-2.8-5 .2 2.3 1 4 2.8 5z"/><path d="M12 13c1.4-1.6 3.2-2.2 5-2-.9 1.7-2.8 2.6-5 2zM12 13c-1.4-1.6-3.2-2.2-5-2 .9 1.7 2.8 2.6 5 2zM12 18c1.4-1.6 3.2-2.2 5-2-.9 1.7-2.8 2.6-5 2zM12 18c-1.4-1.6-3.2-2.2-5-2 .9 1.7 2.8 2.6 5 2z"/>',
+    /** Cooking oils: a bottle with a drop on its label. */
+    oil: '<path d="M10 2h4v3l1.6 2.6V20a2 2 0 0 1-2 2h-3.2a2 2 0 0 1-2-2V7.6L10 5z"/><path d="M8.4 11h7.2"/><path d="M12 13.6c-.9 1.2-1.4 2.1-1.4 2.7a1.4 1.4 0 0 0 2.8 0c0-.6-.5-1.5-1.4-2.7z"/>',
+    /** Transportation: a bus from the front. */
+    bus: '<rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 3v8M16 3v8"/><circle cx="8" cy="14.5" r="1"/><circle cx="16" cy="14.5" r="1"/><path d="M7 18v2.5M17 18v2.5"/>',
+    /** Meat & fish: a drumstick, with a small fish. */
     meat: '<path d="M15.4 3.2a5 5 0 0 1 2.9 8.7l-2.2 2.2a4 4 0 0 1-3.3 1.1l-2.3 2.3a1.6 1.6 0 1 1-1.9 2.6 1.6 1.6 0 1 1-2.6-1.9 1.6 1.6 0 1 1 2.6-1.9l2.3-2.3a4 4 0 0 1 1.1-3.3l2.2-2.2a5 5 0 0 1 1.2-5.3z"/><path d="M14 6.5c.8-.8 2-.8 2.8 0"/>',
     /** Music & dance classes: two beamed notes and a small dancing figure. */
     'music-dance': '<path d="M9 17V5l9-2v12"/><circle cx="6.5" cy="17" r="2.5"/><circle cx="15.5" cy="15" r="2.5"/><path d="M9 9l9-2"/>',
@@ -104,7 +118,9 @@ const PATHS = {
     /** Electricity bill: a light bulb with a bolt in it. */
     electricity: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/><path d="m12.8 6.5-2.3 3.6h3l-2.3 3.4"/>',
     /** Fuel: a pump with its hose and nozzle, and a drop. */
-    'fuel-pump': '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><rect x="6.5" y="6" width="5" height="4" rx=".8"/><path d="M14 9h1.5a2 2 0 0 1 2 2v5.5a1.5 1.5 0 0 0 3 0V9.5L18 7"/><path d="M20.5 9.5V7.6L19 6"/><path d="M9 13.5c0 1-.7 1.7-1.5 1.7S6 14.5 6 13.5c0-.9 1.5-2.5 1.5-2.5s1.5 1.6 1.5 2.5z"/>',
+    'fuel-pump': '<path d="M5 21V5.5A2.5 2.5 0 0 1 7.5 3h4A2.5 2.5 0 0 1 14 5.5V21"/><path d="M3.5 21h12"/><path d="M7.5 7h4"/><path d="M9.5 12.2c-1 1.3-1.6 2.2-1.6 3a1.6 1.6 0 0 0 3.2 0c0-.8-.6-1.7-1.6-3z"/><path d="M14 10h1.2a1.8 1.8 0 0 1 1.8 1.8v4.7a1.5 1.5 0 0 0 3 0V8.2a2 2 0 0 0-.6-1.4L17.5 5"/>',
+    /** Gas cylinder (LPG): the cylinder with its collar, a band and a flame. */
+    'gas-cylinder': '<path d="M9 6V4.6A1.1 1.1 0 0 1 10.1 3.5h3.8A1.1 1.1 0 0 1 15 4.6V6"/><path d="M6.5 10.5a4.5 4.5 0 0 1 4.5-4.5h2a4.5 4.5 0 0 1 4.5 4.5V19a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2z"/><path d="M6.5 11h11"/><path d="M12 13.2c1.3 1.2 2 2.3 2 3.5a2 2 0 0 1-4 0c0-.7.3-1.3.8-1.8.2.6.5.9.9 1 0-1 .1-1.9.3-2.7z"/>',
     bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
     fuel: '<path d="M3 22V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v17"/><path d="M2 22h13"/><path d="M14 10h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/><path d="M6 8h5"/>',
@@ -179,12 +195,14 @@ export function categoryIcon(name = '') {
         [/music|dance|danc|singing|guitar|keyboard class|veena|bharatanatyam|kuchipudi/i, 'music-dance', 'violet'],
         [/office travel|business travel|work trip|official travel/i, 'office-travel', 'aqua'],
         [/electricity|power bill|current bill/i, 'electricity', 'gold'], [/^fuel$|^fuel\b(?! &)|petrol|diesel|\bcng\b/i, 'fuel-pump', 'coral'],
-        [/meat|fish|chicken|mutton|non.?veg|seafood|\beggs?\b|prawn/i, 'meat', 'red'],
+        [/\beggs?\b/i, 'egg', 'gold'], [/meat|fish|chicken|mutton|non.?veg|seafood|prawn/i, 'meat', 'red'],
+        [/millet/i, 'grain', 'gold'], [/cold.?pressed/i, 'oil', 'gold'], [/refined oil|cooking oil/i, 'oil', 'coral'], [/^transport/i, 'bus', 'aqua'],
+        [/dry ?fruit|\bnuts?\b/i, 'nut', 'gold'], [/fruit/i, 'apple', 'coral'], [/vegetable/i, 'carrot', 'aqua'],
         [/chit/i, 'chit', 'gold'], [/\btips?\b|gratuity/i, 'heart', 'coral'], [/milk|dairy/i, 'milk', 'aqua'], [/maid|household help|cook|driver/i, 'users', 'violet'],
         [/gym|fitness|yoga|\bsports?\b/i, 'dumbbell', 'coral'], [/gadget|electronic|laptop|computer/i, 'monitor', 'violet'],
-        [/vegetable|fruit/i, 'leaf', 'aqua'], [/agricult|farm|crop/i, 'leaf', 'gold'], [/food deliver|swiggy|zomato|takeaway/i, 'utensils', 'coral'],
+        [/agricult|farm|crop/i, 'leaf', 'gold'], [/food deliver|swiggy|zomato|takeaway/i, 'utensils', 'coral'],
         [/snack|beverage|tea|coffee|bakery/i, 'utensils', 'gold'], [/subscription|ott/i, 'repeat', 'violet'],
-        [/lpg|cylinder/i, 'fuel', 'gold'], [/water can|drinking water/i, 'droplet', 'aqua'], [/dth|cable/i, 'film', 'violet'],
+        [/lpg|cylinder|cooking gas/i, 'gas-cylinder', 'red'], [/water can|drinking water/i, 'droplet', 'aqua'], [/dth|cable/i, 'film', 'violet'],
         [/vehicle|car |bike/i, 'car', 'gray'], [/cab|auto|uber|ola|rapido/i, 'car', 'coral'], [/parking|toll|fastag/i, 'car', 'gray'],
         [/laundry|ironing|dry clean/i, 'sparkles', 'aqua'], [/pharmac|medicine/i, 'heart', 'red'], [/furniture|decor/i, 'home', 'gold'],
         [/festiv|pooja|puja|temple/i, 'gift', 'gold'], [/\bpets?\b|\bvet/i, 'heart', 'coral'], [/book|stationer/i, 'journal', 'gray'],

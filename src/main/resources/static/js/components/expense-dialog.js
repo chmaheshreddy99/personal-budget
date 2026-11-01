@@ -18,6 +18,9 @@
  *   openExpenseDialog({ expense, onSaved })              edit (expense = row from /api/expenses)
  *   openExpenseDialog({ expense, copy: true })           duplicate as a new expense
  *   openExpenseDialog({ claim, onSaved })                edit money lent / paid for someone
+ *   openExpenseDialog({ expense, split: true })          add items: an expense becomes (or a bill gets more) items
+ *
+ * Split into items (Expense mode): one bill paid at once, each thing bought in its own category (see bill-items.js).
  */
 import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, categoriesOf } from '../core/store.js';
@@ -29,6 +32,7 @@ import { money, moneyShort, isoDate, currencySymbol, percent, date, orgNow } fro
 import { openJournalEditor } from './transaction-forms.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
 import { addMonths, monthsBetween, emiPreviewHtml } from './emi.js';
+import { bindBillItems, billBudgetHtml, amountOnly } from './bill-items.js';
 
 /** Display order of payment accounts with equal use. Payables = "pay later" (expenses only). */
 const typeRank = a => ({ BANK: 0, CREDIT_CARD: 1, CASH: 2, WALLET: 3, PAYABLE: 4 }[a.accountType] ?? 9);
@@ -57,7 +61,7 @@ const MODES = {
     EMI: { label: 'On EMI', iconName: 'calendar', party: 'Bought from', partyHint: 'Shop (optional)' },
 };
 
-export async function openExpenseDialog({ expense = null, copy = false, claim = null, emi = null, mode = 'EXPENSE', onSaved } = {}) {
+export async function openExpenseDialog({ expense = null, copy = false, claim = null, emi = null, mode = 'EXPENSE', split = false, onSaved } = {}) {
     let saveKey = newRequestKey();   // one key per save: a retry or a second click saves once (renewed after each save)
     if (expense && !copy && expense.viaJournal) {
         // part of a manual journal voucher: edited as a full journal
@@ -91,14 +95,15 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         .sort((a, b) => (usage.credit[b.id] || 0) - (usage.credit[a.id] || 0) || typeRank(a) - typeRank(b));
     const lastPayer = history.narration?.find(s => s.voucherType === 'EXPENSE' && s.creditAccountId)?.creditAccountId;
 
+    const itemizedBill = !!expense?.itemized;
     const values = {
-        amount: emi?.principal ?? claim?.amount ?? expense?.amount ?? '',
+        amount: emi?.principal ?? claim?.amount ?? expense?.billAmount ?? expense?.amount ?? '',
         entryDate: emi?.purchaseDate ?? claim?.startDate ?? (copy ? isoDate() : expense?.date ?? isoDate()),
         narration: emi?.narration ?? claim?.narration ?? expense?.narration ?? '',
         party: emi?.party ?? claim?.party ?? expense?.party ?? '',
         reference: emi?.reference ?? claim?.reference ?? (copy ? '' : expense?.reference ?? ''),
-        notes: emi?.notes ?? claim?.notes ?? (copy ? '' : expense?.memo ?? ''),
-        categoryId: emi?.categoryId ?? expense?.categoryId ?? '',
+        notes: emi?.notes ?? claim?.notes ?? (copy ? '' : (itemizedBill ? expense.billNotes : expense?.memo) ?? ''),
+        categoryId: emi?.categoryId ?? (itemizedBill ? '' : expense?.categoryId) ?? '',
         paidFromId: emi?.payAccountId ?? claim?.paidFromAccountId ?? expense?.paidFromId ?? lastPayer ?? payers[0]?.id ?? '',
         dueDate: claim?.dueDate ?? '',
         interestRate: claim?.interestRate ?? '',
@@ -178,9 +183,12 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
             <section class="xp-right">
                 <div class="expense-only xp-cat-pick">
                     <div class="xp-section-head">
-                        <span class="section-title">${icon('tag')} Category</span>
+                        <span class="section-title">${icon('tag')} <span data-cat-head>Category</span></span>
                         <span class="xp-cat-suggest" data-cat-suggest></span>
+                        <button type="button" class="date-chip xp-split" data-split title="One payment, several things bought: each item in its own category (groceries, eggs, cosmetics …)">
+                            ${icon('split')}<span data-split-label>Split into items</span></button>
                     </div>
+                    <div class="xp-items" data-items hidden></div>
                     <div class="xp-cat-find">${icon('search')}<input class="xp-cat-search" placeholder="Find a category… Enter picks the first" data-plain data-enter-self>
                         ${categories.length > TOP_CATEGORIES ? `<button type="button" class="link-btn" data-all-cats>All ${categories.length}</button>` : ''}</div>
                     <div class="cat-grid" data-categories>${categories.map((c, i) => categoryTile(c, i >= TOP_CATEGORIES, i < 9 ? i + 1 : null)).join('')}</div>
@@ -221,15 +229,18 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         </div>
     </form>`;
 
+    let bill = null;   // the items, when the expense is split into them (bound below)
     const save = async (m, again) => {
         const form = m.el.querySelector('form');
+        const split = current === 'EXPENSE' && bill?.on ? bill.collect() : null;
+        if (split) form.amount.value = String(split.total);
         const total = evalAmount(form.amount.value);
         if (form.amount.value.trim() && total === null) { form.amount.focus(); throw new Error('The amount is not a number or a sum'); }
         if (total !== null) form.amount.value = String(total);
         const data = readForm(form);
         data.amount = total;
         if (!(total > 0)) { form.amount.focus(); throw new Error('Enter the amount'); }
-        if (current === 'EXPENSE' && !data.categoryId) { form.querySelector('.xp-cat-search')?.focus(); throw new Error('Pick a category: type its name and press Enter, or Alt+1…9'); }
+        if (current === 'EXPENSE' && !split && !data.categoryId) { form.querySelector('.xp-cat-search')?.focus(); throw new Error('Pick a category: type its name and press Enter, or Alt+1…9'); }
         if (!data.paidFromId) throw new Error('Pick the account you paid from');
         if (current !== 'EXPENSE' && current !== 'EMI' && !data.party) { form.party.focus(); throw new Error(`Enter who ${current === 'LENT' ? 'borrowed the money' : 'you paid for'}`); }
         if (current === 'EMI') {
@@ -268,17 +279,21 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
 
         let entryId;
         if (current === 'EXPENSE') {
-            const category = categories.find(c => c.id === Number(data.categoryId));
+            // a bill split into items: each in its own category (one item left is a plain expense in its category)
+            const several = split && split.items.length > 1;
+            const category = categories.find(c => c.id === Number(split ? split.items[0].categoryId : data.categoryId));
             const payload = {
-                entryDate: data.entryDate, amount: data.amount, categoryId: Number(data.categoryId),
-                paidFromId: Number(data.paidFromId), narration: data.narration || category.name,
+                entryDate: data.entryDate, amount: data.amount, categoryId: several ? null : category.id,
+                paidFromId: Number(data.paidFromId), narration: data.narration || (several ? null : category.name),
                 party: data.party, reference: data.reference, notes: data.notes,
                 version: editingExpense ? expense.version : null,
+                items: split ? split.items : null,
             };
+            const what = several ? `Bill · ${split.items.length} items` : category.name;
             if (editingExpense) {
                 await api.put(`/expenses/${expense.entryId}`, payload, { key: saveKey });
                 entryId = expense.entryId;
-                toast(`Expense updated · ${money(data.amount)}`);
+                toast(`${several ? `Bill updated · ${split.items.length} items` : 'Expense updated'} · ${money(data.amount)}`);
             } else {
                 const saved = await api.post('/expenses', payload, { key: saveKey });
                 if (saved?.pending) {   // this user's expenses wait for a checker
@@ -290,7 +305,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                     return again ? (form.amount.value = '', form.amount.focus(), true) : undefined;
                 }
                 entryId = saved.id;
-                toast(`${category.name} · ${money(saved.amount)} saved as ${saved.entryNo}`);
+                toast(`${what} · ${money(saved.amount)} saved as ${saved.entryNo}`);
             }
         } else {
             const payload = {
@@ -321,7 +336,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         return false;
     };
 
-    const title = editingEmi ? `Edit EMI · ${emi.narration}` : editingExpense ? 'Edit expense' : editingClaim ? `Edit · ${claim.kindLabel}` : copy ? 'Duplicate expense' : 'Add expense';
+    const title = editingEmi ? `Edit EMI · ${emi.narration}` : editingExpense ? (itemizedBill || split ? 'Edit bill' : 'Edit expense') : editingClaim ? `Edit · ${claim.kindLabel}` : copy ? 'Duplicate expense' : 'Add expense';
     const modal = openModal({
         title, iconName: 'receipt', size: 'lg expense-modal', body,
         actions: [
@@ -331,11 +346,15 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         ],
     });
 
-    bind(modal.el.querySelector('form'), { categories, budgets, payers, claimList, history, setMode: m => { current = m; },
+    bill = bind(modal.el.querySelector('form'), { categories, budgets, payers, claimList, history, setMode: m => { current = m; },
         allPayers: accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.accountType))
             .sort((a, b) => (usage.credit[b.id] || 0) - (usage.credit[a.id] || 0) || typeRank(a) - typeRank(b)) });
     const evidence = bindEvidenceField(modal.el);
-    setTimeout(() => modal.el.querySelector('[name=amount]').focus(), 40);
+    // a bill opens with its items; "add items" opens with a new one to fill in
+    const startItems = itemizedBill ? expense.items.map(i => ({ categoryId: i.categoryId, name: i.name || '', amount: String(Number(i.amount)) }))
+        : split && expense ? [{ categoryId: expense.categoryId, name: '', amount: '' }] : null;
+    if (startItems) bill.start({ items: startItems, fixed: !itemizedBill, addBlank: split });
+    else setTimeout(() => modal.el.querySelector('[name=amount]').focus(), 40);
 }
 
 // ===================================================================== pieces
@@ -409,12 +428,32 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
     const grid = form.querySelector('[data-categories]');
     let autoPicked = false;   // the category came from the description, not from a click
     const amountOf = () => evalAmount(form.amount.value) || 0;
+    const pinTile = id => grid.querySelectorAll('.cat-tile.extra').forEach(t => t.classList.toggle('pinned', t.dataset.category === String(id)));
+    // the amount takes figures only (and + - * / for a sum); first, so every other listener sees it clean
+    amountOnly(form.amount);
+    // while the items of a bill do not add up (more than the bill, an amount that is not a number), it cannot be saved
+    const saveButtons = () => [...(form.closest('.modal-backdrop') || document).querySelectorAll('[data-action-index].primary, [data-action-index].left')];
+    // split into items: the tiles pick the category of the item being edited
+    const items = bindBillItems(form, {
+        categories,
+        onChange: () => updateBudget(),
+        onValidity: (ok, reason) => saveButtons().forEach(b => {
+            b.disabled = !ok;
+            b.title = ok ? '' : reason || '';
+        }),
+        onActive: (id, index) => {
+            select('category', id);
+            pinTile(id);
+            form.querySelector('[data-cat-head]').textContent = `Category of item ${index + 1}`;
+        },
+    });
     const setCategory = (id, auto = false) => {
+        if (items.on) { if (!auto && id) items.pick(id); return; }
         autoPicked = auto;
         form.categoryId.value = id;
         select('category', id);
         // a picked category beyond the top tiles stays visible
-        grid.querySelectorAll('.cat-tile.extra').forEach(t => t.classList.toggle('pinned', t.dataset.category === String(id)));
+        pinTile(id);
         updateBudget();
         suggestCategory();
     };
@@ -443,6 +482,8 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
     }
 
     function applyMode(next) {
+        // items are for expenses: put aside (as they are) while recording something else, back on Expense
+        if (next !== 'EXPENSE') items.pause();
         mode = next;
         setMode(next);
         form.className = `expense-form mode-${next} ${Number(form.interestRate.value) > 0 ? '' : 'no-rate'}`;
@@ -459,10 +500,40 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
         if (heading && /^Add /.test(heading.textContent)) {
             heading.textContent = next === 'EXPENSE' ? 'Add expense' : next === 'LENT' ? 'Add money lent' : next === 'EMI' ? 'Add a purchase on EMI' : 'Add payment for someone';
         }
+        if (next === 'EXPENSE') items.resume();
+        else select('category', form.categoryId.value);   // the tiles are this entry's own again (EMI)
+        syncSplit();
         renderPayers();
         updateClaimInfo();
         updateEmi();
     }
+
+    /**
+     * Into items: the category picked (and a typed amount, which then stays as the bill total) becomes the first item
+     * and a new one is started. Back to one category: the one with the most of the bill.
+     */
+    function toggleSplit() {
+        if (!items.on) {
+            const first = form.categoryId.value;
+            form.categoryId.value = '';
+            items.enter({ items: first ? [{ categoryId: first, name: '', amount: '' }] : [], fixed: true, addBlank: !!first });
+        } else {
+            const top = [...items.byCategory().entries()].sort((a, b) => b[1] - a[1])[0];
+            items.exit();
+            setCategory(top ? String(top[0]) : '');
+        }
+        syncSplit();
+    }
+    function syncSplit() {
+        form.querySelector('[data-split-label]').textContent = items.on ? 'One category' : 'Split into items';
+        form.querySelector('[data-split]').title = items.on ? 'Back to one category for the whole amount'
+            : 'One payment, several things bought: each item in its own category (groceries, eggs, cosmetics …)';
+        if (!items.on) form.querySelector('[data-cat-head]').textContent = 'Category';
+        form.querySelector('[data-cat-suggest]').innerHTML = '';
+        updateBudget();
+    }
+    form.querySelector('[data-split]').addEventListener('click', toggleSplit);
+    form.addEventListener('expense-next', () => { if (items.on) { items.exit(); syncSplit(); setCategory(''); } });
 
     setCategory(form.categoryId.value);
     setDate(form.entryDate.value);
@@ -598,6 +669,7 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
 
     /** The description hints the category: a past expense with the same words, or a category named in it. */
     function suggestCategory() {
+        if (items.on) return;   // each item has its own
         const box = form.querySelector('[data-cat-suggest]');
         const text = form.narration.value.trim().toLowerCase();
         let hit = null;
@@ -626,7 +698,7 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
     form.narration.addEventListener('suggestpick', e => {
         const s = e.detail;
         if (s.voucherType !== 'EXPENSE' || mode !== 'EXPENSE') return;
-        if (s.categoryId && categories.some(c => c.id === s.categoryId) && (!form.categoryId.value || autoPicked)) setCategory(s.categoryId, true);
+        if (s.categoryId && !items.on && categories.some(c => c.id === s.categoryId) && (!form.categoryId.value || autoPicked)) setCategory(s.categoryId, true);
         if (s.creditAccountId && payers.some(a => a.id === s.creditAccountId)) { form.paidFromId.value = s.creditAccountId; renderPayers(); }
         if (!form.amount.value && s.amount) { form.amount.value = s.amount; updateBudget(); }
     });
@@ -657,6 +729,7 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
 
     function updateBudget() {
         const box = form.querySelector('[data-budget]');
+        if (items?.on) { box.innerHTML = billBudgetHtml(items.byCategory(), { categories, budgets }); return; }
         const id = Number(form.categoryId.value);
         const line = budgets.lines.find(l => l.categoryId === id);
         const category = categories.find(c => c.id === id);
@@ -678,6 +751,13 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
                 ? `${icon('alert')} This takes you ${money(after - limit)} over budget`
                 : `${money(limit - after)} left this month after this expense`}</div>`;
     }
+
+    return {
+        get on() { return items.on; },
+        collect: () => items.collect(),
+        /** Opens on the items of a bill (or of an expense being split). */
+        start(opts) { items.enter(opts); syncSplit(); },
+    };
 }
 
 

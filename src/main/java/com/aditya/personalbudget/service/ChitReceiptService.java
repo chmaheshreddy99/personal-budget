@@ -142,7 +142,9 @@ public class ChitReceiptService {
                           String kind, List<Line> installLines, List<String> supersedes, String payerSignature, String cancelReason,
                           LocalDateTime cancelledAt, String cancelledBy, String supersededBy,
                           /* the installments it stands for (also in a list, where the documents are not read) */
-                          List<Integer> installmentNos, int installCount) {
+                          List<Integer> installmentNos, int installCount,
+                          /* what a QR on the record carries to check it (see verifyCode); null until it is sealed */
+                          String verifyCode) {
     }
 
     public record CreatedLink(AckView receipt, String token) {
@@ -161,7 +163,23 @@ public class ChitReceiptService {
                             String acknowledgedName, LocalDateTime acknowledgedAt, String signature, String acknowledgementSeal,
                             boolean locationShared, String evidencePayload, String digitalSignature, String publicKey,
                             String keyFingerprint, String disputeReason, LocalDateTime disputedAt, LocalDateTime createdAt,
-                            String kind, List<Line> installLines, List<String> supersedes, String payerSignature) {
+                            String kind, List<Line> installLines, List<String> supersedes, String payerSignature,
+                            /* what a QR on the record carries to check it (see verifyCode) */
+                            String verifyCode) {
+    }
+
+    /**
+     * What a check of a record's QR finds (see {@link #verify}). {@code result}: GENUINE (signed, and still standing),
+     * WITHDRAWN (signed, then withdrawn by the payer), REPLACED (cancelled by a payout receipt that restates it) or
+     * NOT_FOUND (no record has this number and code: not issued here, or changed). The signed text, signature and public
+     * key come with it, so the browser checks the signature itself.
+     */
+    public record Verification(String result, String ackNo, String kind, String household, String chitName, String ticketNo,
+                               String payerName, String organizerName, BigDecimal totalAmount, String amountInWords, String currency,
+                               List<Integer> installmentNos, String signedBy, LocalDateTime signedAt, boolean onPaper,
+                               String withdrawnReason, LocalDateTime withdrawnAt, String replacedBy,
+                               String evidencePayload, String digitalSignature, String publicKey, String keyFingerprint,
+                               boolean signatureValid) {
     }
 
     private final ChitReceiptAckRepository acks;
@@ -965,7 +983,7 @@ public class ChitReceiptService {
         return new PublicAck("VERIFY", error, Math.max(0, left), t.getName(), a.getPayerName(), hint, "••••••" + a.getOrganizerPhone().substring(6),
                 a.getAckNo(), a.getLinkExpiresAt(), null, null, null, List.of(), null, null, null, null, null, t.getCurrency(),
                 Boolean.TRUE.equals(a.getRequireSelfie()), Boolean.TRUE.equals(a.getRequireLocation()), false, a.getStatus(),
-                null, null, null, null, false, null, null, null, null, null, null, null, kindOf(a), List.of(), List.of(), null);
+                null, null, null, null, false, null, null, null, null, null, null, null, kindOf(a), List.of(), List.of(), null, null);
     }
 
     private PublicAck full(ChitReceiptAck a, Organization t) {
@@ -979,7 +997,7 @@ public class ChitReceiptService {
                 a.getAcknowledgedName(), a.getAcknowledgedAt(), a.getSignature(), a.getAcknowledgementSeal(), a.getAcknowledgedLocation() != null,
                 a.getEvidencePayload(), a.getDigitalSignature(), settings.publicKeyFor(a.getEvidencePayload(), a.getDigitalSignature()), settings.fingerprintFor(a.getEvidencePayload(), a.getDigitalSignature()), a.getDisputeReason(),
                 a.getDisputedAt(), a.getCreatedAt(), kindOf(a), a.getInstallLines() == null ? List.of() : decode(a.getInstallLines()), supersededNos(a),
-                a.getPayerSignature());
+                a.getPayerSignature(), isFinal(a) ? verifyCode(a.getEvidencePayload()) : null);
     }
 
     private AckView view(ChitReceiptAck a) {
@@ -1005,7 +1023,88 @@ public class ChitReceiptService {
                 files.listForAgreement(FILES, a.getId()), a.getCreatedBy(), a.getCreatedAt(), kindOf(a),
                 a.getInstallLines() == null ? List.of() : decode(a.getInstallLines()), supersededNos(a), a.getPayerSignature(), a.getCancelReason(),
                 a.getCancelledAt(), a.getCancelledBy(), a.getSupersededBy() == null ? null : acks.findById(a.getSupersededBy()).map(ChitReceiptAck::getAckNo).orElse(null),
-                installmentNos(a, nos), a.getInstallmentIds().isBlank() ? 0 : a.getInstallmentIds().split(",").length);
+                installmentNos(a, nos), a.getInstallmentIds().isBlank() ? 0 : a.getInstallmentIds().split(",").length,
+                isFinal(a) ? verifyCode(a.getEvidencePayload()) : null);
+    }
+
+    /**
+     * The code a record's QR carries: SHA-256 of exactly the text that was signed, Base64 (URL-safe, no padding). It finds
+     * the record (with its number) and proves the holder has the record itself; any change to the text changes it.
+     */
+    public static String verifyCode(String evidencePayload) {
+        if (evidencePayload == null || evidencePayload.isBlank()) {
+            return null;
+        }
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(evidencePayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(h);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    // ================================================================== checking a record (its QR), no sign-in
+
+    /**
+     * Checks a record from its QR: its number and the code of its signed text ({@link #verifyCode}). Only a record whose
+     * signed text has exactly that code answers, so nobody can look records up by number; what it says is whether it still
+     * stands (or was withdrawn, or replaced by a payout receipt), the figures it is for, and the signed text, signature and
+     * key to check it with.
+     */
+    @Transactional(readOnly = true)
+    public Verification verify(String ackNo, String code) {
+        String no = ackNo == null ? "" : ackNo.trim();
+        String want = code == null ? "" : code.trim();
+        if (no.isEmpty() || want.isEmpty()) {
+            return notFound(no);
+        }
+        for (ChitReceiptAck a : acks.findByAckNo(no)) {
+            if (!isFinal(a) && !ChitReceiptAck.CANCELLED.equals(a.getStatus())) {
+                continue;   // never signed: nothing to check
+            }
+            Organization t = tenants.findById(a.getTenantId()).orElse(null);
+            if (t == null) {
+                continue;
+            }
+            Map<String, String> doc = vault.read(VAULT, a.getTenantId(), a.getId());
+            String payload = doc.get("evidencePayload");
+            if (payload == null || !java.security.MessageDigest.isEqual(want.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    String.valueOf(verifyCode(payload)).getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                continue;
+            }
+            OrgClock.showFor(t.getId());   // the answer is written after this: in the organization's zone
+            String replacedBy = a.getSupersededBy() == null ? null : acks.findById(a.getSupersededBy()).map(ChitReceiptAck::getAckNo).orElse(null);
+            String result = ChitReceiptAck.CANCELLED.equals(a.getStatus()) ? (replacedBy != null ? "REPLACED" : "WITHDRAWN") : "GENUINE";
+            Map<Long, Integer> nos = new java.util.HashMap<>();
+            installments.findByChitIdOrderByInstallmentNo(a.getChitId()).forEach(i -> nos.put(i.getId(), i.getInstallmentNo()));
+            String key = settings.publicKeyFor(payload, a.getDigitalSignature());
+            return new Verification(result, a.getAckNo(), kindOf(a), t.getName(), a.getChitName(), a.getTicketNo(), a.getPayerName(),
+                    a.getOrganizerName(), a.getTotalAmount(), HostedChitService.inWords(a.getTotalAmount()), t.getCurrency(),
+                    installmentNos(a, nos), a.getAcknowledgedName(), a.getAcknowledgedAt(), payload.contains("SIGNED_ON_PAPER"),
+                    ChitReceiptAck.CANCELLED.equals(a.getStatus()) && replacedBy == null ? a.getCancelReason() : null,
+                    ChitReceiptAck.CANCELLED.equals(a.getStatus()) ? a.getCancelledAt() : null, replacedBy,
+                    payload, a.getDigitalSignature(), key, AppSettingsService.fingerprintOf(key),
+                    settings.verifyPayLink(payload, a.getDigitalSignature()) || key != null && verifies(payload, a.getDigitalSignature(), key));
+        }
+        return notFound(no);
+    }
+
+    private static Verification notFound(String ackNo) {
+        return new Verification("NOT_FOUND", ackNo, null, null, null, null, null, null, null, null, null, List.of(), null, null,
+                false, null, null, null, null, null, null, null, false);
+    }
+
+    /** Whether the signature over the text verifies with this public key (X.509, Base64). */
+    private static boolean verifies(String text, String signature, String publicKey) {
+        try {
+            java.security.Signature sig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            sig.initVerify(java.security.KeyFactory.getInstance("EC").generatePublic(
+                    new java.security.spec.X509EncodedKeySpec(Base64.getDecoder().decode(publicKey))));
+            sig.update(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return sig.verify(Base64.getDecoder().decode(signature.trim()));
+        } catch (java.security.GeneralSecurityException | IllegalArgumentException | NullPointerException e) {
+            return false;
+        }
     }
 
     /** The numbers of the installments a record stands for, in order. */

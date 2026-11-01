@@ -379,6 +379,8 @@ export function bondBlocks(doc) {
     add('witness', `<div class="bond-signs ${witnesses.length > 1 ? '' : 'one'}">${witnesses.map((w, i) => signBox(doc, w, witnesses.length > 1 ? `Witness ${i + 1}` : 'Witness',
         { lead: doc.kind && i === 0 ? 'In the presence of' : '' })).join('')}</div>`);
     add('foot', `<p class="bond-foot">Agreement fingerprint (SHA-256): <code>${esc(doc.fingerprint || '')}</code>${doc.footnote ? `<br>${esc(doc.footnote)}` : ''}</p>`);
+    // a signed record's QR codes (receipt-qr.js), to check it from the paper with a phone
+    if (doc.verifyHtml) add('verify', doc.verifyHtml, { keep: true });
 
     const annexures = (doc.annexures || []).filter(x => x.images?.length || x.rows?.length).map((x, i) => {
         const letter = String.fromCharCode(65 + i);

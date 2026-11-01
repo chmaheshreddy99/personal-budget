@@ -121,6 +121,13 @@ public class ChitReceiptController {
 
     // ---------------------------------------------------------------- the organizer (no sign-in)
 
+    /** Checks a receipt from the QR printed on it: its number and the code of its signed text. No sign-in. */
+    @PostMapping("/api/public/verify/chit-receipt")
+    public ResponseEntity<ChitReceiptService.Verification> verify(@RequestBody java.util.Map<String, String> body) {
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(receipts.verify(body == null ? null : body.get("no"), body == null ? null : body.get("code")));
+    }
+
     @PostMapping("/api/public/chit-receipts/{token}")
     public ResponseEntity<PublicAck> open(@PathVariable String token, @Valid @RequestBody(required = false) OpenRequest request) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(receipts.open(token, request));

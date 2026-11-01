@@ -78,7 +78,8 @@ public class ExpenseController {
         String fingerprint = String.join("|", "expense", String.valueOf(me.tenantId()),
                 me.viaLink() ? "link" + me.linkId() : "user" + me.userId(), String.valueOf(request.entryDate()),
                 request.amount().stripTrailingZeros().toPlainString(), String.valueOf(request.categoryId()),
-                String.valueOf(request.paidFromId()), clean(request.narration()), clean(request.party()));
+                String.valueOf(request.paidFromId()), clean(request.narration()), clean(request.party()),
+                request.items() == null ? "" : String.valueOf(request.items().size()));
         return duplicates.once(fingerprint, me.approval()
                         ? "This expense was already sent for approval a moment ago. If it is really a second one, wait a few seconds or change the description"
                         : "This expense was already recorded a moment ago. If it is really a second one, wait a few seconds or change the description",

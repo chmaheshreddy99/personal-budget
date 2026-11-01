@@ -190,13 +190,14 @@ public class PendingService {
         ExpenseRequest r = request(p);
         ApproveRequest fix = c == null ? new ApproveRequest(null, null, null, null, null, null) : c;
         String notes = r.notes() == null || r.notes().isBlank() ? "Recorded by " + p.getSubmittedBy() : r.notes() + " · recorded by " + p.getSubmittedBy();
+        // an itemized bill keeps its items: its amount and categories are corrected by sending it back
         ExpenseRequest post = new ExpenseRequest(
                 fix.entryDate() != null ? fix.entryDate() : r.entryDate(),
-                fix.amount() != null ? fix.amount() : r.amount(),
-                fix.categoryId() != null ? fix.categoryId() : r.categoryId(),
+                fix.amount() != null && !r.itemized() ? fix.amount() : r.amount(),
+                fix.categoryId() != null && !r.itemized() ? fix.categoryId() : r.categoryId(),
                 fix.paidFromId() != null ? fix.paidFromId() : r.paidFromId(),
                 fix.narration() != null && !fix.narration().isBlank() ? fix.narration().trim() : r.narration(),
-                r.party(), r.reference(), ActivityService.cut(notes, 255), null);
+                r.party(), r.reference(), ActivityService.cut(notes, 255), null, r.items());
         EntryView posted = expenses.create(post);
         attachmentService.moveToEntry(p.getId(), posted.id());
         String corrections = changes(r, post);
@@ -230,13 +231,16 @@ public class PendingService {
 
     /** Stores the request on the entry (summary, amount, date); returns what it was for. */
     private String fill(PendingEntry p, ExpenseRequest r) {
-        Category category = category(r.categoryId());
+        List<Category> itemCategories = r.itemized() ? r.items().stream().map(i -> category(i.categoryId())).toList() : List.of();
+        Category category = r.itemized() ? itemCategories.getFirst() : category(r.categoryId());
         Account payer = payer(r.paidFromId());
-        ExpenseRequest clean = new ExpenseRequest(r.entryDate(), r.amount(), r.categoryId(), r.paidFromId(),
-                blankToNull(r.narration()), blankToNull(r.party()), blankToNull(r.reference()), blankToNull(r.notes()), null);
+        ExpenseRequest clean = new ExpenseRequest(r.entryDate(), r.amount(), r.itemized() ? null : r.categoryId(), r.paidFromId(),
+                blankToNull(r.narration()), blankToNull(r.party()), blankToNull(r.reference()), blankToNull(r.notes()), null,
+                r.itemized() ? r.items() : null);
         p.setPayload(json.writeValueAsString(clean));
-        String what = clean.narration() == null ? category.getName() : clean.narration();
-        p.setSummary(ActivityService.cut(what + " · " + category.getName() + " · from " + payer.getName(), 255));
+        String kinds = r.itemized() ? r.items().size() + " items" : category.getName();
+        String what = clean.narration() == null ? (r.itemized() ? ExpenseService.billName(itemCategories) : category.getName()) : clean.narration();
+        p.setSummary(ActivityService.cut(what + " · " + kinds + " · from " + payer.getName(), 255));
         p.setAmount(r.amount());
         p.setEntryDate(r.entryDate());
         return what;
@@ -251,8 +255,14 @@ public class PendingService {
         if (!before.entryDate().equals(after.entryDate())) {
             out.add("date " + before.entryDate() + " → " + after.entryDate());
         }
-        if (!before.categoryId().equals(after.categoryId())) {
+        if (!before.itemized() && !after.itemized() && !Objects.equals(before.categoryId(), after.categoryId())) {
             out.add("category " + categoryName(before.categoryId()) + " → " + categoryName(after.categoryId()));
+        }
+        if (before.itemized() || after.itemized()) {
+            int was = before.itemized() ? before.items().size() : 1, now = after.itemized() ? after.items().size() : 1;
+            if (was != now || !Objects.equals(before.items(), after.items())) {
+                out.add(was == now ? "items" : "items " + was + " → " + now);
+            }
         }
         if (!before.paidFromId().equals(after.paidFromId())) {
             out.add("paid from " + accountName(before.paidFromId()) + " → " + accountName(after.paidFromId()));
@@ -365,7 +375,8 @@ public class PendingService {
     private PendingView toView(PendingEntry p) {
         ExpenseRequest r = request(p);
         Long tenantId = p.getTenantId();
-        String category = r.categoryId() == null ? null : categories.findByIdAndTenantId(r.categoryId(), tenantId).map(Category::getName).orElse(null);
+        String category = r.itemized() ? r.items().size() + " items"
+                : r.categoryId() == null ? null : categories.findByIdAndTenantId(r.categoryId(), tenantId).map(Category::getName).orElse(null);
         String payer = r.paidFromId() == null ? null : accounts.findByIdAndTenantId(r.paidFromId(), tenantId).map(Account::getName).orElse(null);
         boolean editable = UserContext.current().map(me -> isMine(p, me)).orElse(false)
                 && (PendingEntry.PENDING.equals(p.getStatus()) || PendingEntry.REJECTED.equals(p.getStatus()));

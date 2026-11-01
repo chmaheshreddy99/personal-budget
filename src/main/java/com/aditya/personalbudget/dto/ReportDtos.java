@@ -67,7 +67,33 @@ public final class ReportDtos {
                                BigDecimal averageMonthlyExpense, BigDecimal investmentShare,
                                BigDecimal shortTermLiabilities, BigDecimal longTermLiabilities,
                                List<ValuePoint> assetMix, List<ValuePoint> liabilityMix,
-                               List<ValuePoint> netWorthTrend) {
+                               List<ValuePoint> netWorthTrend,
+                               /* who makes up the receivable / payable accounts, by account */
+                               List<Counterparties> counterparties) {
+    }
+
+    /**
+     * A receivable or payable account on the balance sheet split by person. Entries not made for an item (an expense
+     * paid later through Payables, a transfer, a journal) are matched oldest first with the payments, and what is still
+     * open of them is listed under the shop / person named on them, or under one group without a name
+     * ({@code named = false}). {@code unlinked} is what is left over (paid ahead, rounding), so the parts add up to
+     * the account.
+     */
+    public record Counterparties(Long accountId, String accountName, boolean payable, List<PartyBalance> parties,
+                                 BigDecimal unlinked, BigDecimal unlinkedPrevious) {
+    }
+
+    /** One person on a receivable / payable account: their balance on both dates and the items behind it. */
+    public record PartyBalance(String party, boolean named, BigDecimal amount, BigDecimal previous, int openItems, boolean overdue,
+                               LocalDate oldest, List<ClaimBalance> items) {
+    }
+
+    /**
+     * One item (money lent, paid for someone, borrowed, a bill to pay; {@code claimId}) or one entry still open on the
+     * account ({@code kind} ENTRY, {@code claimId} null), and its balance on both dates; {@code entryId} opens it.
+     */
+    public record ClaimBalance(Long claimId, Long entryId, String kind, String kindLabel, String narration, LocalDate startDate,
+                               LocalDate dueDate, BigDecimal amount, BigDecimal previous, boolean overdue) {
     }
 
     // ------------------------------------------------------------------ ledger
