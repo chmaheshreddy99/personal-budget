@@ -480,6 +480,16 @@ public class ClaimService {
     @Transactional
     public ClaimView postInterest(Long id, boolean automatic, Integer upToPeriod, Long accountId, boolean makeDefault,
                                   boolean combine) {
+        return postInterest(id, automatic, upToPeriod, accountId, makeDefault, combine, null);
+    }
+
+    /**
+     * As above, with the entries dated {@code entryDate} when given (posting by hand on another day), otherwise each
+     * on the last day of its months. It may not be in the future, nor before the first of the months it books.
+     */
+    @Transactional
+    public ClaimView postInterest(Long id, boolean automatic, Integer upToPeriod, Long accountId, boolean makeDefault,
+                                  boolean combine, LocalDate entryDate) {
         Claim claim = claim(id);
         if (Money.nz(claim.getInterestRate()).signum() <= 0) {
             throw new BusinessException("'" + claim.getNarration() + "' has no interest rate");
@@ -494,6 +504,15 @@ public class ClaimService {
         if (due.isEmpty() && !automatic) {
             throw new BusinessException(upToPeriod == null ? "No finished month of interest is waiting to be posted"
                     : "Month " + upToPeriod + " is not finished yet or is already posted");
+        }
+        if (entryDate != null && !due.isEmpty()) {
+            if (entryDate.isAfter(OrgClock.today())) {
+                throw new BusinessException("The interest posting date cannot be in the future");
+            }
+            if (entryDate.isBefore(due.getFirst().period().from())) {
+                throw new BusinessException("The interest posting date cannot be before " + due.getFirst().period().from()
+                        + ", the start of the interest it books");
+            }
         }
         boolean payable = claim.getKind().isPayable();
         if (combine && due.size() > 1) {
@@ -519,7 +538,7 @@ public class ClaimService {
             if (d.amount().signum() > 0) {
                 String month = (d.firstPeriod() < d.period().period() ? "months " + d.firstPeriod() + "-" + d.period().period()
                         : "month " + d.period().period()) + " (" + d.period().from() + " to " + d.period().to() + ")";
-                JournalDraft draft = JournalDraft.of(d.period().to(), VoucherType.INTEREST_ACCRUAL,
+                JournalDraft draft = JournalDraft.of(entryDate != null ? entryDate : d.period().to(), VoucherType.INTEREST_ACCRUAL,
                                 "Interest " + (payable ? "owed to " : "from ") + claim.getParty() + ", " + month)
                         .party(claim.getParty());
                 if (payable) {

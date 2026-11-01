@@ -4,8 +4,9 @@
    isBreeze()), so switching back to Classic is just this sheet turned off:
    - column headers that read as headers: a deep ocean band (Classic's height), and day / group
      heads tinted with a brand bar, so a heading is never mistaken for a transaction line
-   - open rows in the brand's tones (ocean, aqua, violet, gold): an expense's cards each in its own, a journal
+   - open rows: an expense shaped as the open Lent panel in a fixed brand palette of thin tints, a journal
      entry's actions labelled and grouped, an entry of money lent or borrowed shown whole with its lifecycle
+   - budgets in the brand's colours: the month strip, the list rows by how they stand, the selected budget's tiles
    - live motion: charts draw themselves and their latest point breathes, progress bars fill in and carry a soft
      sheen, lifecycles light up step by step up to where the item stands, which keeps pulsing.
    All motion is off for reduced motion.
@@ -37,21 +38,22 @@
 
 /* ===================================================================== headers
    Only colour changes, never size: the padding and the 1px rule stay Classic's, so the sticky day / group heads still
-   sit right under the header. The darker rule is an inset shadow, which takes no room. */
-table.grid th,
-.accounts-page .p-ledger table.grid thead th,
-.chits-page .chit-tab-body table.grid thead th,
-.emi-sched thead th {
-    background: var(--bz-th-bg);
-    color: var(--bz-th-ink);
-    border-bottom-color: var(--bz-th-rule);
+   sit right under the header. The darker rule is an inset shadow, which takes no room.
+   Only real header rows (thead): a th used as a row label in the body or the totals keeps Classic's look. The band
+   wins over the light header backgrounds some pages set for their own tables (Reports tiles, Deep analysis, the
+   ledgers), since light text on those would vanish. */
+table.grid > thead > tr > th,
+.emi-sched > thead > tr > th {
+    background: var(--bz-th-bg) !important;
+    color: var(--bz-th-ink) !important;
+    border-bottom-color: var(--bz-th-rule) !important;
     box-shadow: inset 0 -2px 0 var(--bz-th-rule);
 }
-table.grid th .muted, table.grid th small { color: rgba(234, 244, 251, 0.72); }
-table.grid th a, table.grid th .link-btn { color: #bfe3fa; }
-table.grid th svg, .ms2-matrix thead th svg { color: #9fd3f5; }
-.xp-table th.sortable:hover { color: #ffffff; }
-.xp-table th.sorted { color: #ffd98a; }
+table.grid > thead > tr > th :is(small, b, em, strong, .muted, .secondary) { color: rgba(234, 244, 251, 0.78) !important; }
+table.grid > thead > tr > th :is(a, .link-btn) { color: #bfe3fa !important; }
+table.grid > thead > tr > th svg { color: #9fd3f5 !important; }
+.xp-table > thead > tr > th.sortable:hover { color: #ffffff !important; }
+.xp-table > thead > tr > th.sorted { color: #ffd98a !important; }
 
 /* the day and group heads: a branded tint and a bar on the left, so they never read as a transaction line */
 .day-head-inner { background: linear-gradient(90deg, rgba(11, 106, 166, 0.13), rgba(11, 106, 166, 0.05)); box-shadow: inset 3px 0 0 var(--bz-ocean); }
@@ -64,37 +66,55 @@ table.grid tr.group td { background: rgba(11, 106, 166, 0.1); }
    Sizes stay Classic's; the accents are inset shadows, so nothing moves. */
 tr.detail-row > td { background: var(--bz-wash); }
 tr.detail-row > td > * { animation: bz-reveal 0.26s var(--ease-out) backwards; }
-.xp-detail2, tr.detail-row .entry-detail { box-shadow: inset 3px 0 0 var(--bz-ocean); }
+tr.detail-row .entry-detail { box-shadow: inset 3px 0 0 var(--bz-ocean); }
 
-/* ===================================================================== an open expense, each part in its brand tone
-   the posting ocean, the category aqua, the payer violet, the note gold; the facts on top each with its own colour */
-.xd-fact { color: #35506a; }
-.xd-fact b { color: var(--bz-value); }
-.xd-top > .xd-fact:nth-child(1) svg { color: var(--bz-ocean); }
-.xd-top > .xd-fact:nth-child(2) svg { color: var(--bz-aqua); }
-.xd-top > .xd-fact:nth-child(3) svg { color: var(--bz-violet); }
-.xd-top > .xd-fact:nth-child(4) svg { color: var(--bz-gold); }
-.xd-card { --bz-tone: var(--bz-ocean); --bz-tint: var(--bz-ocean-tint); --bz-line: var(--bz-ocean-line); }
-.xd-cards > .xd-card:nth-child(3n + 2) { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
-.xd-cards > .xd-card:nth-child(3n) { --bz-tone: var(--bz-violet); --bz-tint: var(--bz-violet-tint); --bz-line: var(--bz-violet-line); }
-.xd-card, .bz-claim-card {
+/* ===================================================================== an open expense: the Lent panel's shape, richly branded
+   The parts and sizes of an open lent / borrowed item (widgets.css .claim-panel: one white card, the facts as its head,
+   figure boxes with small caps labels), in one fixed brand palette whatever was bought: a thin ocean → aqua line along
+   the top over a pale glacier wash, the facts in ocean, and the three boxes in thin tints of their own (the posting
+   ocean, the category aqua, the payee violet), each with a hairline of its colour along its top. */
+.xp-detail2 {
+    margin: 3px 8px 6px 18px; padding: 6px 9px;
+    border-radius: 8px; border: 1px solid rgba(11, 106, 166, 0.18);
+    background:
+        linear-gradient(90deg, #0b6aa6, #2d8fd5 45%, #13a89a) top / 100% 2px no-repeat,
+        linear-gradient(180deg, rgba(227, 241, 251, 0.9), rgba(255, 255, 255, 0) 70px),
+        rgba(255, 255, 255, 0.94);
+    box-shadow: 0 1px 2px rgba(10, 46, 79, 0.05), 0 4px 14px rgba(10, 46, 79, 0.06);
+}
+.xd-top { margin: 0 -9px; padding: 1px 9px 5px; border-bottom: 1px solid rgba(11, 106, 166, 0.14); font-size: 11px; color: #3c5770; }
+.xd-fact svg { color: #2d8fd5; }
+.xd-fact b { color: var(--ocean-800); }
+
+/* the figure boxes: the Lent panel's, each in a thin tint with a hairline of its colour on top */
+.xd-card {
+    --tone: #2d8fd5; --tone-ink: #0b5c94; --tone-tint: rgba(45, 143, 213, 0.07); --tone-line: rgba(45, 143, 213, 0.22);
+    padding: 3px 7px; border-radius: 6px; border: 1px solid var(--tone-line);
+    background: linear-gradient(180deg, var(--tone-tint), rgba(255, 255, 255, 0.85) 80%), #fff;
+    box-shadow: inset 0 2px 0 color-mix(in srgb, var(--tone) 70%, transparent), 0 1px 2px rgba(10, 46, 79, 0.04);
+}
+.xd-card.xd-category { --tone: #13a89a; --tone-ink: #0b7a6f; --tone-tint: rgba(19, 168, 154, 0.07); --tone-line: rgba(19, 168, 154, 0.24); }
+.xd-card.xd-payee { --tone: #7b6ce0; --tone-ink: #4a3aa7; --tone-tint: rgba(123, 108, 224, 0.07); --tone-line: rgba(123, 108, 224, 0.22); }
+.xd-card-head { font-size: 9px; font-weight: 750; letter-spacing: 0.05em; color: var(--tone-ink); }
+.xd-card-head svg { width: 12px; height: 12px; color: var(--tone); }
+.xd-card b.mono { color: var(--bz-value); font-variant-numeric: tabular-nums; }
+.xd-card .muted { color: #62788d; }
+.xd-side { color: var(--tone); }
+.xd-bar { border-radius: 999px; background: rgba(10, 79, 128, 0.09); }
+.xd-bar em { border-radius: 999px; background: linear-gradient(90deg, #2d8fd5, #13a89a); }
+.xd-bar.warn em { background: linear-gradient(90deg, #f6cf6a, #e3a21a); }
+.xd-bar.over em { background: linear-gradient(90deg, #f08a8a, #d03b3b); }
+.xp-detail2 .section-title { color: var(--ocean-800); }
+.xp-detail2 .section-title svg { width: 12px; height: 12px; color: #2d8fd5; }
+.xd-note { background: linear-gradient(180deg, #fffaf0, #fffdf8); border-color: rgba(211, 155, 38, 0.32); color: #5a4108; }
+.xd-note svg { color: #c48a1a; }
+
+/* the lent / borrowed entry in Journals keeps its tone cards */
+.bz-claim-card {
     background: linear-gradient(180deg, var(--bz-tint), rgba(255, 255, 255, 0.7) 70%), #fbfdff;
     border-color: var(--bz-line);
     box-shadow: inset 0 3px 0 var(--bz-tone), 0 1px 3px rgba(10, 46, 79, 0.06);
 }
-.xd-card-head { color: var(--bz-tone); font-weight: 750; }
-.xd-card-head svg { color: var(--bz-tone); }
-.xd-card b.mono { color: var(--bz-value); }
-.xd-card .muted { color: #5f7488; }
-.xd-side { color: var(--bz-tone); opacity: 0.8; }
-.xd-bar { background: rgba(10, 79, 128, 0.12); }
-.xd-bar em { background: linear-gradient(90deg, #36c9b8, #0fa08f); }
-.xd-bar.warn em { background: linear-gradient(90deg, #f6cf6a, #e3a21a); }
-.xd-bar.over em { background: linear-gradient(90deg, #f08a8a, #d03b3b); }
-.xd-note { background: var(--bz-gold-tint); border-color: var(--bz-gold-line); color: #5a4108; }
-.xd-note svg { color: var(--bz-gold); }
-.xr-posting { background: var(--bz-ocean-tint); }
-.xl-node, .xl-parent { background: rgba(255, 255, 255, 0.75); }
 
 /* an open journal entry: the debit and credit pills in the brand's tints */
 .ed-pill.dr { background: rgba(18, 181, 166, 0.1); border-color: var(--bz-aqua-line); }
@@ -108,30 +128,27 @@ tr.detail-row > td > * { animation: bz-reveal 0.26s var(--ease-out) backwards; }
 .bz-acts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-left: auto; }
 .bz-group { display: inline-flex; align-items: center; gap: 4px; }
 .bz-group + .bz-group { padding-left: 8px; border-left: 1px solid var(--hairline-strong); }
-.btn.bz-act, .xd-actions .btn {
+.btn.bz-act {
     --bz-tone: var(--bz-ocean); --bz-tint: var(--bz-ocean-tint); --bz-line: var(--bz-ocean-line);
     display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px; border-radius: 999px;
     font-weight: 650; text-decoration: none; color: var(--bz-tone); background: var(--bz-tint); border: 1px solid var(--bz-line);
     box-shadow: none; transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-.xd-actions .btn { height: 22px; padding: 0 9px; }
-.xd-actions .btn.icon { width: 24px; padding: 0; }
-.btn.bz-act svg, .xd-actions .btn svg { width: 12px; height: 12px; color: currentColor; }
-.btn.bz-act:hover, .xd-actions .btn:hover {
+.btn.bz-act svg { width: 12px; height: 12px; color: currentColor; }
+.btn.bz-act:hover {
     color: #fff; background: var(--bz-tone); border-color: var(--bz-tone);
     box-shadow: 0 3px 8px color-mix(in srgb, var(--bz-tone) 32%, transparent); transform: translateY(-1px);
 }
-.btn.bz-act:active, .xd-actions .btn:active { transform: none; box-shadow: none; }
-.btn.bz-act:focus-visible, .xd-actions .btn:focus-visible { outline: 2px solid var(--bz-tone); outline-offset: 2px; }
-.btn.bz-edit, .xd-actions .btn.primary {
+.btn.bz-act:active { transform: none; box-shadow: none; }
+.btn.bz-act:focus-visible { outline: 2px solid var(--bz-tone); outline-offset: 2px; }
+.btn.bz-edit {
     color: #fff; background: linear-gradient(180deg, #1882c4, #0b6aa6); border-color: #0a5f96;
     box-shadow: 0 1px 2px rgba(10, 46, 79, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
-.btn.bz-edit:hover, .xd-actions .btn.primary:hover { background: linear-gradient(180deg, #1d8fd6, #0b72b3); }
-.btn.bz-manage, .xd-actions [data-xp-action="refund"] { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
-.btn.bz-reverse, .xd-actions [data-xp-action="reverse"] { --bz-tone: var(--bz-gold); --bz-tint: var(--bz-gold-tint); --bz-line: var(--bz-gold-line); }
-.xd-actions [data-xp-action="paid-for"] { --bz-tone: var(--bz-violet); --bz-tint: var(--bz-violet-tint); --bz-line: var(--bz-violet-line); }
-.btn.bz-delete, .xd-actions [data-xp-action="delete"] { --bz-tone: var(--bz-red); --bz-tint: var(--bz-red-tint); --bz-line: var(--bz-red-line); }
+.btn.bz-edit:hover { background: linear-gradient(180deg, #1d8fd6, #0b72b3); }
+.btn.bz-manage { --bz-tone: var(--bz-aqua); --bz-tint: var(--bz-aqua-tint); --bz-line: var(--bz-aqua-line); }
+.btn.bz-reverse { --bz-tone: var(--bz-gold); --bz-tint: var(--bz-gold-tint); --bz-line: var(--bz-gold-line); }
+.btn.bz-delete { --bz-tone: var(--bz-red); --bz-tint: var(--bz-red-tint); --bz-line: var(--bz-red-line); }
 .btn.bz-close { width: 24px; height: 24px; padding: 0; border-radius: 50%; color: var(--text-secondary); }
 .btn.bz-close:hover { color: var(--bz-value); background: rgba(10, 79, 128, 0.1); }
 .ed-bar .btn.sm.bz-act, .ed-bar .btn.sm.bz-close { height: 24px; }
@@ -155,6 +172,79 @@ tr.detail-row > td > * { animation: bz-reveal 0.26s var(--ease-out) backwards; }
     .bz-claim-grid { grid-template-columns: minmax(0, 1fr); }
     .bz-acts { margin-left: 0; }
 }
+
+/* ===================================================================== budgets (#/planning)
+   The same page and sizes, in the brand's colours: the month strip on a soft ocean wash with a brand edge, spending in
+   ocean → aqua (amber → coral once over), committed money in violet; each figure with a tone dot; the list rows
+   edged by how they stand; the selected budget's tiles each in a tone of their own. */
+.budget-strip {
+    background: radial-gradient(120% 180% at 100% 0%, rgba(18, 181, 166, 0.12), transparent 55%),
+        linear-gradient(180deg, #f3f8fd, #e9f2fa);
+    border: 1px solid rgba(11, 106, 166, 0.22);
+    box-shadow: inset 0 3px 0 var(--bz-ocean), 0 2px 10px rgba(10, 46, 79, 0.07);
+}
+.budget-strip.is-over { box-shadow: inset 0 3px 0 #e0703f, 0 2px 10px rgba(10, 46, 79, 0.07); }
+.bs-spent { color: var(--bz-value); }
+.bs-label { color: var(--bz-ocean); }
+.bs-track { height: 10px; background: rgba(10, 79, 128, 0.1); }
+.bs-track .seg.c, .bs-legend .sw.c { background: linear-gradient(90deg, #8a7ff0, #6a5ad6); }
+.bs-track .seg.s { background: linear-gradient(90deg, #2d8fd5, #13a89a); }
+.bs-legend .sw.s { background: #13a89a; }
+.bs-track .seg.p { background: repeating-linear-gradient(135deg, rgba(19, 168, 154, 0.4) 0 4px, rgba(19, 168, 154, 0.12) 4px 8px); }
+.bs-legend .sw.p { background: repeating-linear-gradient(135deg, rgba(19, 168, 154, 0.6) 0 2px, rgba(19, 168, 154, 0.15) 2px 4px); }
+.budget-strip.is-over .bs-track .seg.s { background: linear-gradient(90deg, #f0a33c, #e0703f); }
+.bs-stat b, .bs-score > div > b { color: var(--bz-value); }
+.bs-stat small::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; background: var(--dot, var(--bz-ocean)); }
+.bs-stat:nth-child(5n + 2) { --dot: #12a493; }
+.bs-stat:nth-child(5n + 3) { --dot: #6a5ad6; }
+.bs-stat:nth-child(5n + 4) { --dot: #d39b26; }
+.bs-stat:nth-child(5n) { --dot: #e0703f; }
+.bs-stat.attn b { color: #8f6100; }
+.bs-score:not(.warn):not(.bad) .bs-ring { background: conic-gradient(#13a89a calc(var(--p) * 3.6deg), rgba(10, 79, 128, 0.1) 0); }
+.bs-ring b { background: #fff; color: var(--bz-value); }
+
+/* the budgets list: each row edged by how it stands, the bar in that tone */
+.bn-item { box-shadow: inset 3px 0 0 var(--bn-tone, #b9c6d3); }
+.bn-item.t-good { --bn-tone: #13a89a; }
+.bn-item.t-info { --bn-tone: #2d8fd5; }
+.bn-item.t-warn { --bn-tone: #e3a21a; }
+.bn-item.t-bad { --bn-tone: #d03b3b; }
+.bn-item.t-idle { --bn-tone: #b9c6d3; }
+.bn-item:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--bn-tone, #b9c6d3) 9%, transparent), transparent 70%); }
+.bn-item.selected { background: linear-gradient(90deg, rgba(11, 106, 166, 0.12), rgba(11, 106, 166, 0.04)); box-shadow: inset 3px 0 0 var(--bz-ocean), 0 0 0 1px rgba(11, 106, 166, 0.2); }
+.t-good .bn-bar em { background: linear-gradient(90deg, #36c9b8, #13a89a); }
+.t-info .bn-bar em { background: linear-gradient(90deg, #6cb7ea, #2d8fd5); }
+.t-warn .bn-bar em { background: linear-gradient(90deg, #f6cf6a, #e3a21a); }
+.t-bad .bn-bar em { background: linear-gradient(90deg, #f08a8a, #d03b3b); }
+.t-good .bn-status { color: #0b7a6f; }
+
+/* the selected budget: its progress on a wash in its pace tone, the tiles each in a tone */
+.budget-progress { background: linear-gradient(180deg, rgba(11, 106, 166, 0.1), rgba(11, 106, 166, 0.02)); }
+.budget-progress.pace-good { background: linear-gradient(180deg, rgba(18, 181, 166, 0.12), rgba(18, 181, 166, 0.02)); }
+.budget-progress.pace-warning { background: linear-gradient(180deg, rgba(227, 162, 26, 0.13), rgba(227, 162, 26, 0.02)); }
+.budget-progress.pace-over { background: linear-gradient(180deg, rgba(208, 59, 59, 0.1), rgba(208, 59, 59, 0.02)); }
+.bp-amounts b { color: var(--bz-value); }
+.bp-amounts .bp-pct { color: var(--bz-ocean); }
+.bp-track > span { background: linear-gradient(90deg, #36c9b8, #13a89a); }
+.bp-track.ahead > span { background: linear-gradient(90deg, #6cb7ea, #2d8fd5); }
+.bp-track.warning > span { background: linear-gradient(90deg, #f6cf6a, #e3a21a); }
+.bp-track.over > span { background: linear-gradient(90deg, #f08a8a, #d03b3b); }
+.bp-details .metric { --tone: var(--bz-ocean); background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 9%, #fff), #fff); border-color: color-mix(in srgb, var(--tone) 26%, transparent); box-shadow: inset 0 2px 0 var(--tone); }
+.bp-details .metric:nth-child(6n + 2) { --tone: #12a493; }
+.bp-details .metric:nth-child(6n + 3) { --tone: #6a5ad6; }
+.bp-details .metric:nth-child(6n + 4) { --tone: #d39b26; }
+.bp-details .metric:nth-child(6n + 5) { --tone: #e0703f; }
+.bp-details .metric:nth-child(6n) { --tone: #5f7a94; }
+.bp-details .metric-icon { background: color-mix(in srgb, var(--tone) 14%, #fff); color: var(--tone); }
+.bp-details .metric .label { color: var(--tone); }
+.bp-details .metric.highlight { --tone: #d03b3b; }
+
+/* the side: the watch list and the analysis cards with a brand edge */
+.planning-page .side-card { border-color: rgba(11, 106, 166, 0.18); box-shadow: inset 0 2px 0 rgba(11, 106, 166, 0.5), var(--shadow-sm); }
+.planning-page .side-card.watch { box-shadow: inset 0 2px 0 #e3a21a, var(--shadow-sm); }
+.watch-item { border-left-width: 3px; }
+.watch-item.good { background: rgba(18, 181, 166, 0.07); }
+.watch-item.info { background: rgba(11, 106, 166, 0.06); border-left-color: #2d8fd5; }
 
 /* ===================================================================== progress: fills in, then a soft sheen runs over it */
 :is(.progress > span, .xd-bar em, .progress-mini i, .grp-bar i, .h-meter i, .xs-bar em, .cs-bar em, .cr-bar em, .in-bar em,

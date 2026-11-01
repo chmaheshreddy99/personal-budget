@@ -700,7 +700,10 @@ export function interestAccountFilter(kind) {
 export const settlesOnPosting = (a, kind) => ['BANK', 'CASH', 'WALLET'].includes(a?.accountType)
     || (KIND_META[kind]?.payable && a?.accountType === 'CREDIT_CARD');
 
-/** Post finished months (all waiting, or up to one month) to the default or another account. */
+/**
+ * Post finished months (all waiting, or up to one month) to the default or another account, on the date chosen:
+ * filled in with the last day of the months; left as it is, each month keeps its own last day.
+ */
 async function openPostInterest(claim, upToPeriod, onChanged) {
     const accounts = await loadAccounts();
     const lastPosted = claim.postings.length ? claim.postings[claim.postings.length - 1].periodNo : 0;
@@ -708,6 +711,9 @@ async function openPostInterest(claim, upToPeriod, onChanged) {
     const compound = claim.interestType === 'COMPOUND';
     const estimate = months.reduce((s, p) => s + Number(compound ? p.compoundInterest : p.simpleInterest), 0);
     const payable = KIND_META[claim.kind]?.payable;
+    const today = isoDate();
+    const lastDay = months.length ? months[months.length - 1].to : today;
+    const defaultDate = lastDay > today ? today : lastDay;
     openModal({
         title: `Post interest · ${claim.party}`, iconName: 'percent',
         body: `<form class="form-grid one">
@@ -718,6 +724,9 @@ async function openPostInterest(claim, upToPeriod, onChanged) {
                 <div class="small muted">${payable ? 'Booked as Loan Interest (expense).' : 'Booked as Interest income.'}
                     Interest already received directly is not booked again.</div>
             </div>
+            <label class="field"><span>Posting date</span>
+                <input type="date" name="entryDate" value="${defaultDate}" min="${months[0]?.from || claim.startDate}" max="${today}" required></label>
+            <div class="small muted" data-date-hint></div>
             <label class="field"><span>${payable ? 'Owed in' : 'Owed to you in'}</span>
                 <select name="accountId">${accountOptions(accounts, interestAccountFilter(claim.kind), claim.interestAccountId, 'Choose account')}</select></label>
             <div class="small" data-account-hint></div>
@@ -734,14 +743,31 @@ async function openPostInterest(claim, upToPeriod, onChanged) {
             };
             select.addEventListener('change', hint);
             hint();
+            const form = m.el.querySelector('form');
+            const dateHint = () => {
+                const chosen = form.entryDate.value;
+                const several = months.length > 1 && !form.combine?.checked;
+                m.el.querySelector('[data-date-hint]').innerHTML = `${icon('calendar')} ${chosen === defaultDate
+                    ? (several ? 'Each month is dated on its own last day.' : 'The last day of the interest period.')
+                    : `${several ? `All ${months.length} entries are` : 'The entry is'} dated ${esc(date(chosen))}.`}`;
+            };
+            form.entryDate.addEventListener('input', dateHint);
+            form.combine?.addEventListener('change', dateHint);
+            dateHint();
         },
         actions: [{ label: 'Cancel' }, {
             label: 'Post interest', kind: 'primary', iconName: 'check',
             onClick: async m => {
                 const form = m.el.querySelector('form');
                 const accountId = Number(form.accountId.value) || null;
+                const entryDate = form.entryDate.value;
+                if (!entryDate || !form.entryDate.checkValidity()) {
+                    form.entryDate.reportValidity();
+                    throw new Error(`Choose a posting date between ${date(form.entryDate.min)} and today`);
+                }
                 const saved = await api.post(`/claims/${claim.id}/interest`, {
                     upToPeriod: upToPeriod, accountId, makeDefault: form.makeDefault.checked, combine: form.combine?.checked || false,
+                    entryDate: entryDate === defaultDate ? null : entryDate,   // left as filled in: each month on its own last day
                 });
                 toast(`Interest posted · ${money(saved.interestPosted)} booked so far`);
                 onChanged?.();

@@ -335,6 +335,28 @@ class PersonalBudgetApplicationTests {
         assertThat(reports.trialBalance(LocalDate.now()).balanced()).isTrue();
     }
 
+    @Test
+    void interestPostedByHandCanBeDatedButNotInTheFutureNorBeforeItsMonths() {
+        Long bank = accounts.findByTenantId(UserContext.tenantId()).stream()
+                .filter(a -> a.getAccountType() == AccountType.BANK).findFirst().orElseThrow().getId();
+        LocalDate start = LocalDate.now().minusMonths(2).minusDays(3);
+        ClaimView claim = claims.create(new ClaimRequest(ClaimKind.LENT, "Dated Friend", null, new BigDecimal("20000"),
+                start, null, new BigDecimal("12"), null, bank, null, null, null, null, null, false, null));
+
+        assertThatThrownBy(() -> claims.postInterest(claim.id(), false, 1, null, false, false, LocalDate.now().plusDays(1)))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("future");
+        assertThatThrownBy(() -> claims.postInterest(claim.id(), false, 1, null, false, false, start.minusDays(1)))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("before");
+
+        LocalDate chosen = LocalDate.now().minusDays(2);
+        ClaimView dated = claims.postInterest(claim.id(), false, 1, null, false, false, chosen);         // month 1, on the day chosen
+        assertThat(entries.findById(dated.postings().getFirst().journalEntryId()).orElseThrow().getEntryDate()).isEqualTo(chosen);
+        ClaimView usual = claims.postInterest(claim.id(), false);                                       // month 2, on its last day
+        var month2 = usual.postings().getLast();
+        assertThat(entries.findById(month2.journalEntryId()).orElseThrow().getEntryDate()).isEqualTo(month2.to());
+        assertThat(reports.trialBalance(LocalDate.now()).balanced()).isTrue();
+    }
+
     @Autowired com.aditya.personalbudget.service.BudgetService budgetService;
 
     @Test

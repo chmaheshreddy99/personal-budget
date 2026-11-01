@@ -83,7 +83,7 @@ public class ClaimController {
                                   @RequestBody(required = false) com.aditya.personalbudget.dto.ClaimDtos.PostInterestRequest request) {
         return request == null ? claims.postInterest(id, false)
                 : claims.postInterest(id, false, request.upToPeriod(), request.accountId(), Boolean.TRUE.equals(request.makeDefault()),
-                        Boolean.TRUE.equals(request.combine()));
+                        Boolean.TRUE.equals(request.combine()), request.entryDate());
     }
 
     /** When interest is collected (every month, every year, whenever paid) and whether it is booked automatically. */

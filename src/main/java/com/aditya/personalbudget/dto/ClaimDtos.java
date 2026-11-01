@@ -143,7 +143,9 @@ public final class ClaimDtos {
     /** Post finished months of interest: all of them, or up to (and including) one month; to an account. */
     public record PostInterestRequest(Integer upToPeriod, Long accountId, Boolean makeDefault,
                                       /* book all the months as one entry (e.g. a year's interest) */
-                                      Boolean combine) {
+                                      Boolean combine,
+                                      /* the date of the journal entries; empty: each one on the last day of its months */
+                                      LocalDate entryDate) {
     }
 
     /** When interest is collected and whether it is booked automatically as each period ends. */

@@ -1408,14 +1408,14 @@ async function expenseDetail(r, ctx = {}) {
         </div>
         ${e.itemized ? billItemsHtml(r, manage) : ''}
         <div class="xd-cards ${e.itemized ? 'xb-cards' : ''}">
-            <div class="xd-card">
+            <div class="xd-card xd-posting">
                 <div class="xd-card-head">${icon('journal')}Posting</div>
                 ${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span><span class="ellipsis">${esc(l.accountName)}${e.itemized
                     ? (l.memo && Number(l.debit) ? ` <span class="muted">· ${esc(l.memo)}</span>` : '')
                     : l.categoryId && l.categoryId === e.categoryId ? ` <span class="muted">· ${esc(e.categoryName)}</span>` : ''}</span>
                     <b class="mono ${Number(l.debit) ? '' : 'muted'}">${money(Number(l.debit) || Number(l.credit))}</b></div>`).join('')}
             </div>
-            ${e.itemized ? '' : `<div class="xd-card">
+            ${e.itemized ? '' : `<div class="xd-card xd-category">
                 <div class="xd-card-head">${icon('tag')}${esc(e.categoryName)}</div>
                 ${used !== null ? `<div class="xd-line"><span>Budget ${esc(ctx.monthLabel || '')}</span><b class="mono ${used > 100 ? 'neg' : ''}">${money(line.spent)} / ${moneyShort(limit)}</b></div>
                     <i class="xd-bar ${used > 100 ? 'over' : used > 80 ? 'warn' : ''}"><em style="width:${Math.min(used, 100)}%"></em></i>
@@ -1424,7 +1424,7 @@ async function expenseDetail(r, ctx = {}) {
                 <div class="xd-line small"><span class="muted">In this list</span><span>${sameCat.length}× · <b class="mono">${moneyShort(spentCat)}</b></span></div>
                 <div class="xd-line small"><span class="muted">This one</span><span>${spentCat ? percent(r.amount / spentCat * 100, 0) : '—'} of it</span></div>
             </div>`}
-            <div class="xd-card">
+            <div class="xd-card xd-payee">
                 <div class="xd-card-head">${icon(e.party ? 'user' : 'wallet')}${e.party ? esc(e.party) : 'Paid from'}</div>
                 ${e.party ? `<div class="xd-line small"><span class="muted">Here in this list</span><span>${samePlace.length}× · <b class="mono">${moneyShort(samePlace.reduce((s, x) => s + x.amount, 0))}</b></span></div>
                     <div class="xd-line small"><span class="muted">Average</span><b class="mono">${money(Math.round(samePlace.reduce((s, x) => s + x.amount, 0) / (samePlace.length || 1)))}</b></div>` : ''}
