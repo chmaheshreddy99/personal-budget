@@ -94,7 +94,9 @@ public final class PlanningDtos {
             BigDecimal safePerDay,
             LocalDate limitReachedOn,
             /* one plain sentence for the card */
-            String insight) {
+            String insight,
+            /* no budget, and the user asked not to be offered one */
+            boolean budgetIgnored) {
     }
 
     public record BudgetSummary(
@@ -115,7 +117,9 @@ public final class PlanningDtos {
             /* budgets in the month before, for "copy last month" */
             int previousMonthBudgets,
             BigDecimal previousMonthTotal,
-            List<BudgetAlert> alerts) {
+            List<BudgetAlert> alerts,
+            /* the part of unbudgetedSpent in categories the user chose not to budget */
+            BigDecimal ignoredSpent) {
     }
 
     /**

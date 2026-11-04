@@ -6,6 +6,7 @@
  *    with an inflation-adjusted view.
  */
 import { api } from '../core/api.js';
+import { readQuery, setQuery } from '../core/route.js';
 import { panel, table, esc, kpi } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, percent } from '../core/format.js';
@@ -237,6 +238,7 @@ export function calculateInterest({ mode, amount, rate, years, compounding, infl
 }
 
 export function renderInterestCalculator(el) {
+    if (['lumpsum', 'monthly', 'loan'].includes(readQuery().get('mode'))) interestInputs.mode = readQuery().get('mode');   // #/forecast/interest?mode=loan
     el.innerHTML = `
     <div class="planner interest-planner">
         ${panel({
@@ -334,6 +336,7 @@ export function renderInterestCalculator(el) {
         const tile = e.target.closest('[data-mode]');
         if (!tile) return;
         interestInputs.mode = tile.dataset.mode;
+        setQuery({ mode: interestInputs.mode });
         form.querySelectorAll('.mode-tile').forEach(t => t.classList.toggle('active', t === tile));
         fields();
         draw();

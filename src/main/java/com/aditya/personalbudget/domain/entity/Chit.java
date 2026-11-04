@@ -57,6 +57,10 @@ public class Chit implements TenantOwned {
     @Column(length = 20)
     private String organizerPhone;
 
+    /** Organizer's e-mail: a plain copy of each installment paid goes to it (Settings › Alerts). */
+    @Column(length = 120)
+    private String organizerEmail;
+
     /** Organizer's UPI ID (VPA) for paying installments by QR code, e.g. shriram@hdfcbank. */
     @Column(length = 60)
     private String organizerUpi;
@@ -134,6 +138,36 @@ public class Chit implements TenantOwned {
 
     @Column(length = 255)
     private String notes;
+
+    // ---- lift terms: what lifting (taking the prize before maturity) gets and costs with this organizer; the
+    //      Lift or hold analyzer (Forecast) uses them. Empty: lifting pays the maturity amount less nothing, and the
+    //      installments stay as they are.
+
+    /** After lifting, what is paid each month instead of the usual installment (often the full amount, no dividend). */
+    @PositiveOrZero
+    private BigDecimal afterLiftInstallment;
+
+    /** Lifting early pays less: the cut off the maturity amount, percent, if lifted in the first month allowed. */
+    @PositiveOrZero
+    private BigDecimal liftDiscountFirst;
+
+    /** The cut in the last month (the cut runs in a straight line from the first to the last). */
+    @PositiveOrZero
+    private BigDecimal liftDiscountLast;
+
+    /** A one-time charge on lifting (documents, surety, the organizer's fee), percent of the payout. */
+    @PositiveOrZero
+    private BigDecimal liftFeePercent;
+
+    /** Lifting is allowed from this installment on (empty: from the first). */
+    private Integer liftFromMonth;
+
+    /**
+     * The lift table: what lifting pays in each month, over the straight line, and (optionally) what is paid each month
+     * after lifting in that month: "month=payout" or "month=payout@installment", comma separated.
+     */
+    @Column(length = 6000)
+    private String liftChart;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;

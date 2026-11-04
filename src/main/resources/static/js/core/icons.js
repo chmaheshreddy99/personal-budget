@@ -23,6 +23,12 @@ const PATHS = {
     bank: '<path d="M3 22h18"/><path d="M6 18v-7M10 18v-7M14 18v-7M18 18v-7"/><path d="M12 2 20 7H4z"/>',
     card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
     cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+    // a cash account: one ₹500 note, ₹ in the middle (shown on the note's stone green, tone "sage")
+    'cash-note': '<rect x="2" y="5.5" width="20" height="13" rx="2.2"/><path d="M5.6 12h.01M18.4 12h.01"/><path stroke-width="1.6" d="M9.5 8.6h5M9.5 11h5M11 8.6c1.7 0 2.6.9 2.6 2.2s-.9 2.2-2.6 2.2H9.5l3.6 3.4"/>',
+    // a chit: ₹ going round among the members (shown in gold)
+    'chit-book': '<path d="M20.4 12a8.4 8.4 0 0 1-14.5 5.8"/><path d="M3.6 12a8.4 8.4 0 0 1 14.5-5.8"/><path d="M18.4 2.9v3.3h-3.3"/><path d="M5.6 21.1v-3.3h3.3"/><path stroke-width="1.8" d="M9.4 8.2h5.2M9.4 10.8h5.2M11 8.2c1.8 0 2.8 1 2.8 2.3s-1 2.3-2.8 2.3H9.4l3.8 3.6"/>',
+    // a wallet with its ₹ clasp
+    'wallet-cash': '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M21 11h-4a2 2 0 0 0 0 4h4"/><path d="M17 13h.01"/>',
     coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
     receipt: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M8 7h8M8 11h8"/><path d="M12 17.5 8 15h1a4 4 0 0 0 0-8"/>',
     journal: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
@@ -229,24 +235,6 @@ export function categoryIcon(name = '') {
  * Full-colour artwork for the money accounts (cash, wallets, coins): real-looking rupee notes, a wallet with notes in it and a
  * stack of coins, drawn flat so they stay crisp at 20 px. icon(name) returns these as they are (they keep their own colours).
  */
-/**
- * A rupee note as on the real series, drawn to stay readable from 20 px up: its colour, a bold frame, the portrait as a solid disc, the
- * security thread and the value in large figures. At x, y, w × h in a 48 × 48 box, turned by rot degrees about its centre.
- */
-function note(x, y, w, h, rot, paper, ink, value) {
-    const cx = x + w / 2, cy = y + h / 2;
-    return `<g transform="rotate(${rot} ${cx} ${cy})">
-        <rect x="${x + 0.8}" y="${y + 1.6}" width="${w}" height="${h}" rx="2.6" fill="#0b2038" opacity=".22"/>
-        <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2.6" fill="${paper}" stroke="${ink}" stroke-width="1.5"/>
-        <rect x="${x + 2.2}" y="${y + 2.2}" width="${w - 4.4}" height="${h - 4.4}" rx="1.4" fill="none" stroke="${ink}" stroke-width=".8" opacity=".55"/>
-        <circle cx="${x + w * 0.3}" cy="${cy}" r="${h * 0.27}" fill="#fff" opacity=".75" stroke="${ink}" stroke-width=".9"/>
-        <circle cx="${x + w * 0.3}" cy="${cy - h * 0.05}" r="${h * 0.12}" fill="${ink}" opacity=".7"/>
-        <rect x="${x + w * 0.52}" y="${y + 1}" width="1.8" height="${h - 2}" fill="${ink}" opacity=".55"/>
-        <text x="${x + w - 2.6}" y="${y + h - 3.2}" text-anchor="end" font-size="${(h * 0.46).toFixed(1)}" font-weight="900" fill="${ink}" font-family="Arial, Helvetica, sans-serif">${value}</text>
-        <text x="${x + w - 2.8}" y="${y + h * 0.4}" text-anchor="end" font-size="${(h * 0.32).toFixed(1)}" font-weight="900" fill="${ink}" font-family="Arial, Helvetica, sans-serif">₹</text>
-    </g>`;
-}
-
 /** A gold coin from the side and the top, with ₹ on its face. */
 function coin(cx, cy, rx, ry, depth) {
     return `<path d="M${cx - rx} ${cy}v${depth}a${rx} ${ry} 0 0 0 ${2 * rx} 0v${-depth}z" fill="#d18a0e" stroke="#6b4600" stroke-width="1.2"/>
@@ -256,27 +244,12 @@ function coin(cx, cy, rx, ry, depth) {
 }
 
 /**
- * Full-colour artwork for the money accounts: two real-looking rupee notes (₹200 yellow behind a ₹500 stone-grey), a leather wallet with notes,
- * gold coins and a chit passbook. Flat colours (no gradients, so many share a page) and bold outlines, readable from 20 px.
+ * Full-colour artwork (gold coins), kept for where a picture is wanted. Cash, wallets and chits are drawn as plain line icons
+ * like every other account (cash-note, wallet-cash, chit-book above), small and in their tile's colour.
  * icon(name) returns these as they are: they keep their own colours.
  */
 const ART = {
-    'cash-note': note(3, 7, 38, 21, -11, '#f6c945', '#6e4b00', '200') + note(8, 18, 38, 22, 3, '#c9d2b5', '#33402a', '500'),
-    'wallet-cash': note(10, 3, 30, 17, -8, '#f6c945', '#6e4b00', '200') + `
-        <rect x="3.8" y="19.6" width="41" height="25" rx="5.5" fill="#0b2038" opacity=".22"/>
-        <rect x="3" y="18" width="41" height="25" rx="5.5" fill="#9c5a24" stroke="#4a2808" stroke-width="1.6"/>
-        <rect x="6" y="21" width="35" height="19" rx="3.6" fill="none" stroke="#e9b882" stroke-width="1" stroke-dasharray="2 1.6"/>
-        <rect x="27" y="25.5" width="18" height="12" rx="4" fill="#bd7432" stroke="#4a2808" stroke-width="1.5"/>
-        <circle cx="34" cy="31.5" r="2.8" fill="#ffcf3f" stroke="#6b4600" stroke-width="1"/>`,
     'coin-stack': coin(16, 38, 11, 4.6, 4.2) + coin(16, 31.5, 11, 4.6, 4.2) + coin(16, 25, 11, 4.6, 4.2) + coin(33, 34, 10, 4.2, 4) + coin(33, 27.5, 10, 4.2, 4) + coin(31, 15, 9.5, 9.5, 0),
-    'chit-book': `<rect x="7.8" y="5.8" width="28" height="36" rx="3.2" fill="#0b2038" opacity=".25"/>
-        <rect x="6" y="4" width="28" height="36" rx="3.2" fill="#174a85" stroke="#0a2a52" stroke-width="1.6"/>
-        <rect x="6" y="4" width="6" height="36" rx="2.4" fill="#0f3a6b"/>
-        <rect x="32" y="6.5" width="3.2" height="31" rx="1" fill="#f6f2e4" stroke="#bcb497" stroke-width=".8"/>
-        <text x="22.5" y="15.5" text-anchor="middle" font-size="8.6" font-weight="900" fill="#ffd45e" font-family="Arial, Helvetica, sans-serif" letter-spacing=".3">CHIT</text>
-        <circle cx="22.5" cy="26" r="7.2" fill="#ffd45e" stroke="#9a6c00" stroke-width="1.2"/>
-        <text x="22.5" y="30.2" text-anchor="middle" font-size="11" font-weight="900" fill="#174a85" font-family="Arial, Helvetica, sans-serif">₹</text>`
-        + coin(37, 41, 9.5, 3.8, 3.6) + coin(37, 35.6, 9.5, 3.8, 3.6),
 };
 
 export function icon(name, extraClass = '') {
@@ -296,11 +269,11 @@ export function hydrateIcons(root = document) {
 /** The icon and color family that represents an account type. */
 export function accountTypeIcon(type) {
     const map = {
-        CASH: ['cash-note', 'art'], BANK: ['bank', ''], WALLET: ['wallet-cash', 'art'], MEAL_CARD: ['meal-card', 'aqua'],
+        CASH: ['cash-note', 'sage'], BANK: ['bank', ''], WALLET: ['wallet-cash', 'aqua'], MEAL_CARD: ['meal-card', 'aqua'],
         FIXED_DEPOSIT: ['lock', 'violet'], RECURRING_DEPOSIT: ['repeat', 'violet'], SAVINGS_SCHEME: ['piggy', 'violet'],
         MUTUAL_FUND: ['trending', 'violet'], STOCKS: ['trending', 'violet'], BONDS: ['report', 'violet'],
         GOLD: ['gem', 'gold'], SILVER: ['gem', 'gray'], REAL_ESTATE: ['home', ''], VEHICLE: ['car', 'gray'],
-        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['chit-book', 'art'], RECEIVABLE: ['arrow-in', 'aqua'],
+        INSURANCE_POLICY: ['shield', ''], CHIT_FUND: ['chit-book', 'gold'], RECEIVABLE: ['arrow-in', 'aqua'],
         LOAN_GIVEN: ['hand', 'aqua'], OTHER_ASSET: ['layers', 'gray'],
         CREDIT_CARD: ['card', 'coral'], HOME_LOAN: ['home', 'red'], VEHICLE_LOAN: ['car', 'red'],
         PERSONAL_LOAN: ['briefcase', 'red'], GOLD_LOAN: ['gem', 'red'], EDUCATION_LOAN: ['journal', 'red'],

@@ -22,6 +22,12 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import com.facebook.react.bridge.WritableArray
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -34,11 +40,18 @@ import java.lang.ref.WeakReference
  *  - bank SMS: detection on or off, the SMS caught while the app was closed (see [SmsReceiver]), and reading the
  *    recent inbox; a new SMS is also sent to the running app as the "BudgetSms" event;
  *  - evidence: a photo from the camera, or an image or PDF picked from the phone, kept in the app's own files
- *    (photos turned upright and made at most 1600 px, JPEG) until it is uploaded.
+ *    (photos turned upright and made at most 1600 px, JPEG) until it is uploaded;
+ *  - bills read on the phone ([BillOcr]): scanned with the document scanner (pages, edges found, straightened), scanned
+ *    like a video ([LiveScanActivity], for a long bill), or photos already taken; each gives the bill's rows and its
+ *    photos, which stay as the expense's evidence.
+ * The SMS parts exist only in the "sms" build (BuildConfig.SMS); the standard build asks for no SMS permission.
  */
 class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
 
     override fun getName() = NAME
+
+    /** SMS_BUILD: whether this build reads bank SMS (the "sms" edition); the standard one never asks for SMS. */
+    override fun getConstants(): MutableMap<String, Any> = mutableMapOf("SMS_BUILD" to com.personalbudget.app.BuildConfig.SMS)
 
     override fun initialize() {
         super.initialize()
@@ -185,6 +198,130 @@ class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactCo
         }
     }
 
+    // ------------------------------------------------------------------ bills read on the phone
+
+    private var scanPending: Promise? = null
+
+    /**
+     * mode "document": the document scanner (Google Play services: finds the bill's edges, straightens it, several
+     * pages, or pictures from the gallery); "live": the camera reads a long bill as it moves down it. Resolves with
+     * {rows: JSON of the bill's rows, images: [{path, name, type, size}]}, or null when cancelled.
+     */
+    @ReactMethod
+    fun scanBill(mode: String, promise: Promise) {
+        val activity = context.currentActivity
+        if (activity == null) { promise.reject("SCAN", "The app is not in front"); return }
+        if (scanPending != null) { promise.reject("SCAN", "A scan is already open"); return }
+        scanPending = promise
+        try {
+            if (mode == "live") {
+                activity.startActivityForResult(Intent(activity, LiveScanActivity::class.java), REQ_LIVE)
+                return
+            }
+            val options = GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(15)
+                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build()
+            GmsDocumentScanning.getClient(options).getStartScanIntent(activity)
+                .addOnSuccessListener { sender ->
+                    try { activity.startIntentSenderForResult(sender, REQ_SCAN, null, 0, 0, 0) }
+                    catch (e: Exception) { scanPending = null; promise.reject("SCAN", e.message, e) }
+                }
+                .addOnFailureListener { e ->
+                    scanPending = null
+                    promise.reject("SCAN", "The document scanner is not ready on this phone (it comes with Google Play services). Try the long-bill scan or a photo. ${e.message ?: ""}".trim(), e)
+                }
+        } catch (e: Exception) {
+            scanPending = null
+            promise.reject("SCAN", e.message, e)
+        }
+    }
+
+    /** Reads photos already on the phone (paths in the app's files, JSON array), as pages of one bill: {rows}. */
+    @ReactMethod
+    fun ocrImages(pathsJson: String, promise: Promise) {
+        Thread {
+            try {
+                val paths = JSONArray(pathsJson)
+                val merger = RowMerger()
+                for (i in 0 until paths.length()) {
+                    val f = File(paths.getString(i))
+                    if (!f.canonicalPath.startsWith(context.filesDir.canonicalPath) && !f.canonicalPath.startsWith(context.cacheDir.canonicalPath)) continue
+                    val text = Tasks.await(BillOcr.recognizer.process(InputImage.fromFilePath(context, Uri.fromFile(f))))
+                    merger.addPage(BillOcr.rows(text))
+                }
+                promise.resolve(Arguments.createMap().apply { putString("rows", JSONArray(merger.rows).toString()) })
+            } catch (e: Exception) {
+                promise.reject("SCAN", "The bill could not be read: ${e.message}", e)
+            }
+        }.start()
+    }
+
+    /** Reads the photos of a bill again, cleaned up ("contrast" or "large": [BillOcr.enhanced]), for a read that did not match: {rows}. */
+    @ReactMethod
+    fun ocrImagesEnhanced(pathsJson: String, pass: String, promise: Promise) {
+        Thread {
+            try {
+                val paths = JSONArray(pathsJson)
+                val merger = RowMerger()
+                for (i in 0 until paths.length()) {
+                    val f = File(paths.getString(i))
+                    if (!f.canonicalPath.startsWith(context.filesDir.canonicalPath) && !f.canonicalPath.startsWith(context.cacheDir.canonicalPath)) continue
+                    val text = Tasks.await(BillOcr.recognizer.process(InputImage.fromBitmap(BillOcr.enhanced(f, pass), 0)))
+                    merger.addPage(BillOcr.rows(text))
+                }
+                promise.resolve(Arguments.createMap().apply { putString("rows", JSONArray(merger.rows).toString()) })
+            } catch (e: Throwable) {
+                // a second look only: a photo too big for memory is no reason to lose the first read
+                promise.reject("SCAN", "The bill could not be read again: ${e.message}", e)
+            }
+        }.start()
+    }
+
+    /** The scanner's pages: each read, then kept (upright, at most 1600 px) as evidence. */
+    private fun finishDocumentScan(promise: Promise, data: Intent?) {
+        val pages = GmsDocumentScanningResult.fromActivityResultIntent(data)?.pages.orEmpty()
+        if (pages.isEmpty()) { promise.resolve(null); return }
+        Thread {
+            try {
+                val merger = RowMerger()
+                val images: WritableArray = Arguments.createArray()
+                for (page in pages) {
+                    val text = Tasks.await(BillOcr.recognizer.process(InputImage.fromFilePath(context, page.imageUri)))
+                    merger.addPage(BillOcr.rows(text))
+                    val bytes = context.contentResolver.openInputStream(page.imageUri)?.use { it.readBytes() }
+                    if (bytes != null) images.pushMap(saveImage(bytes))
+                }
+                promise.resolve(Arguments.createMap().apply {
+                    putString("rows", JSONArray(merger.rows).toString())
+                    putArray("images", images)
+                })
+            } catch (e: Exception) {
+                promise.reject("SCAN", "The bill could not be read: ${e.message}", e)
+            }
+        }.start()
+    }
+
+    private fun finishLiveScan(promise: Promise, resultCode: Int, data: Intent?) {
+        val error = data?.getStringExtra("error")
+        if (resultCode != Activity.RESULT_OK) {
+            if (error != null) promise.reject("SCAN", error) else promise.resolve(null)
+            return
+        }
+        val images: WritableArray = Arguments.createArray()
+        val frames = JSONArray(data?.getStringExtra("frames") ?: "[]")
+        for (i in 0 until frames.length()) {
+            val f = File(frames.getString(i))
+            if (f.exists()) images.pushMap(describe(f, f.name, "image/jpeg"))
+        }
+        promise.resolve(Arguments.createMap().apply {
+            putString("rows", data?.getStringExtra("rows") ?: "[]")
+            putArray("images", images)
+        })
+    }
+
     // ------------------------------------------------------------------ the phone's own lock
 
     private var authPending: Promise? = null
@@ -213,6 +350,14 @@ class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactCo
     }
 
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQ_SCAN || requestCode == REQ_LIVE) {
+            val p = scanPending ?: return
+            scanPending = null
+            if (requestCode == REQ_LIVE) finishLiveScan(p, resultCode, data)
+            else if (resultCode != Activity.RESULT_OK) p.resolve(null)
+            else finishDocumentScan(p, data)
+            return
+        }
         if (requestCode == REQ_AUTH) {
             val p = authPending ?: return
             authPending = null
@@ -342,6 +487,8 @@ class BudgetBridgeModule(private val context: ReactApplicationContext) : ReactCo
         private const val REQ_CAMERA = 7301
         private const val REQ_FILES = 7302
         private const val REQ_AUTH = 7303
+        private const val REQ_SCAN = 7304
+        private const val REQ_LIVE = 7305
         private const val MAX_SIDE = 1600
         const val EVENT_SMS = "BudgetSms"
         @Volatile

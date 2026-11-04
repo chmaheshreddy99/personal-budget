@@ -1,7 +1,8 @@
 /**
- * Balance sheet: a classic two-column statement (Assets | Liabilities & Equity) on any date, with three
- * compact cards on top (assets and liabilities with their parts, net worth with how it is funded). Groups holding a single account show as one row,
- * the asset / liability mix fills the space under equity, and a slim right-hand pane holds suggestions,
+ * Balance sheet: a compact two-column statement (Assets | Liabilities & Equity) on any date, the date with its month
+ * arrows in the top middle, with four cards on top (assets and liabilities with their parts, net worth with how it is
+ * funded, liquid money with what of it is free to invest). Groups holding a single account show as one row, the asset and
+ * liability mix and the liquid money over the year fill the space under equity, and a slim right-hand pane holds suggestions,
  * the net-worth trend, health ratios, dues profile and the biggest movers.
  *
  * Receivables and Payables open into the people behind them: who owes you (and whom you owe) how much, the change since
@@ -16,7 +17,7 @@ import { loadAccounts } from '../core/store.js';
 import { esc, printElement } from '../core/ui.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
-import { lineChart } from '../core/charts.js';
+import { lineChart, donutChart, legend } from '../core/charts.js';
 import { money, moneyShort, percent, isoDate, date, shortDate } from '../core/format.js';
 
 /** "Compare with" presets: the comparison date for a given as-of date. */
@@ -42,6 +43,7 @@ export async function render(container, _params, isCurrent) {
         view.asOf = isDate(q.get('asOf')) ? q.get('asOf') : isoDate();
         view.compare = q.get('compare') in COMPARE ? q.get('compare') : 'month';
         if (isDate(q.get('to'))) view.compareTo = q.get('to');
+        view.showPrevious = q.get('previous') === '1';
     }
     const asOfDate = new Date(view.asOf + 'T00:00:00');
     view.compareTo = COMPARE[view.compare].date(asOfDate) || view.compareTo;
@@ -52,7 +54,7 @@ export async function render(container, _params, isCurrent) {
     if (!isCurrent()) return;
     view.compareTo = bs.compareDate;
     PEOPLE = new Map((bs.counterparties || []).map(c => [c.accountId, c]));
-    const query = { asOf: view.asOf === isoDate() ? null : view.asOf, compare: view.compare === 'month' ? null : view.compare, to: view.compare === 'custom' ? view.compareTo : null };
+    const query = { asOf: view.asOf === isoDate() ? null : view.asOf, compare: view.compare === 'month' ? null : view.compare, to: view.compare === 'custom' ? view.compareTo : null, previous: view.showPrevious };
     showPageRoute('balance-sheet', routeHash('balance-sheet', query), Object.values(query).join('|'), { routed: fromAddress(_params) });
     const reload = () => render(container, [], isCurrent);
 
@@ -61,19 +63,25 @@ export async function render(container, _params, isCurrent) {
 
     container.innerHTML = `
     <div class="page balance-page">
-        <div class="page-toolbar glass">
-            <h2 class="page-title">${icon('scale')} Balance sheet</h2>
-            ${bs.balanced ? `<span class="badge good">${icon('check-circle')}Balanced</span>`
-                          : `<span class="badge critical">${icon('alert')}Out of balance</span>`}
-            <span class="spacer"></span>
-            <label class="row small secondary">As of <input type="date" id="asof" value="${bs.asOf}" max="${isoDate()}"></label>
-            <span class="small secondary">compare with</span>
-            <div class="seg-chips sm" id="bs-compare">${Object.entries(COMPARE).map(([k, c]) =>
-                `<button class="seg-chip ${view.compare === k ? 'active' : ''}" data-compare="${k}">${c.label}</button>`).join('')}</div>
-            ${view.compare === 'custom' ? `<input type="date" id="compare" value="${bs.compareDate}" max="${bs.asOf}">` : `<span class="small muted">${date(bs.compareDate)}</span>`}
-            <label class="switch small"><input type="checkbox" id="bs-prev" ${view.showPrevious ? 'checked' : ''}><span></span>Previous column</label>
-            ${exportButton({ label: '' })}
-            <button class="btn sm" id="print" title="Print">${icon('printer')}</button>
+        <div class="page-toolbar glass bs-toolbar">
+            <div class="bs-tb-side">
+                <h2 class="page-title">${icon('scale')} Balance sheet</h2>
+                ${bs.balanced ? `<span class="badge good">${icon('check-circle')}Balanced</span>`
+                              : `<span class="badge critical">${icon('alert')}Out of balance</span>`}
+            </div>
+            <div class="bs-when" title="The date of the balance sheet">
+                <button type="button" class="btn sm icon" data-asof-step="-1" title="End of the month before">${icon('chevron-left')}</button>
+                <input type="date" id="asof" value="${bs.asOf}" max="${isoDate()}" aria-label="As of">
+                <button type="button" class="btn sm icon" data-asof-step="1" ${bs.asOf >= isoDate() ? 'disabled' : ''} title="End of the next month">${icon('chevron-right')}</button>
+            </div>
+            <div class="bs-tb-side end">
+                <div class="seg-chips sm" id="bs-compare" title="Compare with">${Object.entries(COMPARE).map(([k, c]) =>
+                    `<button class="seg-chip ${view.compare === k ? 'active' : ''}" data-compare="${k}" ${k === view.compare ? `title="Compared with ${date(bs.compareDate)}"` : ''}>${c.label}</button>`).join('')}</div>
+                ${view.compare === 'custom' ? `<input type="date" id="compare" value="${bs.compareDate}" max="${bs.asOf}">` : `<span class="small muted nowrap">${date(bs.compareDate)}</span>`}
+                <label class="switch small" title="Show the comparison date's figures as a column"><input type="checkbox" id="bs-prev" ${view.showPrevious ? 'checked' : ''}><span></span>Previous</label>
+                ${exportButton({ label: '' })}
+                <button class="btn sm" id="print" title="Print">${icon('printer')}</button>
+            </div>
         </div>
 
         <section class="panel bs-main">
@@ -90,19 +98,23 @@ export async function render(container, _params, isCurrent) {
                     <div class="bh-chips"><span><i class="ef-own"></i>own ${percent((Number(bs.netWorth) / (assets || 1)) * 100, 0)}</span><span><i class="ef-debt"></i>debt ${percent((liabilities / (assets || 1)) * 100, 0)}</span>
                         ${bs.emergencyFundMonths !== null ? `<span>${Number(bs.emergencyFundMonths).toFixed(1)} mo safety net</span>` : ''}</div>
                 </div>
+                ${liquidCard(bs)}
             </div>
-            <div class="bs-columns scroll">
+            <div class="bs-body scroll">
+            <div class="bs-columns">
                 <div class="bs-col">
                     ${sectionHtml(bs.assets, assets, false, 'asset')}
                 </div>
                 <div class="bs-col">
                     ${sectionHtml(bs.liabilities, liabilities, true, 'liability')}
                     ${sectionHtml(bs.equity, Number(bs.equity.total), false, 'equity')}
-                    <div class="bs-mixes">
+                    <div class="bs-graphs">
                         ${mixCard('Asset mix', bs.assetMix, assets, 'asset')}
                         ${mixCard('Liability mix', bs.liabilityMix, liabilities, 'liability')}
+                        ${liquidTrendCard(bs)}
                     </div>
                 </div>
+            </div>
             </div>
             <div class="bs-totals">
                 <div><span>Total assets</span><b>${money(assets)}</b></div>
@@ -128,8 +140,14 @@ export async function render(container, _params, isCurrent) {
         series: [{ name: 'Net worth', values: trend.map(p => Number(p.value)), color: 'var(--series-1)' }],
     });
 
+    drawGraphs(container, bs);
+
     // ---- events
     container.querySelector('#asof').addEventListener('change', e => { view.asOf = e.target.value; reload(); });
+    container.querySelector('.bs-when').addEventListener('click', e => {
+        const b = e.target.closest('[data-asof-step]');
+        if (b) { view.asOf = stepMonthEnd(view.asOf, Number(b.dataset.asofStep)); reload(); }
+    });
     container.querySelector('#compare')?.addEventListener('change', e => { view.compareTo = e.target.value; reload(); });
     container.querySelector('#bs-compare').addEventListener('click', e => {
         const b = e.target.closest('[data-compare]');
@@ -175,7 +193,7 @@ export async function render(container, _params, isCurrent) {
         });
         return {
             title: `Balance sheet as of ${date(bs.asOf)}`, subtitle: `Compared with ${date(bs.compareDate)}`, filename: `balance-sheet-${bs.asOf}`,
-            summary: [['Net worth', Number(bs.netWorth)], ['Change', Number(bs.netWorthChange)]],
+            summary: [['Net worth', Number(bs.netWorth)], ['Change', Number(bs.netWorthChange)], ['Liquid money', Number(bs.liquidAssets)], ['Investable surplus', investableOf(bs).free]],
             sheets: [{ name: 'Balance sheet', columns: [{ label: 'Section' }, { label: 'Group' }, { label: 'Account' },
                 { label: date(bs.compareDate), type: 'money' }, { label: date(bs.asOf), type: 'money' }, { label: 'Change', type: 'money' }],
                 rows: rows.map(r => [r[0], r[1], r[2], r[3] === '' ? '' : Number(r[3]), r[4], r[5]]),
@@ -188,6 +206,39 @@ export async function render(container, _params, isCurrent) {
 }
 
 // ===================================================================== header
+
+/** The month end before `iso`, or after it (never past today). */
+function stepMonthEnd(iso, step) {
+    const d = new Date(`${iso}T00:00:00`);
+    const end = isoDate(new Date(d.getFullYear(), d.getMonth() + (step > 0 ? (isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)) === iso ? 2 : 1) : 0), 0));
+    return end > isoDate() ? isoDate() : end;
+}
+
+/** Liquid money split into what is spoken for (short-term dues, six months of spending) and what is free to invest. */
+function investableOf(bs) {
+    const liquid = Number(bs.liquidAssets);
+    const dues = Math.min(Math.max(0, liquid), Number(bs.shortTermLiabilities));
+    const buffer = Math.min(Math.max(0, liquid - dues), Number(bs.averageMonthlyExpense || 0) * 6);
+    return { liquid, dues, buffer, free: Math.max(0, liquid - dues - buffer) };
+}
+
+/** Liquid money: how much, and how much of it could be invested without touching dues or the safety net. */
+function liquidCard(bs) {
+    const { liquid, dues, buffer, free } = investableOf(bs);
+    const part = v => (liquid > 0 ? (v / liquid) * 100 : 0);
+    return `
+    <div class="bh-card liquid">
+        <div class="bh-top"><span class="bh-label" title="Cash, bank and wallet money you can use at once">${icon('droplet')}Liquid money</span>${changeText(liquid, Number(bs.previousLiquidAssets), false)}</div>
+        <b class="bh-value">${money(liquid)}</b>
+        <div class="bh-mix" title="What the money is spoken for">
+            <span style="width:${part(dues)}%;background:#f3a07f" title="Short-term dues ${money(dues)}"></span>
+            <span style="width:${part(buffer)}%;background:#7dd0f5" title="Six months of spending ${money(buffer)}"></span>
+            <span style="width:${part(free)}%;background:#7de3b0" title="Investable surplus ${money(free)}"></span></div>
+        <div class="bh-chips">
+            <span class="bh-free" title="Liquid money left after short-term dues (${money(dues)}) and a safety net of six months of spending (${money(buffer)})"><i style="background:#7de3b0"></i>Investable surplus <b>${moneyShort(free)}</b></span>
+            <span><i style="background:#f3a07f"></i>dues ${moneyShort(dues)}</span><span><i style="background:#7dd0f5"></i>safety net ${moneyShort(buffer)}</span></div>
+    </div>`;
+}
 
 function changeText(value, previous, lowerIsBetter, pct = null) {
     const change = value - previous;
@@ -277,8 +328,8 @@ function sectionHtml(section, total, isLiability, tone) {
             ${view.showPrevious ? `<span class="spacer"></span><span class="col-h">${date(view.compareTo)}</span><span class="col-h now">${date(view.asOf)}</span>` : `<span class="spacer"></span><b class="mono">${money(section.total)}</b>`}
         </div>
         ${groups || '<div class="muted small bs-empty">Nothing here</div>'}
-        <div class="bs-section-total"><span>Total ${esc(section.label.toLowerCase())}</span>
-            ${view.showPrevious ? `<span class="g-prev">${money(section.previous)}</span>` : ''}<b>${money(section.total)}</b></div>
+        ${view.showPrevious ? `<div class="bs-section-total"><span>Total ${esc(section.label.toLowerCase())}</span>
+            <span class="g-prev">${money(section.previous)}</span><b>${money(section.total)}</b></div>` : ''}
     </div>`;
 }
 
@@ -447,20 +498,46 @@ function trendCard(bs) {
     </div>`;
 }
 
+const MIX_COLORS = { asset: ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-6'], liability: ['--series-2', '--series-8', '--series-5'] };
+
+/** A mix as a donut (drawn by drawGraphs) beside its parts. */
 function mixCard(title, mix, total, kind) {
-    const colors = kind === 'asset'
-        ? ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-6']
-        : ['--series-2', '--series-8', '--series-5'];
-    if (!mix.length) return '';
+    const colors = MIX_COLORS[kind];
+    const shown = mix.filter(m => Number(m.value) > 0);
+    if (!shown.length) return '';
     return `
-    <div class="side-card">
+    <div class="side-card bs-graph">
         <div class="side-head">${icon(kind === 'asset' ? 'layers' : 'card')}<b>${title}</b><span class="spacer"></span><b class="mono small">${moneyShort(total)}</b></div>
-        <div class="mix-bar tall">${mix.map((m, i) => `<span style="width:${(Number(m.value) / (total || 1)) * 100}%;background:var(${colors[i % colors.length]})"
-            title="${esc(m.label)} ${money(m.value)}"></span>`).join('')}</div>
-        <div class="mix-rows">${mix.map((m, i) => `<div class="mix-row"><i class="legend-swatch" style="background:var(${colors[i % colors.length]})"></i>
-            <span class="ellipsis">${esc(m.label)}</span><span class="spacer"></span>
-            <span class="muted">${percent((Number(m.value) / (total || 1)) * 100, 0)}</span><b class="mono">${moneyShort(m.value)}</b></div>`).join('')}</div>
+        <div class="bs-graph-body"><div class="chart bs-donut" id="bs-donut-${kind}"></div>
+            <div class="mix-rows">${shown.map((m, i) => `<div class="mix-row" title="${esc(m.label)} ${money(m.value)} · ${percent((Number(m.value) / (total || 1)) * 100, 0)}"><i class="legend-swatch" style="background:var(${colors[i % colors.length]})"></i>
+                <span class="ellipsis">${esc(m.label)}</span><span class="spacer"></span><b class="mono">${moneyShort(m.value)}</b></div>`).join('')}</div></div>
     </div>`;
+}
+
+function liquidTrendCard(bs) {
+    return `
+    <div class="side-card bs-graph wide">
+        <div class="side-head">${icon('droplet')}<b>Liquid money</b><span class="spacer"></span>
+            ${legend([{ label: 'Liquid money', color: 'var(--series-1)' }, { label: '6 months of spending', color: 'var(--series-4)' }], 'line')}</div>
+        <div class="chart bs-liquid" id="bs-liquid"></div>
+    </div>`;
+}
+
+function drawGraphs(container, bs) {
+    const donut = (kind, mix) => {
+        const el = container.querySelector(`#bs-donut-${kind}`);
+        if (el) donutChart(el, { format: moneyShort, items: mix.filter(m => Number(m.value) > 0)
+            .map((m, i) => ({ label: m.label, value: Number(m.value), color: `var(${MIX_COLORS[kind][i % MIX_COLORS[kind].length]})` })) });
+    };
+    donut('asset', bs.assetMix);
+    donut('liability', bs.liabilityMix);
+    const first = Math.max(0, bs.liquidTrend.findIndex(p => Number(p.value) !== 0));
+    const trend = bs.liquidTrend.slice(Math.min(first, bs.liquidTrend.length - 2));
+    lineChart(container.querySelector('#bs-liquid'), {
+        labels: trend.map(p => p.label), labelFormat: l => shortDate(l).split(' ')[1] || shortDate(l), format: moneyShort, area: true, includeZero: true,
+        series: [{ name: 'Liquid money', values: trend.map(p => Number(p.value)), color: 'var(--series-1)' },
+            { name: '6 months of spending', values: trend.map(() => Number(bs.averageMonthlyExpense || 0) * 6), color: 'var(--series-4)' }],
+    });
 }
 
 function healthCard(bs) {

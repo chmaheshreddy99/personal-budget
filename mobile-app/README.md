@@ -31,6 +31,40 @@ accounts, statements and expenses on the phone, so it works without the server, 
   or pick from the most used), the account, what it was for, the shop, a reference and notes. **Evidence:** take a photo of the bill or attach an
   image or PDF. It is kept on the phone and uploaded to the expense at the next sync, then deleted from the phone.
   The account's balance goes down at once, marked *waiting*, until it is synced.
+- **Scan a bill** (the banner at the top of the + sheet): the phone reads a bill and suggests the expense; you check it
+  and post it. Reading happens on the phone (Google ML Kit text recognition): the bill never leaves it to be read.
+  - **Scan bill:** the document scanner (from Google Play services) finds the bill's edges and straightens it; several
+    pages, or pictures from the gallery. Pages of a long bill photographed in overlapping parts are joined.
+  - **Long bill:** reads it like a video: start at the shop's name and move the phone slowly down to the total. Every
+    camera frame is merged into what was read (rows already read are recognised, only what follows is added), so a
+    supermarket roll longer than the screen is read whole. *Light* turns on the torch for faded thermal paper. A few
+    frames are kept as photos.
+  - **From a photo:** a photo already on the phone. **Type the items:** the same review, filled in by hand.
+  - **On the mobile web version** the same scanner opens from the + sheet: the same reader, categories and checks, with
+    Tesseract (`static/vendor/tesseract`, in the browser) reading the photo instead of ML Kit. Its copy of `src/receipt.ts`
+    is generated: after changing the reader run `npm run web:bill` (a test fails if it was forgotten).
+  - **Reading the table:** a number in front of an item's words is a serial number or quantity, never an amount. Serials
+    running 1, 2, 3 mark where each item starts, so a name and its numbers on separate rows are joined, and the last
+    serial gives the item count. Rows where quantity × rate = amount show which column holds the amounts.
+  - **Matching the read:** the read is checked against the total and item count you enter before scanning, else against
+    what the bill prints. If it does not match, the app tries other readings, the smallest change first and within a fixed
+    limit (60,000 readings, 3 changes): another column of numbers, a decimal point missed or moved, a comma for the point,
+    `125 50` for 125.50, quantity × rate, one misread digit (only when just one row can be it), a row read twice set
+    aside, a row that looked like a heading taken in. Then the photo is read again with more contrast, then larger.
+    Every change shows on its item with what was read, to undo. A bill whose items add up to its own printed total is
+    left alone, even when the total entered differs.
+  - **Check and post:** the shop, date, account (the one this shop was paid from before, or by how it was paid: UPI,
+    card, cash) and the bill number are filled in; the **bill total** shows whether the items add up. The items each
+    have their name, quantity × rate, amount and a suggested **category**: what you chose before for that item or shop,
+    then the kind of shop (a restaurant's dishes are Dining, a pharmacy's are Medicines, a fuel slip is Fuel), then the
+    item's words (milk → Milk & Dairy, tomato → Vegetables, detergent → Household ...). Tax, delivery or service charges,
+    discounts and round off are found too: when the items already make the total, the GST printed is inside the prices
+    and is not added; otherwise what makes the sum come right is counted (each can be switched). **What the phone read**
+    lists every row: tap one it missed to add it as an item.
+  - **Itemized** posts one transaction with a line per item in its own category (or **one line per category**), so the
+    budget sees groceries, household and snacks separately; tax and discount are spread over the items in proportion
+    and the lines add up exactly to the bill. **One expense** posts the whole bill in one category. The photos stay as
+    the expense's evidence. An itemized bill still waiting on the phone opens in the same screen to be changed.
 - **Chits:** the chits you are a member of, with progress, overdue instalments, the next due date, what is still to
   pay and their value now. Open a chit to see its instalments and **pay one**: choose the account and date, and
   enter the dividend, which comes off what you pay. This works offline too. The account's balance goes down at once,
@@ -44,7 +78,7 @@ accounts, statements and expenses on the phone, so it works without the server, 
   expenses: the account's balance moves at once, marked *waiting*, and the server books it once at the next sync.
 - **More → Balance sheet:** net worth, assets, liabilities and equity by group (tap a group to see its accounts),
   plus debt to assets, liquidity, emergency-fund months and monthly spend. A copy is kept for offline use.
-- **More → Bank SMS:** detects debit SMS from Indian banks and cards: SBI, HDFC, ICICI, Axis, Kotak, BoB, PNB, Union,
+- **More → Bank SMS** (the **SMS edition** only, see *Build*): detects debit SMS from Indian banks and cards: SBI, HDFC, ICICI, Axis, Kotak, BoB, PNB, Union,
   Canara, IDFC FIRST, IndusInd, Yes, Federal, Paytm, SBI Card, Amex and others. It covers UPI, card, ATM, IMPS/NEFT
   and NACH/auto-debit messages. Credits, OTPs, bill reminders, *will be debited*, failed or declined payments, collect
   requests, refunds and offers are ignored. The app asks you to record each debit, even when it is closed (a
@@ -91,16 +125,27 @@ You need Node 22 or later, JDK 17–21 and the Android SDK (build-tools 36, NDK 
 cd mobile-app
 npm install
 cd android
-./gradlew assembleRelease        # Windows: gradlew.bat assembleRelease
+./gradlew assembleStandardRelease assembleSmsRelease    # Windows: gradlew.bat …
 ```
 
-The APKs are in `android/app/build/outputs/apk/release/`: `app-arm64-v8a-release.apk` for almost every current phone, or `app-universal-release.apk`. Copies are kept in `apk/`. Copy it to the phone and install it (allow
-installing from this source). During development, use `npm start` and `npx react-native run-android` with a phone
-connected over USB debugging.
+There are two **editions** of the same app (the same id and key, so either replaces the other when installed):
 
-The release build is signed with the template's debug key, which is fine for installing the app yourself. Before
-putting it on Play, make a key of your own (see React Native's *Publishing to Google Play Store*). Google Play also
-asks for a declaration before it accepts an app that reads SMS.
+| Edition | APK | |
+|---|---|---|
+| **standard** | `apk/personal-budget-<version>-standard-arm64-v8a.apk` | Everything but bank SMS. It asks for **no SMS permission**, so Google Play Protect has nothing to flag. Install this one. |
+| **sms** | `apk/personal-budget-<version>-sms-arm64-v8a.apk` | Adds bank SMS offered as expenses. Any app installed from an APK that reads SMS can be flagged by Play Protect ("unsafe app" / "harmful"); it is the SMS permission it warns about. |
+
+The APKs come out in `android/app/build/outputs/apk/<edition>/release/` (`…-arm64-v8a-release.apk` for almost every
+current phone, `…-universal-release.apk` for any); copies are kept in `apk/`. Copy one to the phone and install it
+(allow installing from this source). During development: `npm start` and `npx react-native run-android --mode standardDebug`.
+
+**If Play Protect still warns** when installing: it shows for apps that are not from the Play Store and not yet known to
+Google. Tap *More details → Install anyway*, or send the APK to Google for a scan (*Play Protect → the gear → Improve
+harmful app detection*, or the "Submit app for analysis" link in the warning). Releases are signed with the app's own
+key (`android/keystore.properties`, `android/app/release.keystore`; keep both safe: an update signed with another key
+cannot replace the installed app). The app asks for the camera only when the long-bill scan is first used; the
+document scanner and photos go through the phone's own apps. Google Play asks for a declaration before it accepts an
+app that reads SMS, so only the standard edition could go there as it is.
 
 The architectures built are in `android/gradle.properties` (`reactNativeArchitectures`): arm64-v8a and armeabi-v7a
 for phones, and x86_64 for the emulator.
@@ -112,13 +157,15 @@ App.tsx                 the tabs (Accounts, Expenses, +, Chits, More), the add-e
 src/data.ts             types, the size-limited store, the server client, sync, balances with what waits
 src/state.tsx           the app's state and actions (useApp), when to sync, the SMS queue
 src/sms.ts              reading bank SMS: amount, account, shop, reference, date, category
-src/native.ts           the Android module (store and SMS) from JavaScript
+src/native.ts           the Android module (store, SMS, bill scanning) from JavaScript
+src/receipt.ts          reading a bill's rows: shop, date, total, items (qty × rate), tax / charges / discounts, categories, learning
 src/evidence.tsx        taking / attaching evidence, thumbnails
-src/screens/*           Setup, Accounts, AccountDetail, Expenses (with Claims, Emis, Income), AddExpense (the record sheet), Chits, More,
+src/screens/*           Setup, Accounts, AccountDetail, Expenses (with Claims, Emis, Income), AddExpense (the record sheet), ScanBill, Chits, More,
                         Gifts, Budget, Categories, BalanceSheet, Detected (bank SMS), Settings
 src/ui.tsx, theme.ts    building blocks, icons (lucide), colours
-android/app/src/main/java/com/personalbudget/app/bridge/
-                        BudgetBridgeModule (store, SMS), SmsReceiver (catches bank SMS, notifies)
+android/app/src/main/java/com/personalbudget/app/bridge/   BudgetBridgeModule (the module), BillOcr (text into rows, joining
+                        pages and frames), LiveScanActivity (the long-bill camera scan), SmsReceiver (sms edition)
+android/app/src/sms/    the sms edition's manifest: the SMS permissions and receiver
 ```
 
 Tests: `npm test`. These cover the SMS parser (debit and non-debit messages from many Indian banks), money

@@ -100,6 +100,7 @@ public class ClaimService {
     private final ClaimAgreementRepository agreements;
     private final AttachmentService files;
     private final AppSettingsService settings;
+    private final NotificationService notifications;
 
     /** The yearly rate a household's idle money is compared with, and where it came from. */
     public record Benchmark(BigDecimal rate, String source) {
@@ -162,8 +163,10 @@ public class ClaimService {
                         JournalEntryRepository entries, LedgerService ledger, CategoryService categories,
                         ClaimInterestPostingRepository postings, BudgetProperties properties,
                         com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimShareRepository shares,
-                        ClaimAgreementRepository agreements, AttachmentService files, AppSettingsService settings) {
+                        ClaimAgreementRepository agreements, AttachmentService files, AppSettingsService settings,
+                        NotificationService notifications) {
         this.settings = settings;
+        this.notifications = notifications;
         this.agreements = agreements;
         this.files = files;
         this.shares = shares;
@@ -251,7 +254,9 @@ public class ClaimService {
 
         JournalEntry entry = ledger.post(draft(claim, request.reference()));
         claim.setJournalEntryId(entry.getId());
-        return toView(claims.save(claim), context());
+        ClaimView view = toView(claims.save(claim), context());
+        notifications.claimCreated(view);
+        return view;
     }
 
     @Transactional

@@ -31,7 +31,7 @@ import { chitStatus, chitTrailHtml, hasChitStatus } from '../core/chit-trail.js'
 import { bondHtml, printBond, padHtml, bindPad, evidenceRows, chitRecitals } from '../core/bond.js';
 import { kycTilesHtml, bindKycTiles, fileUrls, kycAnnexures, DOC_LABELS } from '../components/agreement-ui.js';
 import * as chitAccounts from './chit-accounts.js';
-import { showRoute } from '../core/route.js';
+import { showRoute, routeHash, readQuery, setQuery } from '../core/route.js';
 import { paymentsNarrative, sectionSwitch, moneyAccountOptions, openTransfer, whereHtml, monthTrailHtml, transfersTable, statsToggleHtml, bindStatsToggle } from './chit-accounts.js';
 
 const view = { selectedId: null, tab: 'month', historyKind: 'ALL', memberQuery: '', duesFilter: 'ALL' };
@@ -69,6 +69,12 @@ const isAuction = c => c.chitType === 'AUCTION';
 const isPlanned = c => c.chitType === 'PLANNED';
 const typeName = c => isAuction(c) ? 'Auction' : isPlanned(c) ? 'Planned' : 'Fixed';
 const typeIcon = c => isAuction(c) ? 'gavel' : isPlanned(c) ? 'calendar' : 'hand-coins';
+/** The address of what the page shows: the chit, its tab, the tab's filter and whether the figures are shown. */
+const hostRoute = id => routeHash(`host-chits/${id}/${view.tab}`, {
+    dues: view.tab === 'dues' && view.duesFilter !== 'ALL' ? view.duesFilter : null,
+    kind: view.tab === 'history' && view.historyKind !== 'ALL' ? view.historyKind : null,
+    sub: view.tab === 'money' ? view.moneyTab : null, figures: readQuery().get('figures') });
+
 /** The top figures (portfolio cards and the chit's key tiles) are shown on demand; the choice is remembered. */
 const statsPref = () => getPref('hostChitStats', { show: false });
 
@@ -361,6 +367,14 @@ export async function render(container, params, isCurrent) {
     const [first, second] = params;
     if (/^\d+$/.test(first || '')) view.selectedId = Number(first);
     if (second && TABS.some(t => t.key === second)) view.tab = second;
+    // #/host-chits/<id>/dues?dues=OVERDUE, …/history?kind=IN, …/money?sub=months, &figures=1
+    const asked = params.query;
+    if (asked?.toString()) {
+        view.duesFilter = asked.get('dues') || 'ALL';
+        view.historyKind = asked.get('kind') || 'ALL';
+        view.moneyTab = asked.get('sub') || null;
+        if (asked.has('figures')) setPref('hostChitStats', { show: asked.get('figures') === '1' });
+    }
     if (!chits.some(c => c.id === view.selectedId)) view.selectedId = chits[0]?.id ?? null;
     const reload = () => render(container, [], isCurrent);
 
@@ -391,7 +405,7 @@ export async function render(container, params, isCurrent) {
 
     async function show(id, { push = false } = {}) {
         view.selectedId = id;
-        showRoute(`#/host-chits/${id}/${view.tab}`, { push });
+        showRoute(hostRoute(id), { push });
         listEl.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const d = await api.get(`/hosted-chits/${id}`);
         if (view.selectedId !== id) return;
@@ -588,10 +602,10 @@ function drawDetail(container, d) {
     bindExport(target.querySelector('.p-chit-tabs'), () => exportReport(d));
 
     target.addEventListener('click', async e => {
-        const tab = e.target.closest('[data-tab]');
+        const tab = e.target.closest('#hc-tabs [data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
-            showRoute(`#/host-chits/${c.id}/${view.tab}`);
+            showRoute(hostRoute(c.id));
             target.querySelectorAll('#hc-tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
             drawTab();
             body.scrollTop = 0;
@@ -626,7 +640,7 @@ function drawDetail(container, d) {
             else if (act === 'consolidate') openTransfer({ chitId: c.id, toAccountId: c.accountId, chitMoney: true, onDone: refreshChit,
                 from: d.money.spots.filter(s => !s.chitBook && num(s.amount) > 0).map(s => ({ accountId: s.accountId, amount: num(s.amount) })) });
             else if (act === 'go') { chitAccounts.focus(el.dataset.go); location.hash = '#/host-chits/accounts'; }
-            else if (act === 'money-tab') { view.moneyTab = el.dataset.tab; drawTab(); }
+            else if (act === 'money-tab') { view.moneyTab = el.dataset.tab; showRoute(hostRoute(c.id)); drawTab(); }
             else if (act === 'plan-pdf') printPlan(draftFromChit(d));
             else if (act === 'plan-link') sharePlan(draftFromChit(d));
             else if (act === 'edit-plan') openPlanEditor(d);
@@ -652,14 +666,14 @@ function drawDetail(container, d) {
             }
             else if (act === 'undo-payment') undoPayment(d, d.payments.find(x => x.id === Number(el.dataset.payment)));
             else if (act === 'edit-member') openMember(d, d.members.find(x => x.id === memberId));
-            else if (act === 'history-kind') { view.historyKind = el.dataset.kind; drawTab(); }
+            else if (act === 'history-kind') { view.historyKind = el.dataset.kind; showRoute(hostRoute(c.id)); drawTab(); }
             else if (act === 'ledger-open') body.querySelectorAll('details.hc-lg').forEach(x => { x.open = true; });
             else if (act === 'lg-expand') {
                 const more = el.parentElement.querySelector('.hc-lg-more');
                 more.hidden = !more.hidden;
                 el.classList.toggle('open', !more.hidden);
             }
-            else if (act === 'dues-filter') { view.duesFilter = el.dataset.kind; drawTab(); }
+            else if (act === 'dues-filter') { view.duesFilter = el.dataset.kind; showRoute(hostRoute(c.id)); drawTab(); }
             else if (act === 'delete-chit') openDelete(d);
             else if (act === 'close-chit') openCloseChit(d);
             else if (act === 'reopen-chit') {

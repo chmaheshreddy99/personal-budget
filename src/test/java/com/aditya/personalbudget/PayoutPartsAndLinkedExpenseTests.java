@@ -73,6 +73,7 @@ class PayoutPartsAndLinkedExpenseTests {
     @Autowired TransactionService transactions;
     @Autowired com.aditya.personalbudget.service.ClaimService claims;
     @Autowired JournalEntryRepository entries;
+    @Autowired com.aditya.personalbudget.service.ForecastService forecast;
 
     private Long bank;
     private Long wallet;
@@ -288,6 +289,37 @@ class PayoutPartsAndLinkedExpenseTests {
     }
 
     // ------------------------------------------------------------------ income
+
+    @Test
+    void onlyIncomeMarkedRegularIsProjectedUnlessMoreIsAskedFor() {
+        Long gifts = categories.list().stream().filter(c -> c.kind() == CategoryKind.INCOME && c.active() && "Gifts Received".equals(c.name()))
+                .map(c -> c.id()).findFirst().orElseThrow();
+        LocalDate lastMonth = LocalDate.now().withDayOfMonth(1).minusMonths(1);
+        var before = forecast.forecast(3, null, null, "ALL");
+        EntryView regular = transactions.postQuick(new QuickTransactionRequest(QuickKind.INCOME, lastMonth, bd(3000), null, bank, gifts,
+                "Tuition fees", null, null, "REGULAR"));
+        transactions.postQuick(new QuickTransactionRequest(QuickKind.INCOME, lastMonth, bd(6000), null, bank, gifts, "Sold a bike", null, null, "ONE_TIME"));
+        transactions.postQuick(new QuickTransactionRequest(QuickKind.INCOME, lastMonth, bd(900), null, bank, gifts, "Not said", null, null));
+
+        var all = forecast.forecast(3, null, null, "ALL");
+        assertThat(all.regularIncome().subtract(before.regularIncome())).isEqualByComparingTo("1000");    // a month, over three months
+        assertThat(all.oneTimeIncome().subtract(before.oneTimeIncome())).isEqualByComparingTo("2000");
+        assertThat(all.unmarkedIncome().subtract(before.unmarkedIncome())).isEqualByComparingTo("300");
+        assertThat(all.rows().get(1).incomeRecorded()).isEqualByComparingTo(all.regularIncome().add(all.unmarkedIncome()).add(all.oneTimeIncome()));
+
+        var regularOnly = forecast.forecast(3, null, null, null);   // the default
+        assertThat(regularOnly.incomeBasis()).isEqualTo("REGULAR");
+        assertThat(regularOnly.rows().get(1).incomeRecorded()).isEqualByComparingTo(regularOnly.regularIncome());
+        assertThat(forecast.forecast(3, null, null, "UNMARKED").rows().get(1).incomeRecorded())
+                .isEqualByComparingTo(all.regularIncome().add(all.unmarkedIncome()));
+        assertThat(forecast.forecast(3, null, null, "NONE").rows()).allSatisfy(r -> assertThat(r.income()).isZero());
+
+        // an edit that does not say keeps what the income was
+        assertThat(regular.incomeNature()).isEqualTo("REGULAR");
+        EntryView edited = transactions.updateIncome(regular.id(), new IncomeRequest(lastMonth, bd(3300), gifts, bank, "Tuition fees", null, null,
+                entries.findById(regular.id()).orElseThrow().getVersion()));
+        assertThat(edited.incomeNature()).isEqualTo("REGULAR");
+    }
 
     @Test
     void anIncomeIsEditedInPlaceAndAReversedOneIsNot() {

@@ -31,6 +31,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,6 +69,7 @@ public class LedgerService {
     public static final String SOURCE_CLAIM = "CLAIM";
     public static final String SOURCE_CLAIM_REPAYMENT = "CLAIM_REPAYMENT";
     public static final String SOURCE_CLAIM_INTEREST = "CLAIM_INTEREST";
+    public static final String SOURCE_BANK_INTEREST = "BANK_INTEREST";
     public static final String SOURCE_REFUND = "EXPENSE_REFUND";
     public static final String SOURCE_REVERSAL = "REVERSAL";
 
@@ -251,6 +254,7 @@ public class LedgerService {
         Map<Long, Integer> evidence = attachments.countsByEntry(UserContext.tenantId());
         Map<Long, ChitTrailService.Trail> chitTrails = trails.forEntries(list);
         Map<Long, ConstructionTagService.ProjectTag> projects = projectTags.forEntries(list);
+        Map<Long, BigDecimal[]> chitBalances = chitBalances(linesByEntry.values().stream().flatMap(List::stream).toList(), all);
 
         return list.stream().map(e -> {
             List<LineView> lineViews = linesByEntry.getOrDefault(e.getId(), List.of()).stream()
@@ -259,10 +263,11 @@ public class LedgerService {
                         Account a = accountById.get(l.getAccountId());
                         String shown = l.getCategoryId() != null ? categoryName.getOrDefault(l.getCategoryId(), a.getName())
                                 : l.getChitId() != null ? chitName.getOrDefault(l.getChitId(), a.getName()) : a.getName();
+                        BigDecimal[] chit = chitBalances.get(l.getId());
                         return new LineView(l.getId(), l.getLineNo(), l.getAccountId(), a.getCode(), shown,
                                 a.getAccountClass(), l.getDebit(), l.getCredit(), l.getMemo(),
                                 l.getCategoryId(), l.getChitId(), a.getName(), l.getHostedChitId(),
-                                l.getBalanceBefore(), l.getBalanceAfter());
+                                l.getBalanceBefore(), l.getBalanceAfter(), chit == null ? null : chit[0], chit == null ? null : chit[1]);
                     })
                     .toList();
             Lock lock = lockOf(e, reversals, numbers);
@@ -270,8 +275,32 @@ public class LedgerService {
                     voucherLabel(e), e.getNarration(), e.getReference(), e.getParty(), e.getAmount(),
                     e.getSourceType(), e.getSourceId(), isManual(e), e.getCreatedBy(), e.getCreatedAt(), lineViews,
                     lock.reason(), lock.manageAt(), lock.reversible(), lock.reversedBy(), lock.reversalOf(),
-                    claimIdOf(e), e.getVersion(), evidence.getOrDefault(e.getId(), 0), chitTrails.get(e.getId()), projects.get(e.getId()));
+                    claimIdOf(e), e.getVersion(), evidence.getOrDefault(e.getId(), 0), chitTrails.get(e.getId()), projects.get(e.getId()),
+                    e.getIncomeNature());
         }).toList();
+    }
+
+    /** By line: the balance of its chit just before and after it, for the chits of the lines shown (in ledger order, as the account's snapshots). */
+    private Map<Long, BigDecimal[]> chitBalances(List<JournalLine> shown, List<JournalEntry> all) {
+        Set<Long> chitIds = shown.stream().map(JournalLine::getChitId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        if (chitIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, LocalDate> dates = all.stream().collect(Collectors.toMap(JournalEntry::getId, JournalEntry::getEntryDate));
+        List<JournalLine> ofChits = lines.findByTenantId(UserContext.tenantId()).stream()
+                .filter(l -> chitIds.contains(l.getChitId()) && dates.containsKey(l.getJournalEntryId()))
+                .sorted(Comparator.comparing((JournalLine l) -> dates.get(l.getJournalEntryId()))
+                        .thenComparing(JournalLine::getJournalEntryId).thenComparing(JournalLine::getLineNo))
+                .toList();
+        Map<Long, BigDecimal> running = new HashMap<>();
+        Map<Long, BigDecimal[]> balances = new HashMap<>();
+        for (JournalLine l : ofChits) {
+            BigDecimal before = running.getOrDefault(l.getChitId(), Money.ZERO);
+            BigDecimal after = before.add(Money.nz(l.getDebit())).subtract(Money.nz(l.getCredit()));
+            running.put(l.getChitId(), after);
+            balances.put(l.getId(), new BigDecimal[]{before, after});
+        }
+        return balances;
     }
 
     // ================================================================== locking
@@ -307,6 +336,8 @@ public class LedgerService {
                     new Lock("A chit transfer. Edit or undo it on Host a Chit, Chit accounts.", "host-chits/accounts", false, reversedBy, null);
             case SOURCE_CLAIM, SOURCE_CLAIM_REPAYMENT, SOURCE_CLAIM_INTEREST ->
                     new Lock("Money lent, borrowed or its interest. Manage it from Expenses.", "expenses", false, reversedBy, null);
+            case SOURCE_BANK_INTEREST ->
+                    new Lock("Interest on a bank account. Undo it on the account's Balance & interest tab.", "accounts", false, reversedBy, null);
             case SOURCE_REFUND ->
                     new Lock("Refund of " + numbers.getOrDefault(e.getSourceId(), "an expense") + ". Undo it from Expenses.",
                             "expenses", false, null, null);
@@ -465,6 +496,7 @@ public class LedgerService {
         entry.setNarration(narration == null || narration.isBlank() ? draft.voucherType().getLabel() : narration);
         entry.setReference(draft.reference());
         entry.setParty(draft.party());
+        entry.setIncomeNature(draft.voucherType() == VoucherType.INCOME ? draft.incomeNature() : null);
         entry.setAmount(total);
         entry.setSourceType(draft.sourceType());
         entry.setSourceId(draft.sourceId());

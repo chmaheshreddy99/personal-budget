@@ -112,10 +112,20 @@ public class AppSyncService {
                           String notes, String accountName, String entryNo) {
     }
 
-    /** An expense recorded on the phone: clientId is the app's own id for it. */
+    /**
+     * An expense recorded on the phone: clientId is the app's own id for it. With two or more items it is one bill split
+     * into what was bought (a scanned bill, or one entered item by item): one transaction, a line per item in its own
+     * category, amount the bill total; categoryId is then the first item's.
+     */
     public record SyncExpense(@NotBlank @Size(max = 64) String clientId, @NotNull LocalDate date, @NotNull @Positive BigDecimal amount,
                               @NotNull Long categoryId, @NotNull Long paidFromId, @Size(max = 255) String narration,
-                              @Size(max = 100) String party, @Size(max = 60) String reference, @Size(max = 255) String notes) {
+                              @Size(max = 100) String party, @Size(max = 60) String reference, @Size(max = 255) String notes,
+                              @Valid @Size(max = 60) List<com.aditya.personalbudget.dto.JournalDtos.ExpenseItem> items) {
+
+        public SyncExpense(String clientId, LocalDate date, BigDecimal amount, Long categoryId, Long paidFromId, String narration,
+                           String party, String reference, String notes) {
+            this(clientId, date, amount, categoryId, paidFromId, narration, party, reference, notes, null);
+        }
     }
 
     /** A chit instalment paid on the phone: clientId is the app's own id for the payment. */

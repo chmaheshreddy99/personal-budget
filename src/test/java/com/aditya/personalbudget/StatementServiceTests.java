@@ -95,6 +95,49 @@ class StatementServiceTests {
     }
 
     @Test
+    void theCommonProtectionLocksFollowersAndAStatementCanSayOtherwise() {
+        var follower = statements.create(new SubscriptionRequest("CHITS", "a@example.com", null, 1, null, null, true, "GLOBAL", null));
+        assertThat(follower.protect()).isFalse();
+        assertThat(statements.protection().enabled()).isFalse();
+
+        assertThatThrownBy(() -> statements.saveProtection(new StatementService.ProtectionRequest(true, null)))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("common password");
+        // always-lock without any password anywhere is refused
+        assertThatThrownBy(() -> statements.create(new SubscriptionRequest("CHITS", "a@example.com", null, 1, null, null, true, "ON", null)))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("password");
+
+        var on = statements.saveProtection(new StatementService.ProtectionRequest(true, "Common-1"));
+        assertThat(on.enabled()).isTrue();
+        assertThat(on.hasPassword()).isTrue();
+
+        var never = statements.create(new SubscriptionRequest("BALANCE_SHEET", "a@example.com", null, 1, null, null, true, "OFF", null));
+        var own = statements.create(new SubscriptionRequest("EMIS", "a@example.com", null, 1, null, "Own-pass1", true, "ON", null));
+        var always = statements.create(new SubscriptionRequest("MONEY_OWED", "a@example.com", null, 1, null, null, true, "ON", null));
+        var views = statements.overview().subscriptions();
+        assertThat(view(views, follower.id()).protect()).isTrue();
+        assertThat(view(views, follower.id()).hasPassword()).isFalse();
+        assertThat(never.protect()).isFalse();
+        assertThat(own.protect()).isTrue();
+        assertThat(own.hasPassword()).isTrue();
+        assertThat(always.protect()).isTrue();
+
+        // going back to the common password drops its own; turning the common lock off leaves the override locked
+        var back = statements.update(own.id(), new SubscriptionRequest("EMIS", "a@example.com", null, 1, null, null, true, "ON", true));
+        assertThat(back.hasPassword()).isFalse();
+        statements.saveProtection(new StatementService.ProtectionRequest(false, null));
+        views = statements.overview().subscriptions();
+        assertThat(view(views, follower.id()).protect()).isFalse();
+        assertThat(view(views, always.id()).protect()).isTrue();
+        assertThat(statements.protection().hasPassword()).isTrue();
+
+        List.of(follower.id(), never.id(), own.id(), always.id()).forEach(statements::delete);
+    }
+
+    private static StatementService.SubscriptionView view(List<StatementService.SubscriptionView> views, Long id) {
+        return views.stream().filter(v -> v.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    @Test
     void subscriptionsCheckTheirAddressesKeepThePasswordAndRecordWhatHappened() {
         assertThatThrownBy(() -> statements.create(new SubscriptionRequest("CHITS", "not-an-address", null, 1, false, null, true)))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("Not an e-mail address");

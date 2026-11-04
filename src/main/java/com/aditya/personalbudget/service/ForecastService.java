@@ -6,11 +6,11 @@ import com.aditya.personalbudget.domain.entity.Category;
 import com.aditya.personalbudget.domain.entity.Chit;
 import com.aditya.personalbudget.domain.entity.ChitInstallment;
 import com.aditya.personalbudget.domain.entity.RecurringTransaction;
-import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.CategoryKind;
 import com.aditya.personalbudget.domain.type.ChitStatus;
 import com.aditya.personalbudget.domain.type.RecurringKind;
 import com.aditya.personalbudget.dto.InsightDtos.CategoryForecast;
+import com.aditya.personalbudget.dto.InsightDtos.ExpenseLine;
 import com.aditya.personalbudget.dto.InsightDtos.Forecast;
 import com.aditya.personalbudget.dto.InsightDtos.ForecastEvent;
 import com.aditya.personalbudget.dto.InsightDtos.ForecastMonth;
@@ -33,6 +33,15 @@ import java.util.stream.Collectors;
  * <p>
  * Inputs: recurring transactions, budgets, the last three months of actual spending, pending chit installments
  * and expected chit maturities. Optional what-if adjustments scale income and expenses by a percentage.
+ * <p>
+ * Income: the recurring income items, plus the recorded income of the last three months as the basis says, a month on
+ * average, for the sources without a recurring item: REGULAR (the default: income marked as coming every month),
+ * UNMARKED (and income not marked either way), ALL (and one-time income) or NONE (no income at all). Chit gains and
+ * interest are left out: the projection page adds what the money earns itself.
+ * <p>
+ * Expenses come from the budgets: a month with its own budget for a category takes it, any other month the average of
+ * the months budgeted for that category. Categories never budgeted are left out (BUDGET, the default) or take their
+ * 3-month average (BUDGET_HISTORY); with no budgets at all, every category takes its 3-month average.
  */
 @Service
 public class ForecastService {
@@ -52,6 +61,16 @@ public class ForecastService {
     }
 
     public Forecast forecast(int months, BigDecimal incomeAdjust, BigDecimal expenseAdjust) {
+        return forecast(months, incomeAdjust, expenseAdjust, null);
+    }
+
+    public Forecast forecast(int months, BigDecimal incomeAdjust, BigDecimal expenseAdjust, String incomeBasis) {
+        return forecast(months, incomeAdjust, expenseAdjust, incomeBasis, null);
+    }
+
+    public Forecast forecast(int months, BigDecimal incomeAdjust, BigDecimal expenseAdjust, String incomeBasis, String expenseBasis) {
+        String spendBasis = "BUDGET_HISTORY".equals(expenseBasis) ? "BUDGET_HISTORY" : "BUDGET";
+        String basis = incomeBasis != null && List.of("REGULAR", "UNMARKED", "ALL", "NONE").contains(incomeBasis) ? incomeBasis : "REGULAR";
         int horizon = Math.clamp(months, 1, 60);
         BigDecimal incomeFactor = factor(incomeAdjust);
         BigDecimal expenseFactor = factor(expenseAdjust);
@@ -64,36 +83,67 @@ public class ForecastService {
                 current.minusMonths(1).atEndOfMonth());
 
         List<RecurringTransaction> items = recurring.active();
-        boolean hasRecurringIncome = items.stream().anyMatch(r -> r.getKind() == RecurringKind.INCOME);
-        BigDecimal avgIncome = average(books.totalOfClass(history, AccountClass.INCOME));
+        java.util.Set<Long> recurringSources = items.stream().filter(r -> r.getKind() == RecurringKind.INCOME && r.getCategoryId() != null)
+                .map(RecurringTransaction::getCategoryId).collect(Collectors.toSet());
+        Map<String, BigDecimal> byNature = recordedIncome(books, recurringSources, current.minusMonths(HISTORY_MONTHS).atDay(1), current.minusMonths(1).atEndOfMonth());
+        BigDecimal regularAvg = average(byNature.get("REGULAR"));
+        BigDecimal unmarkedAvg = average(byNature.get("UNMARKED"));
+        BigDecimal oneTimeAvg = average(byNature.get("ONE_TIME"));
+        BigDecimal recordedAvg = recordedFor(basis, regularAvg, unmarkedAvg, oneTimeAvg);
         List<String> assumptions = new ArrayList<>();
 
-        // ---- expense baseline per category: budget if set, otherwise 3-month average
-        Map<Long, Budget> budgetByCategory = budgets.all().stream()
-                .collect(Collectors.toMap(Budget::getCategoryId, Function.identity(), (x, y) -> x));
+        // ---- expenses per category: the month's own budget, else the average of the months budgeted (else history)
+        Map<Long, Map<String, BigDecimal>> budgetMonths = new HashMap<>();
+        for (Budget b : budgets.everyMonth()) {
+            if (b.getMonthlyLimit() == null || b.getMonthlyLimit().signum() <= 0) continue;
+            budgetMonths.computeIfAbsent(b.getCategoryId(), k -> new HashMap<>())
+                    .merge(b.getMonth() != null ? b.getMonth() : current.toString(), b.getMonthlyLimit(), BigDecimal::max);
+        }
+        boolean anyBudget = !budgetMonths.isEmpty();
         Map<Long, BigDecimal> categoryHistory = books.categoryMovements(current.minusMonths(HISTORY_MONTHS).atDay(1),
                 current.minusMonths(1).atEndOfMonth());
         List<CategoryForecast> categories = new ArrayList<>();
         Map<Long, BigDecimal> baseline = new HashMap<>();
+        Map<Long, String> categoryName = new HashMap<>();
+        BigDecimal unbudgeted = Money.ZERO;
         for (Category c : books.categoriesOf(CategoryKind.EXPENSE)) {
             if (LedgerSnapshot.budgetOnly(c)) {
                 continue;   // chit installments are projected from the chits themselves below
             }
-            Budget b = budgetByCategory.get(c.getId());
+            categoryName.put(c.getId(), c.getName());
+            Map<String, BigDecimal> set = budgetMonths.getOrDefault(c.getId(), Map.of());
             BigDecimal avg = average(categoryHistory.getOrDefault(c.getId(), Money.ZERO));
-            BigDecimal amount = b != null ? b.getMonthlyLimit() : avg;
-            if (amount.signum() > 0) {
-                baseline.put(c.getId(), amount);
+            if (!set.isEmpty()) {
+                BigDecimal budgetAvg = Money.round(set.values().stream().reduce(Money.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(set.size()), 2, RoundingMode.HALF_UP));
+                baseline.put(c.getId(), budgetAvg);
                 categories.add(new CategoryForecast(c.getId(), c.getName(),
-                        b != null ? "Budget" : HISTORY_MONTHS + "-month average", amount));
+                        set.size() == 1 ? "Budget" : "Budget · avg of " + set.size() + " months", budgetAvg, set.size(), avg));
+            } else if (avg.signum() > 0 && (!anyBudget || "BUDGET_HISTORY".equals(spendBasis))) {
+                baseline.put(c.getId(), avg);
+                categories.add(new CategoryForecast(c.getId(), c.getName(), HISTORY_MONTHS + "-month average", avg, 0, avg));
+            } else if (avg.signum() > 0) {
+                unbudgeted = unbudgeted.add(avg);
+                categories.add(new CategoryForecast(c.getId(), c.getName(), "Not budgeted", Money.ZERO, 0, avg));
             }
         }
-        categories.sort(Comparator.comparing(CategoryForecast::monthlyAmount).reversed());
+        categories.sort(Comparator.comparing(CategoryForecast::monthlyAmount).reversed()
+                .thenComparing(CategoryForecast::historyAverage, Comparator.reverseOrder()));
 
-        assumptions.add(hasRecurringIncome ? "Income comes from your recurring income items"
-                : "No recurring income defined: using the " + HISTORY_MONTHS + "-month average income");
-        assumptions.add("Expenses use the budget of each category, else its " + HISTORY_MONTHS
-                + "-month average; a larger recurring expense in the same category wins");
+        assumptions.add(switch (basis) {
+            case "NONE" -> "No income is projected";
+            case "ALL" -> "Income: recurring income items, plus all income recorded in the last " + HISTORY_MONTHS + " months (one-time too), a month on average";
+            case "UNMARKED" -> "Income: recurring income items, plus income recorded as regular or not marked, a month on average over " + HISTORY_MONTHS + " months";
+            default -> "Income: recurring income items, plus income recorded as regular, a month on average over " + HISTORY_MONTHS + " months; one-time and unmarked income is not projected";
+        });
+        assumptions.add("Recorded income in a source with a recurring income item is left to the item; chit gains and interest are added by what the money earns");
+        if (!anyBudget) {
+            assumptions.add("No budgets are set: expenses use each category's " + HISTORY_MONTHS + "-month average; a larger recurring expense in the same category wins");
+        } else {
+            assumptions.add("Expenses come from the budgets: a month's own budget when set, else the average of the months budgeted"
+                    + ("BUDGET_HISTORY".equals(spendBasis) ? "; categories without a budget use their " + HISTORY_MONTHS + "-month average"
+                    : "; categories without a budget are left out") + "; a larger recurring expense in the same category wins");
+        }
         assumptions.add("The first row is the rest of the current month: budgets minus what is already spent");
         assumptions.add("Chit installments are paid on their due dates without dividends; overdue ones fall in the first row");
         assumptions.add("Active chits pay out their maturity amount one month after the last installment");
@@ -120,8 +170,9 @@ public class ForecastService {
         BigDecimal lowest = null;
 
         // Month-to-date actuals: the first row only covers what is still to come this month.
-        Map<Long, BigDecimal> monthToDate = books.movementsBetween(current.atDay(1), today);
-        BigDecimal incomeToDate = books.totalOfClass(monthToDate, AccountClass.INCOME);
+        Map<String, BigDecimal> toDateByNature = recordedIncome(books, recurringSources, current.atDay(1), today);
+        BigDecimal recordedToDate = recordedFor(basis, toDateByNature.get("REGULAR"), toDateByNature.get("UNMARKED"), toDateByNature.get("ONE_TIME"));
+        BigDecimal recurringMonthly = Money.ZERO;
         Map<Long, BigDecimal> categoriesToDate = books.categoryMovements(current.atDay(1), today);
 
         for (int i = 0; i <= horizon; i++) {
@@ -130,14 +181,14 @@ public class ForecastService {
             LocalDate start = first ? today.plusDays(1) : m.atDay(1);
             LocalDate end = m.atEndOfMonth();
 
-            BigDecimal income = Money.ZERO;
+            BigDecimal recurringIncome = Money.ZERO;
             Map<Long, BigDecimal> recurringExpense = new HashMap<>();
             BigDecimal transfersOut = Money.ZERO;
             BigDecimal transfersIn = Money.ZERO;
             for (RecurringTransaction r : items) {
                 for (LocalDate d : RecurringService.occurrences(r, start, end)) {
                     switch (r.getKind()) {
-                        case INCOME -> income = income.add(r.getAmount());
+                        case INCOME -> recurringIncome = recurringIncome.add(r.getAmount());
                         case EXPENSE -> recurringExpense.merge(r.getCategoryId() != null ? r.getCategoryId() : -1L,
                                 r.getAmount(), BigDecimal::add);
                         case TRANSFER -> {
@@ -155,18 +206,36 @@ public class ForecastService {
                     }
                 }
             }
-            if (!hasRecurringIncome) {
-                income = first ? avgIncome.subtract(incomeToDate).max(Money.ZERO) : avgIncome;
+            if (i == 1) {
+                recurringMonthly = recurringIncome;
             }
-            income = Money.round(income.multiply(incomeFactor));
+            if ("NONE".equals(basis)) {
+                recurringIncome = Money.ZERO;
+            }
+            BigDecimal recordedIncome = first ? recordedAvg.subtract(recordedToDate).max(Money.ZERO) : recordedAvg;
+            recurringIncome = Money.round(recurringIncome.multiply(incomeFactor));
+            recordedIncome = Money.round(recordedIncome.multiply(incomeFactor));
+            BigDecimal income = recurringIncome.add(recordedIncome);
 
             Map<Long, BigDecimal> perCategory = new HashMap<>();
-            baseline.forEach((id, amount) -> perCategory.put(id, first
-                    ? amount.subtract(categoriesToDate.getOrDefault(id, Money.ZERO)).max(Money.ZERO)
-                    : amount));
-            recurringExpense.forEach((id, amount) -> perCategory.merge(id, amount, BigDecimal::max));
+            Map<Long, String> lineBasis = new HashMap<>();
+            String monthKey = m.toString();
+            baseline.forEach((id, amount) -> {
+                BigDecimal own = budgetMonths.getOrDefault(id, Map.of()).get(monthKey);
+                BigDecimal full = own != null ? own : amount;
+                lineBasis.put(id, own != null ? "BUDGET" : budgetMonths.containsKey(id) ? "BUDGET_AVG" : "HISTORY");
+                perCategory.put(id, first ? full.subtract(categoriesToDate.getOrDefault(id, Money.ZERO)).max(Money.ZERO) : full);
+            });
+            recurringExpense.forEach((id, amount) -> {
+                if (amount.compareTo(perCategory.getOrDefault(id, Money.ZERO)) > 0) lineBasis.put(id, "RECURRING");
+                perCategory.merge(id, amount, BigDecimal::max);
+            });
             BigDecimal expenses = Money.round(perCategory.values().stream().reduce(Money.ZERO, BigDecimal::add)
                     .multiply(expenseFactor));
+            List<ExpenseLine> expenseLines = perCategory.entrySet().stream().filter(e -> e.getValue().signum() > 0)
+                    .map(e -> new ExpenseLine(e.getKey() < 0 ? null : e.getKey(), e.getKey() < 0 ? "Recurring, no category"
+                            : categoryName.getOrDefault(e.getKey(), "Other"), Money.round(e.getValue().multiply(expenseFactor)), lineBasis.get(e.getKey())))
+                    .sorted(Comparator.comparing(ExpenseLine::amount).reversed()).toList();
 
             // ---- chits
             BigDecimal chitOut = pending.stream()
@@ -189,7 +258,7 @@ public class ForecastService {
             liquid = liquid.add(net);
             netWorth = netWorth.add(income).subtract(expenses).add(chitGain);
             rows.add(new ForecastMonth(m.toString(), income, expenses, chitOut, chitIn, transfersOut, transfersIn,
-                    net, Money.round(liquid), Money.round(netWorth)));
+                    net, Money.round(liquid), Money.round(netWorth), recurringIncome, recordedIncome, expenseLines));
 
             totalIncome = totalIncome.add(income);
             totalExpense = totalExpense.add(expenses);
@@ -205,7 +274,40 @@ public class ForecastService {
                 Money.round(liquid), Money.round(netWorth),
                 totalIncome.divide(n, 2, RoundingMode.HALF_UP), totalExpense.divide(n, 2, RoundingMode.HALF_UP),
                 lowestMonth, lowest == null ? null : Money.round(lowest), rows, categories,
-                events.stream().limit(40).toList(), assumptions);
+                events.stream().limit(40).toList(), assumptions, basis, regularAvg, unmarkedAvg, oneTimeAvg, Money.round(recurringMonthly),
+                spendBasis, Money.round(unbudgeted));
+    }
+
+    /**
+     * Recorded income between two days by what it is: REGULAR, ONE_TIME or UNMARKED (not said), leaving out the sources
+     * with a recurring income item, chit gains and interest (the earnings of the money itself).
+     */
+    private static Map<String, BigDecimal> recordedIncome(LedgerSnapshot books, java.util.Set<Long> skip, LocalDate from, LocalDate to) {
+        Map<String, BigDecimal> out = new HashMap<>(Map.of("REGULAR", Money.ZERO, "UNMARKED", Money.ZERO, "ONE_TIME", Money.ZERO));
+        for (LedgerSnapshot.PostedLine line : books.lines()) {
+            if (line.categoryId() == null || line.date().isBefore(from) || line.date().isAfter(to) || skip.contains(line.categoryId())) {
+                continue;
+            }
+            Category c = books.category(line.categoryId());
+            if (c == null || c.getKind() != CategoryKind.INCOME
+                    || DefaultChartOfAccounts.CHIT_GAINS.equals(c.getSystemKey()) || DefaultChartOfAccounts.INTEREST_INCOME.equals(c.getSystemKey())) {
+                continue;
+            }
+            var entry = books.entry(line.entryId());
+            String nature = entry != null && entry.getIncomeNature() != null ? entry.getIncomeNature() : "UNMARKED";
+            out.merge(nature, line.net().negate(), BigDecimal::add);
+        }
+        return out;
+    }
+
+    private static BigDecimal recordedFor(String basis, BigDecimal regular, BigDecimal unmarked, BigDecimal oneTime) {
+        BigDecimal total = switch (basis) {
+            case "NONE" -> Money.ZERO;
+            case "ALL" -> regular.add(unmarked).add(oneTime);
+            case "UNMARKED" -> regular.add(unmarked);
+            default -> regular;
+        };
+        return total.max(Money.ZERO);
     }
 
     private static boolean isLiquid(LedgerSnapshot books, Long accountId) {

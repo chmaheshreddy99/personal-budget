@@ -43,6 +43,7 @@ public final class LedgerSnapshot {
     private final Map<Long, Category> categories;
     private final Map<Long, Chit> chits;
     private final List<PostedLine> lines;
+    private final Map<Long, JournalEntry> entries;
     /** {@link #lines} plus the cash paid into chits, as Chit Payments lines (built on first use). */
     private List<PostedLine> budgetLines;
 
@@ -53,6 +54,7 @@ public final class LedgerSnapshot {
         this.chits = chits.stream().collect(Collectors.toMap(Chit::getId, Function.identity()));
         Map<Long, JournalEntry> entryById = entries.stream()
                 .collect(Collectors.toMap(JournalEntry::getId, Function.identity()));
+        this.entries = entryById;
         this.lines = lines.stream()
                 .filter(l -> entryById.containsKey(l.getJournalEntryId()))
                 .map(l -> {
@@ -61,6 +63,11 @@ public final class LedgerSnapshot {
                             e.getNarration(), l.getAccountId(), l.getCategoryId(), l.getChitId(), l.getDebit(), l.getCredit());
                 })
                 .toList();
+    }
+
+    /** The journal entry with this id, or null. */
+    public JournalEntry entry(Long id) {
+        return entries.get(id);
     }
 
     public Map<Long, Account> accounts() {

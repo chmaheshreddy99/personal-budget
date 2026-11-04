@@ -69,7 +69,9 @@ public final class ReportDtos {
                                List<ValuePoint> assetMix, List<ValuePoint> liabilityMix,
                                List<ValuePoint> netWorthTrend,
                                /* who makes up the receivable / payable accounts, by account */
-                               List<Counterparties> counterparties) {
+                               List<Counterparties> counterparties,
+                               /* cash, bank and wallet money on the comparison date, and at the last month ends */
+                               BigDecimal previousLiquidAssets, List<ValuePoint> liquidTrend) {
     }
 
     /**

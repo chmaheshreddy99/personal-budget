@@ -106,11 +106,17 @@ export const hasFeature = (snap: Snapshot | null, f: string) => (!snap?.features
 
 export type LocalStatus = 'QUEUED' | 'FAILED' | 'SYNCED' | 'PENDING';
 
-/** An expense recorded on the phone. */
+/** One thing bought on an itemized bill: its category, what it was and what it cost. */
+export type BillItem = { categoryId: number; categoryName: string; name: string; amount: number };
+
+/**
+ * An expense recorded on the phone. With items (two or more), one bill split into what was bought, booked as one
+ * transaction with a line per item in its own category; amount is then the bill total and categoryId the first item's.
+ */
 export type LocalExpense = {
   clientId: string; date: string; amount: number; categoryId: number; categoryName: string; paidFromId: number; paidFromName: string;
   narration: string; party: string; reference: string; notes: string; createdAt: number; status: LocalStatus; message?: string;
-  entryNo?: string; entryId?: number; pendingId?: number; smsId?: string; syncedAt?: number;
+  entryNo?: string; entryId?: number; pendingId?: number; smsId?: string; syncedAt?: number; items?: BillItem[];
 };
 
 /** A chit instalment paid on the phone, not yet on the server: amount = what left the account (due less dividend). */
@@ -400,7 +406,8 @@ export async function syncNow(settings: Settings, outbox: Outbox, onStep?: (s: s
         method: 'POST', timeoutMs: 30000,
         body: {
           expenses: waiting.map(e => ({ clientId: e.clientId, date: e.date, amount: e.amount, categoryId: e.categoryId, paidFromId: e.paidFromId,
-            narration: e.narration || null, party: e.party || null, reference: e.reference || null, notes: e.notes || null })),
+            narration: e.narration || null, party: e.party || null, reference: e.reference || null, notes: e.notes || null,
+            items: e.items && e.items.length > 1 ? e.items.map(i => ({ categoryId: i.categoryId, amount: i.amount, name: i.name || null })) : null })),
           chitPayments: chitsWaiting.map(c => ({ clientId: c.clientId, chitId: c.chitId, installmentId: c.installmentId, paidDate: c.paidDate,
             fromAccountId: c.fromAccountId, dividend: c.dividend || null })),
           claims: of('CLAIM'), repayments: of('REPAYMENT'), incomes: of('INCOME'), gifts: of('GIFT'), emiPayments: of('EMI_PAY'), transfers: of('TRANSFER'),

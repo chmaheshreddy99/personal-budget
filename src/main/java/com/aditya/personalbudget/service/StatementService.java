@@ -1,5 +1,6 @@
 package com.aditya.personalbudget.service;
 
+import com.aditya.personalbudget.domain.entity.StatementSettings;
 import com.aditya.personalbudget.domain.entity.StatementSubscription;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.ClaimStatus;
@@ -18,6 +19,7 @@ import com.aditya.personalbudget.dto.ReportDtos.SheetSection;
 import com.aditya.personalbudget.dto.ReportDtos.ValuePoint;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
+import com.aditya.personalbudget.repository.StatementSettingsRepository;
 import com.aditya.personalbudget.repository.StatementSubscriptionRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
@@ -28,6 +30,7 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +59,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -71,7 +73,7 @@ public class StatementService {
     private static final Logger log = LoggerFactory.getLogger(StatementService.class);
     private static final String AREA = "Statements";
     private static final String KEY = "statement.pdf-password-key";
-    private static final Pattern EMAIL = Pattern.compile("^[^@\\s,;]+@[^@\\s,;]+\\.[^@\\s,;]+$");
+    private static final java.util.regex.Pattern EMAIL = java.util.regex.Pattern.compile("^[^@\\s,;]+@[^@\\s,;]+\\.[^@\\s,;]+$");
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH);
     private static final int MAX_RECIPIENTS = 10;
@@ -88,17 +90,40 @@ public class StatementService {
             new Kind("MONEY_OWED", "Money lent & owed", "What others owe you and what you owe: each item with what was repaid, what is outstanding, interest and due dates.", "hand"),
             new Kind("EMIS", "EMI statement", "Every running EMI: the instalment, how many are paid, what is outstanding, interest left and when it ends.", "calendar"));
 
+    /**
+     * @param protect     whether its PDF is locked, all told
+     * @param hasPassword it has a password of its own
+     * @param protection  GLOBAL (as all statements), ON or OFF
+     * @param nextSend    the day it goes out next; null while paused
+     */
     public record SubscriptionView(Long id, String kind, String kindLabel, List<String> recipients, List<Long> accountIds, int dayOfMonth,
                                    boolean protect, boolean hasPassword, boolean active, String lastPeriod, java.time.LocalDateTime lastSentAt,
-                                   String lastResult, String createdBy) {
+                                   String lastResult, String createdBy, String protection, LocalDate nextSend) {
     }
 
+    /**
+     * @param protection        GLOBAL, ON or OFF; when left out, {@code protect} says ON, else GLOBAL
+     * @param password          a new password of its own; empty keeps what it has
+     * @param useCommonPassword drop its own password, for the common one
+     */
     public record SubscriptionRequest(@NotBlank @Size(max = 20) String kind, @NotBlank @Size(max = 600) String recipients,
                                       List<Long> accountIds, @Min(1) @Max(28) Integer dayOfMonth, Boolean protect,
-                                      @Size(min = 4, max = 64) String password, Boolean active) {
+                                      @Size(min = 4, max = 64) String password, Boolean active,
+                                      @Pattern(regexp = "GLOBAL|ON|OFF") String protection, Boolean useCommonPassword) {
+
+        public SubscriptionRequest(String kind, String recipients, List<Long> accountIds, Integer dayOfMonth, Boolean protect, String password, Boolean active) {
+            this(kind, recipients, accountIds, dayOfMonth, protect, password, active, null, null);
+        }
     }
 
-    public record Overview(List<Kind> kinds, List<SubscriptionView> subscriptions, boolean mailReady, String mailFrom, String lastMonth) {
+    /** What every statement follows unless it says otherwise; the common password itself never leaves the server. */
+    public record Protection(boolean enabled, boolean hasPassword) {
+    }
+
+    public record ProtectionRequest(Boolean enabled, @Size(min = 4, max = 64) String password) {
+    }
+
+    public record Overview(List<Kind> kinds, List<SubscriptionView> subscriptions, boolean mailReady, String mailFrom, String lastMonth, Protection protection) {
     }
 
     public record SendResult(String period, int sent, String result) {
@@ -109,6 +134,7 @@ public class StatementService {
     }
 
     private final StatementSubscriptionRepository subscriptions;
+    private final StatementSettingsRepository protections;
     private final ReportService reports;
     private final AccountService accounts;
     private final ChitService chits;
@@ -119,9 +145,10 @@ public class StatementService {
     private final ActivityService activity;
     private final SecureRandom random = new SecureRandom();
 
-    public StatementService(StatementSubscriptionRepository subscriptions, ReportService reports, AccountService accounts, ChitService chits,
+    public StatementService(StatementSubscriptionRepository subscriptions, StatementSettingsRepository protections, ReportService reports, AccountService accounts, ChitService chits,
                             ClaimService claims, EmiService emis, TenantMailService mail, AppSettingsService settings, ActivityService activity) {
         this.subscriptions = subscriptions;
+        this.protections = protections;
         this.reports = reports;
         this.accounts = accounts;
         this.chits = chits;
@@ -137,7 +164,30 @@ public class StatementService {
     public Overview overview() {
         var sender = mail.sender();
         return new Overview(KINDS, mine().stream().map(this::view).toList(), sender.isPresent(), sender.map(TenantMailService.Sender::from).orElse(null),
-                OrgClock.today().minusMonths(1).withDayOfMonth(1).toString().substring(0, 7));
+                OrgClock.today().minusMonths(1).withDayOfMonth(1).toString().substring(0, 7), protection());
+    }
+
+    public Protection protection() {
+        return protections.findForTenant(UserContext.tenantId())
+                .map(p -> new Protection(Boolean.TRUE.equals(p.getProtectionEnabled()), p.getPasswordEnc() != null))
+                .orElse(new Protection(false, false));
+    }
+
+    /** Turns locking on or off for the statements that follow the common setting, and sets the common password. */
+    public Protection saveProtection(ProtectionRequest r) {
+        StatementSettings p = protections.findForTenant(UserContext.tenantId()).orElseGet(() -> {
+            StatementSettings fresh = new StatementSettings();
+            fresh.setTenantId(UserContext.tenantId());
+            return fresh;
+        });
+        boolean newPassword = r.password() != null && !r.password().isBlank();
+        if (newPassword) p.setPasswordEnc(encrypt(r.password()));
+        boolean enabled = r.enabled() == null ? Boolean.TRUE.equals(p.getProtectionEnabled()) : r.enabled();
+        if (enabled && p.getPasswordEnc() == null) throw new BusinessException("Set the common password that will open the PDFs");
+        p.setProtectionEnabled(enabled);
+        protections.save(p);
+        activity.record("CHANGED", AREA, "Statement PDFs " + (enabled ? "locked" : "not locked") + " by default" + (newPassword ? "; common password changed" : ""));
+        return protection();
     }
 
     public SubscriptionView create(SubscriptionRequest r) {
@@ -195,7 +245,7 @@ public class StatementService {
         try {
             TenantMailService.Sender sender = mail.sender()
                     .orElseThrow(() -> new BusinessException("E-mail is not set up: add your e-mail account in Settings, E-mail"));
-            String password = Boolean.TRUE.equals(s.getProtect()) && s.getPasswordEnc() != null ? decrypt(s.getPasswordEnc()) : null;
+            String password = passwordFor(s);
             Rendered pdf = render(s.getKind(), period, ids(s.getAccountIds()), password);
             String org = UserContext.current().map(CurrentUser::tenantName).orElse("");
             MimeMessage message = sender.mail().createMimeMessage();
@@ -207,7 +257,10 @@ public class StatementService {
             StringBuilder body = new StringBuilder("Hello,\n\nYour ").append(kind(s.getKind()).label().toLowerCase(Locale.ROOT)).append(" for ")
                     .append(MONTH.format(period)).append(" is attached (").append(pdf.fileName()).append(").\n\n");
             pdf.highlights().forEach(h -> body.append("  - ").append(h).append('\n'));
-            if (password != null) body.append("\nThe PDF is locked: open it with the password set for this statement in Settings, Statements.\n");
+            if (password != null) {
+                body.append("\nThe PDF is locked: open it with ").append(s.getPasswordEnc() != null ? "the password set for this statement" : "the common statement password")
+                        .append(" in Settings, Statements.\n");
+            }
             body.append("\nSent every month on day ").append(day(s)).append(" by ").append(org).append("'s Personal Budget.\n");
             helper.setText(body.toString(), false);
             helper.addAttachment(pdf.fileName(), new ByteArrayResource(pdf.pdf()), "application/pdf");
@@ -243,17 +296,44 @@ public class StatementService {
             s.setAccountIds(null);
         }
         s.setDayOfMonth(r.dayOfMonth() == null ? 1 : r.dayOfMonth());
-        boolean protect = Boolean.TRUE.equals(r.protect());
+        s.setProtection(r.protection() != null ? r.protection() : Boolean.TRUE.equals(r.protect()) ? "ON" : "GLOBAL");
+        if (Boolean.TRUE.equals(r.useCommonPassword())) s.setPasswordEnc(null);
         if (r.password() != null && !r.password().isBlank()) s.setPasswordEnc(encrypt(r.password()));
-        if (protect && s.getPasswordEnc() == null) throw new BusinessException("Set the password that will open the PDF");
-        s.setProtect(protect);
+        if (locked(s) && s.getPasswordEnc() == null && !protection().hasPassword()) throw new BusinessException("Set the password that will open the PDF");
+        s.setProtect("ON".equals(s.getProtection()));
         s.setActive(r.active() == null ? creating || Boolean.TRUE.equals(s.getActive()) : r.active());
     }
 
     private SubscriptionView view(StatementSubscription s) {
         return new SubscriptionView(s.getId(), s.getKind(), kind(s.getKind()).label(), split(s.getRecipients()), ids(s.getAccountIds()), day(s),
-                Boolean.TRUE.equals(s.getProtect()), s.getPasswordEnc() != null, Boolean.TRUE.equals(s.getActive()), s.getLastPeriod(), s.getLastSentAt(),
-                s.getLastResult(), s.getCreatedBy());
+                locked(s), s.getPasswordEnc() != null, Boolean.TRUE.equals(s.getActive()), s.getLastPeriod(), s.getLastSentAt(),
+                s.getLastResult(), s.getCreatedBy(), protectionOf(s), nextSend(s));
+    }
+
+    /** GLOBAL, ON or OFF; a row from before the choice existed is ON if it was locked, else it follows the common setting. */
+    private static String protectionOf(StatementSubscription s) {
+        return s.getProtection() != null ? s.getProtection() : Boolean.TRUE.equals(s.getProtect()) ? "ON" : "GLOBAL";
+    }
+
+    private boolean locked(StatementSubscription s) {
+        String mode = protectionOf(s);
+        return "ON".equals(mode) || "GLOBAL".equals(mode) && protection().enabled();
+    }
+
+    /** What locks its PDF: its own password, else the common one. A statement meant to be locked never goes out unlocked. */
+    private String passwordFor(StatementSubscription s) {
+        if (!locked(s)) return null;
+        if (s.getPasswordEnc() != null) return decrypt(s.getPasswordEnc());
+        return protections.findForTenant(UserContext.tenantId()).map(StatementSettings::getPasswordEnc).map(this::decrypt)
+                .orElseThrow(() -> new BusinessException("The PDF should be locked but no password is set; set one in Settings, Statements"));
+    }
+
+    private static LocalDate nextSend(StatementSubscription s) {
+        if (!Boolean.TRUE.equals(s.getActive())) return null;
+        LocalDate today = OrgClock.today();
+        YearMonth month = YearMonth.from(today);
+        if (month.minusMonths(1).toString().equals(s.getLastPeriod())) return month.plusMonths(1).atDay(day(s));
+        return today.getDayOfMonth() < day(s) ? month.atDay(day(s)) : today;
     }
 
     private List<StatementSubscription> mine() {

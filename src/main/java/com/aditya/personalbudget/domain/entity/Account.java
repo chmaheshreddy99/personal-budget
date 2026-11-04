@@ -3,6 +3,7 @@ package com.aditya.personalbudget.domain.entity;
 import com.aditya.personalbudget.domain.TenantOwned;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.AccountType;
+import com.aditya.personalbudget.domain.type.InterestFrequency;
 import com.aditya.personalbudget.storage.References;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -13,6 +14,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -84,9 +87,30 @@ public class Account implements TenantOwned {
     @DecimalMax("100")
     private BigDecimal interestRate;
 
+    /** Bank accounts: how often the interest is credited (empty: every quarter). */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 12)
+    private InterestFrequency interestFrequency;
+
+    /** Bank accounts: finished periods of interest post themselves. */
+    private Boolean interestAutoPost;
+
+    /** Bank accounts: the day interest is reckoned from; what came before may be in the books already. */
+    private LocalDate interestFrom;
+
     /** Credit card limit or sanctioned loan amount. */
     @PositiveOrZero
     private BigDecimal creditLimit;
+
+    /** Credit cards: the day of the month the statement is made (a shorter month uses its last day); empty: no billing cycle set. */
+    @Min(1)
+    @Max(31)
+    private Integer billingDay;
+
+    /** Credit cards: the days from the statement date to the payment due date. */
+    @Min(14)
+    @Max(30)
+    private Integer paymentDueDays;
 
     /** Maturity date for deposits, loan end date ... */
     private LocalDate maturityDate;

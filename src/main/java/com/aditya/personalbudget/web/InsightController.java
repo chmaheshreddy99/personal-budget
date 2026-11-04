@@ -112,7 +112,9 @@ public class InsightController {
     @GetMapping("/forecast")
     public Forecast forecast(@RequestParam(defaultValue = "12") int months,
                              @RequestParam(required = false) BigDecimal incomeAdjust,
-                             @RequestParam(required = false) BigDecimal expenseAdjust) {
-        return forecast.forecast(months, incomeAdjust, expenseAdjust);
+                             @RequestParam(required = false) BigDecimal expenseAdjust,
+                             @RequestParam(required = false) String incomeBasis,
+                             @RequestParam(required = false) String expenseBasis) {
+        return forecast.forecast(months, incomeAdjust, expenseAdjust, incomeBasis, expenseBasis);
     }
 }

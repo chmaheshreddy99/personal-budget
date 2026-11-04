@@ -405,6 +405,7 @@ table.grid.compact th { padding: 5px 8px; }
 .chip-icon.aqua { background: linear-gradient(180deg, #ecfbf9, var(--aqua-100)); color: #0b8a7e; }
 .chip-icon.coral { background: linear-gradient(180deg, #fff3ee, #fddccf); color: #c2532c; }
 .chip-icon.gold { background: linear-gradient(180deg, #fffaea, #fde9b0); color: #a06d00; }
+.chip-icon.sage { background: linear-gradient(180deg, #f4f7ef, #dfe8d2); color: #3e5b2b; }   /* cash: the ₹500 note's stone green */
 .chip-icon.violet { background: linear-gradient(180deg, #f3f1ff, #dcd7fb); color: #4a3aa7; }
 .chip-icon.red { background: linear-gradient(180deg, #fff1f1, #f9d4d4); color: #b02a2a; }
 .chip-icon.gray { background: linear-gradient(180deg, #f7f9fb, #e4e9ef); color: var(--text-secondary); }
@@ -614,3 +615,64 @@ svg.icon.art { width: 24px; height: 24px; flex: none; }
 /* extra-small chips (balance sheet rows, movers, compact lists): the money artwork stays inside the chip */
 .chip-icon.xs.art { width: 24px; height: 24px; border-radius: 7px; padding: 0; overflow: hidden; }
 .chip-icon.xs.art svg.icon.art { width: 22px; height: 22px; }
+
+/* ===================================================================== the e-mail switch at the foot of a dialog (notify-toggle.js) */
+.nt-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; margin-right: auto; padding: 0 10px 0 7px; border-radius: 999px;
+    border: 1px solid var(--hairline-strong); background: var(--surface-solid); font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    cursor: pointer; user-select: none; transition: border-color 0.15s, background 0.15s, color 0.15s; }
+.nt-pill[hidden] { display: none; }
+.nt-pill:has(+ .left) { margin-right: 4px; }   /* a left button keeps the gap after it */
+.nt-pill input { position: absolute; opacity: 0; pointer-events: none; }
+.nt-pill > svg { width: 13px; height: 13px; }
+.nt-sw { position: relative; width: 24px; height: 14px; flex: none; border-radius: 999px; background: rgba(10, 79, 128, 0.22); transition: background 0.15s; }
+.nt-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition: transform 0.15s; }
+.nt-pill.on { border-color: rgba(11, 124, 189, 0.45); background: var(--grad-brand-soft); color: var(--ocean-800); }
+.nt-pill.on .nt-sw { background: var(--ocean-500); }
+.nt-pill.on .nt-sw::after { transform: translateX(10px); }
+.nt-pill:focus-within { box-shadow: 0 0 0 2px rgba(11, 124, 189, 0.25); }
+.nt-why { font-size: 10.5px; font-weight: 500; color: var(--text-muted); }
+.nt-why:empty { display: none; }
+.nt-pill.set .nt-label::after { content: " ·"; opacity: 0; }
+
+/* ===================================================================== Settings › Alerts */
+.al-page { display: grid; gap: var(--gap); align-content: start; }
+.al-master { margin-left: auto; }
+.al-master { flex: none; }
+.al-master span { width: 40px; height: 22px; background: rgba(255, 255, 255, 0.3); }
+.switch.al-master input:checked + span { background: #2fbf7b; }
+.al-state { min-width: 22px; font-size: 12px; font-weight: 700; color: #fff; }
+.al-master span::after { width: 18px; height: 18px; }
+.al-master input:checked + span::after { transform: translateX(18px); }
+.al-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: var(--gap); align-items: start; }
+.al-events { display: grid; }
+/* the input stays reachable by keyboard, unlike a plain .switch */
+.al-page .switch { position: relative; }
+.al-page .switch input { display: block; position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.al-page .switch input:focus-visible + span { outline: 2px solid var(--ocean-400); outline-offset: 2px; }
+.al-event .switch, .al-to-panel .switch { flex: none; padding: 6px 0; }
+.al-event > .grow, .al-to-panel .pref-row > .grow { flex: 1; min-width: 0; }
+.al-event { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--hairline); transition: background 0.15s; }
+.al-event:last-child { border-bottom: 0; }
+.al-event b { display: block; font-size: 13px; color: var(--ocean-900); }
+.al-event small { display: block; font-size: 11.5px; color: var(--text-muted); }
+.al-event:not(.on) .chip-icon { opacity: 0.45; filter: grayscale(1); }
+.al-event:not(.on) .al-inline { opacity: 0.5; }
+.al-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11.5px; color: var(--text-secondary); }
+.al-amt { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--hairline-strong); background: var(--surface-solid); }
+.al-amt input { width: 74px; height: 24px; border: 0; padding: 0; background: none; text-align: right; font-variant-numeric: tabular-nums; }
+.al-check input { margin: 0; }
+.al-hint { display: flex; gap: 5px; align-items: flex-start; margin: 4px 0 10px; }
+.al-hint svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+.al-acts { align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.al-page.al-off .al-events-panel { opacity: 0.6; }
+.al-log { display: grid; max-height: 320px; overflow: auto; }
+.al-sent { display: flex; align-items: center; gap: 9px; padding: 6px 14px; border-bottom: 1px solid var(--hairline); font-size: 12px; }
+.al-sent > svg { width: 14px; height: 14px; flex: none; color: var(--status-good); }
+.al-sent.bad > svg { color: var(--status-critical); }
+.al-sent b, .al-sent small.ellipsis { display: block; max-width: 100%; }
+.al-sent small { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 1100px) { .al-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .al-event { flex-wrap: wrap; } .al-inline { order: 3; flex-basis: 100%; padding-left: 38px; } }
+
+.ml-pw-needed input { border-color: #e0a100 !important; box-shadow: 0 0 0 2px rgba(224, 161, 0, 0.18); }

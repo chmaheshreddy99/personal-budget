@@ -33,7 +33,12 @@ export function routeHash(path, query = {}) {
     return `#/${path}${parts.length ? `?${parts.join('&')}` : ''}`;
 }
 
-export function showRoute(hash, { push = false } = {}) {
+export function showRoute(hash, { push = false, exact = false } = {}) {
+    // a page writing its address keeps the dialog open over it (...?dialog=expense): only the dialog itself takes it away
+    const dialog = readQuery().get('dialog');
+    if (!exact && dialog && !/[?&]dialog=/.test(hash) && hash.split(/[/?]/)[1] === currentPath().split('/')[0]) {
+        hash += `${hash.includes('?') ? '&' : '?'}dialog=${encode(dialog)}`;
+    }
     if (location.hash === hash) return;
     history[push ? 'pushState' : 'replaceState'](history.state, '', hash);
     window.dispatchEvent(new CustomEvent('routeshown', { detail: hash }));
@@ -65,7 +70,46 @@ export function setQuery(changes, { push = false } = {}) {
         if (v === null || v === undefined || v === '' || v === false) delete q[k];
         else q[k] = String(v);
     });
-    showRoute(routeHash(currentPath(), q), { push });
+    showRoute(routeHash(currentPath(), q), { push, exact: true });
+}
+
+/**
+ * The choices of a page kept in the address (a tab, a period, a switch ...). A spec maps each query key to a choice:
+ * choice(object, field, default, parse?, { move: true }?). The rule, the same on every page: an address holding any of
+ * the keys shows exactly that (a key left out is its default), and a bare address (from the menu) shows what was last
+ * chosen. Writing always leaves at least the first key, so Back returns to the view as it was.
+ */
+export function choice(object, field, def, parse = String, { move = false, format = String } = {}) {
+    return { get: () => object[field], set: v => { object[field] = v; }, def, parse, format, move };
+}
+
+export const asNumber = Number;
+export const asFlag = v => v === '1';
+export const flagText = v => (v ? '1' : '0');
+export const asList = v => (v ? v.split(',').filter(Boolean) : []);
+
+/** Takes the choices from the address the page was reached by; a page redrawn from inside itself has none. */
+export function readChoices(params, spec) {
+    const q = params?.query;
+    if (!q || !Object.keys(spec).some(k => q.has(k))) return;
+    Object.entries(spec).forEach(([k, c]) => c.set(q.has(k) ? c.parse(q.get(k)) : c.def));
+}
+
+/** Writes the choices to the address; one marked {@code move} that changed gets its own step in the history. */
+export function writeChoices(spec) {
+    const q = readQuery();
+    const changes = {};
+    let push = false;
+    Object.entries(spec).forEach(([k, c]) => {
+        const text = c.format(c.get()), def = c.format(c.def);
+        changes[k] = text === def ? null : text;
+        if (c.move && (q.get(k) ?? def) !== text) push = true;
+    });
+    if (Object.values(changes).every(v => v === null)) {
+        const [first, c] = Object.entries(spec)[0];
+        changes[first] = c.format(c.def);
+    }
+    setQuery(changes, { push });
 }
 
 /** A list from the query ("1,2,3"), or [] when it is not there. */

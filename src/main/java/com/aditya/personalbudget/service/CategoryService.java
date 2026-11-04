@@ -121,6 +121,14 @@ public class CategoryService {
         return view(c.getId());
     }
 
+    /** Stops (or starts again) suggesting a budget for an expense category, in every month. */
+    @Transactional
+    public void setBudgetIgnored(Long id, boolean ignored) {
+        Category c = require(id, CategoryKind.EXPENSE);
+        c.setBudgetIgnored(ignored);
+        categories.save(c);
+    }
+
     @Transactional
     public CategoryView update(Long id, CategoryRequest request) {
         Category c = require(id);

@@ -21,7 +21,7 @@ import { date, dateTime, daysFromToday } from '../core/format.js';
 import { evidenceFieldHtml, bindEvidenceField, openViewer, fileUrl } from '../components/evidence.js';
 import { qrSvg } from '../core/qr.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
-import { showRoute, routeHash, fromAddress } from '../core/route.js';
+import { showRoute, routeHash, fromAddress, setQuery } from '../core/route.js';
 
 export const DOC_TYPES = {
     AADHAAR: ['Aadhaar card', 'shield', 'ocean'], PAN: ['PAN card', 'card', 'violet'], PASSPORT: ['Passport', 'plane', 'aqua'],
@@ -51,14 +51,20 @@ const SORTS = { expiry: 'Expiring first', person: 'By person', recent: 'Recently
 const revealed = new Set();
 
 export async function render(container, _params, isCurrent) {
-    if (fromAddress(_params)) view.owner = _params.query.get('owner') || null;   // #/documents?owner=<key>
+    if (fromAddress(_params)) {   // #/documents?owner=<key>&sort=person&layout=cards&type=…
+        const q = _params.query;
+        view.owner = q.get('owner') || null;
+        if (SORTS[q.get('sort')]) view.sort = q.get('sort');
+        if (q.get('layout') === 'cards' || q.get('layout') === 'list') { layout = q.get('layout'); }
+        if (q.has('type')) view.type = q.get('type');
+    }
     const docs = await api.get('/documents');
     if (!isCurrent()) return;
     const reload = () => render(container, [], isCurrent);
     const manage = can('POST_TRANSACTIONS');
     const owners = members(docs);
     if (view.owner && !owners.some(o => o.key === view.owner)) view.owner = null;
-    showRoute(routeHash('documents', { owner: view.owner }));
+    showRoute(routeHash('documents', { owner: view.owner, sort: view.sort, layout, type: view.type }));
     const soon = docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) >= 0 && daysFromToday(d.expiresOn) <= 180);
     const expired = docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) < 0);
     const noScan = docs.filter(d => !d.fileCount);
@@ -136,7 +142,7 @@ export async function render(container, _params, isCurrent) {
         $('#dc-clear').hidden = !(view.owner || view.type || view.q);
     };
     const pickOwner = key => {
-        if ((key || null) !== view.owner) showRoute(routeHash('documents', { owner: key || null }), { push: true });
+        if ((key || null) !== view.owner) showRoute(routeHash('documents', { owner: key || null, sort: view.sort, layout, type: view.type }), { push: true });
         view.owner = key || null;
         view.open = null;
         peopleEl.querySelectorAll('[data-owner]').forEach(el => el.classList.toggle('selected', (el.dataset.owner || null) === view.owner));
@@ -155,11 +161,12 @@ export async function render(container, _params, isCurrent) {
     }
 
     const on = (sel, evt, fn) => $(sel)?.addEventListener(evt, fn);
-    on('#dc-type', 'change', e => { view.type = e.target.value; drawList(); });
+    on('#dc-type', 'change', e => { view.type = e.target.value; setQuery({ type: view.type }); drawList(); });
     on('#dc-sort', 'click', e => {
         const b = e.target.closest('[data-sort]');
         if (!b) return;
         view.sort = b.dataset.sort;
+        setQuery({ sort: view.sort });
         $('#dc-sort').querySelectorAll('[data-sort]').forEach(x => x.classList.toggle('active', x === b));
         drawList();
     });
@@ -167,6 +174,7 @@ export async function render(container, _params, isCurrent) {
         const b = e.target.closest('[data-layout]');
         if (!b) return;
         layout = b.dataset.layout;
+        setQuery({ layout });
         try { localStorage.setItem(LAYOUT_KEY, layout); } catch { /* private mode */ }
         $('#dc-layout').querySelectorAll('[data-layout]').forEach(x => x.classList.toggle('active', x === b));
         drawList();

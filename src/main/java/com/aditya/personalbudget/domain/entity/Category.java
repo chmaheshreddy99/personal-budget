@@ -57,6 +57,9 @@ public class Category implements TenantOwned {
     @Column(length = 20)
     private String systemKey;
 
+    /** Expense categories: the user does not want a budget here, so none is suggested (the spending still shows, apart). */
+    private Boolean budgetIgnored;
+
     @Column(nullable = false)
     private Boolean active;
 

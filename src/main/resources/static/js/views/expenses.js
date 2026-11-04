@@ -29,7 +29,7 @@ import { money, moneyShort, percent, date, dateTime, shortDate, isoDate } from '
 import { barChart, donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openEntryDetail } from '../components/transaction-forms.js';
-import { showRoute, showPageRoute, routeHash, queryList, fromAddress } from '../core/route.js';
+import { showRoute, showPageRoute, routeHash, queryList, fromAddress, readQuery } from '../core/route.js';
 import { claimPanelHtml, bindClaimPanel, claimBadge } from '../components/claim-panel.js';
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
@@ -102,6 +102,9 @@ function readRoute(type, query) {
     view.q = query.get('q') || '';
     view.open = query.get('open') || null;
     view.moreFilters = query.get('filters') === '1';
+    view.side = ['category', 'payer'].includes(query.get('side')) ? query.get('side') : 'mix';
+    view.emiClosed = query.get('closed') === '1';
+    if (query.has('byday')) prefs.grouped = query.get('byday') === '1';
 }
 
 /** The address of what the page shows now. */
@@ -110,7 +113,8 @@ function routeOfView() {
     return routeHash(`expenses/${SLUG_OF_TYPE[view.type] || 'all'}`, {
         period: view.period === 'month' ? '' : view.period, from: custom ? view.from : '', to: custom ? view.to : '',
         q: view.q, ...Object.fromEntries(LIST_FILTERS.map(k => [k, view[k]])), ...Object.fromEntries(ONE_FILTERS.map(k => [k, view[k]])),
-        open: view.open, filters: view.moreFilters,
+        open: view.open, filters: view.moreFilters, side: view.side === 'mix' ? '' : view.side, byday: prefs.grouped, closed: view.emiClosed,
+        dialog: readQuery().get('dialog'),
     });
 }
 
@@ -1061,15 +1065,11 @@ function th(key, label, cls) {
         <span>${label}</span>${on ? `<i class="sort-arrow">${sort.dir === 'asc' ? '▲' : '▼'}</i>` : ''}</th>`;
 }
 
-/**
- * Whether a bill's items are folded away under its row. Ocean: folded until opened (a bill is one row, as tall as any
- * other); Classic: shown until folded. The folded (Classic) and unfolded (Ocean) bills are kept as negative entry ids.
- */
+/** Whether a bill's items are folded away under its row: folded until opened, so a bill is one row, as tall as any other. */
 const unfoldedBills = new Set();
-const billFolded = id => (isOcean() ? !unfoldedBills.has(id) : view.collapsed.has(-id));
+const billFolded = id => !unfoldedBills.has(id);
 function toggleBillFold(id, fold) {
-    if (isOcean()) { if (fold) unfoldedBills.delete(id); else unfoldedBills.add(id); return; }
-    if (fold) view.collapsed.add(-id); else view.collapsed.delete(-id);
+    if (fold) unfoldedBills.delete(id); else unfoldedBills.add(id);
 }
 
 /** The bills drawn over their items in the list just drawn, by key (b<entry id>): opened like any row. */
@@ -1093,7 +1093,7 @@ function tableHtml(rows, filtered = false) {
     const head = `<thead><tr>${heads.join('')}<th class="c-caret"></th></tr></thead>`;
     const cols = heads.filter(Boolean).length + 1;
     const cls = `grid xp-table ${claims ? 'xp-claims' : 'xp-expenses'}`;
-    const line = r => (claims ? claimRowHtml(r, !grouped) : r.isBill ? billRowHtml(r, !grouped) : rowHtml(r, !grouped));
+    const line = r => (claims ? claimRowHtml(r, !grouped) : r.billTotal ? billTotalHtml(r, !grouped) : r.isBill ? billRowHtml(r, !grouped) : rowHtml(r, !grouped));
     // the total of what is listed, as the last line: amount (and, for lent / borrowed, what is still owed)
     const owed = rows.reduce((s, r) => s + (r.claim && isOpenClaim(r.claim) ? Number(r.claim.outstanding) : 0), 0);
     const foot = `<tfoot>${listTotalRow({ count: rows.length, span: cols - (claims ? 3 : 2), filtered,
@@ -1145,6 +1145,7 @@ function nestLinked(rows) {
             out.push(parent);
             const ordered = [...group].sort((a, b) => lineNoOf(a) - lineNoOf(b));
             ordered.forEach((g, i) => out.push({ ...g, item: i === ordered.length - 1 && !kids.length ? 'last' : 'mid', billRow: parent }));
+            out.push({ billTotal: true, raw: r.raw, listed: group, bill: parent });
         } else out.push(kids.length ? { ...r, kidsShown: kids.length } : r);
         kids.forEach((k, i) => out.push({ ...k, nested: i === kids.length - 1 ? 'last' : 'mid', parentRow: parent }));
     });
@@ -1322,6 +1323,18 @@ function billRowHtml(r, withDate) {
         <td class="r c-amt">${r.status ? `<s class="muted small mono" title="The bill">${money(r.gross)}</s> ` : ''}<b class="mono ${r.status === 'REVERSED' ? 'muted' : 'neg'}">${money(r.amount)}</b>${extra
             ? `<span class="xl-allin" title="${money(r.amount)} + charges ${money(extra)}">all-in ${money(r.amount + extra)}</span>` : ''}</td>
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
+    </tr>`;
+}
+
+/** Under the amounts of a bill's items, their total (of the whole bill too, when only some of its items are listed). */
+function billTotalHtml({ raw: e, listed, bill }, withDate) {
+    const partly = listed.length < e.items.length;
+    return `
+    <tr class="xp-item-total ${billFolded(e.entryId) ? 'xl-folded' : ''}" data-bill="${e.entryId}">
+        ${withDate ? '<td class="c-date"></td>' : ''}<td class="c-cat"></td><td class="c-desc"></td>
+        <td class="c-pay r">Total${partly ? ` of ${listed.length} listed` : ''}</td>
+        <td class="r c-amt"><b class="mono">${money(sum(listed))}</b>${partly ? `<span class="xl-allin" title="All ${e.items.length} items">of ${money(bill.amount)}</span>` : ''}</td>
+        <td class="c-caret"></td>
     </tr>`;
 }
 
@@ -1551,6 +1564,7 @@ async function oceanExpenseHtml(r, { e, entry, manage, actions, sameCat, samePla
         <details class="xo-more">
             <summary>${icon('chevron-right')}<b>Details</b><span class="xo-more-facts">${bill.summary}</span></summary>
             <div class="claim-figures">${figs.join('')}</div>
+            ${bill.categories}
             <section class="xo-insights"><div class="section-title">${icon('sparkles')} What the books say</div>${rows.join('')}</section>
         </details>` : `
         <div class="claim-figures">${figs.join('')}</div>
@@ -1571,14 +1585,13 @@ async function oceanExpenseHtml(r, { e, entry, manage, actions, sameCat, samePla
 }
 
 /**
- * A bill split into items, at a glance: a bar of the categories' shares, then each category (its part of the bill and
- * share, how it stands this month and against its budget) with its items under it (each with its own refund action),
- * and the bill's total at the foot: what was paid, what came back, what it counts for now. Its four figures: the bill,
- * its biggest part, how the categories stand against their budgets, and the account that paid.
+ * A bill split into items, at a glance: a bar of the categories' shares, then the items as one compact table, in the
+ * colour of their category, with the bill's total under the amounts. Folded under the details: each category (its part of
+ * the bill and share, how it stands this month and against its budget). Its four figures: the bill, its biggest part,
+ * how the categories stand against their budgets, and the account that paid.
  */
 function billGlance(r, { x, cats, monthLabel, current, manage, rupees, net, gross }) {
     const e = r.raw;
-    const focus = r.isBill ? null : e.lineId;
     const groups = [];
     e.items.forEach(it => {
         let g = groups.find(y => y.categoryId === it.categoryId);
@@ -1620,61 +1633,66 @@ function billGlance(r, { x, cats, monthLabel, current, manage, rupees, net, gros
             <div class="xb-cat-month"><span>${c ? `${monthLabel} ${rupees(c.monthTotal)}${vs != null ? ` <span class="${vs > 0 ? 'neg' : 'pos'}">${vs > 0 ? '▲' : '▼'}${Math.abs(Math.round(vs))}%</span>` : ''}${pct != null
                 ? ` · ${Math.round(pct)}% of ${rupees(c.budget)}${pct > 100 ? ` <span class="neg">${rupees(Number(c.monthTotal) - Number(c.budget))} over</span>` : ''}` : ' · no budget'}` : ''}</span>
                 ${pct != null ? `<i class="ed2-meter ${tone}"><em style="width:${Math.min(100, pct)}%"></em></i>` : ''}</div>
-            ${g.items.map(it => `<div class="xb-item ${it.lineId === focus ? 'focus' : ''}">
-                <span class="ellipsis">${esc(it.name || 'Item')}</span>
-                ${refundPill(it.status, Number(it.refunded || 0)) || '<span></span>'}
-                <b class="mono">${Number(it.refunded) ? `<s>${money(it.amount)}</s> ` : ''}${money(it.netAmount)}</b>
-                <span class="xb-act">${manage && e.refundable && Number(it.netAmount) > 0 ? `<button type="button" class="btn xs ghost icon" data-xp-action="item-refund" data-line="${it.lineId}" data-key="${r.key}"
-                    title="${esc(`Money came back on ${it.name || g.name}`)}">${icon('arrow-in')}</button>` : ''}</span></div>`).join('')}
         </div>`;
     };
     const html = `<div class="section-title">${icon('list')} The bill · ${e.items.length} items in ${groups.length} categor${groups.length === 1 ? 'y' : 'ies'}
             ${manage && e.editable ? `<button type="button" class="link-btn xb-add" data-xp-action="split" data-key="${r.key}">${icon('plus')}Add items</button>` : ''}</div>
         ${bar}
-        <div class="xb-cats">${states.map(catRow).join('')}</div>
-        <div class="xb-total">
-            ${back > 0.004 ? `<span>Paid <b class="mono">${money(gross)}</b></span><span class="pos">Back <b class="mono">−${money(back)}</b></span>` : `<span>${e.items.length} items</span>`}
-            <span class="xb-total-main">Total <b class="mono">${money(net)}</b></span></div>`;
+        ${itemsTableHtml(r, { manage, net, swatch: it => shades[groups.findIndex(g => g.categoryId === it.categoryId) % shades.length] })}`;
     // the folded details in one line: budgets, the biggest part, the paying account
     const summary = [over.length ? `<span class="neg">${over.length} over budget</span>` : near.length ? `<span class="warn-text">${near.length} near budget</span>` : budgeted.length ? 'budgets fine' : '',
         `biggest ${esc(biggest.name)} ${percent(biggest.amount / gross * 100, 0)}`, `paid from ${esc(e.paidFrom)}`,
         x?.duplicates?.length ? '<span class="warn-text">possible duplicate</span>' : ''].filter(Boolean).join(' · ');
-    return { figs, html, summary };
+    return { figs, html, summary, categories: `<div class="xb-cats">${states.map(catRow).join('')}</div>` };
+}
+
+/**
+ * The items of a bill as one table: item · category · share of the bill · amount · refund. One short line each, thin
+ * dotted lines between them, and under the amounts what was paid and came back (if anything) and the total.
+ */
+function itemsTableHtml(r, { manage, net, swatch, note = '' }) {
+    const e = r.raw;
+    const focus = r.isBill ? null : e.lineId;
+    const gross = Number(e.billAmount) || 1;
+    const back = Number(e.billAmount) - net;
+    const row = it => {
+        const ci = categoryIcon(it.categoryName);
+        const itemBack = Number(it.refunded || 0);
+        return `<div class="xi-row ${it.lineId === focus ? 'focus' : ''}">
+            <span class="xi-what"><i class="xl-swatch" style="background:${swatch(it)}"></i><span class="ellipsis" title="${esc(it.name || it.categoryName)}">${esc(it.name || it.categoryName)}</span>${refundPill(it.status, itemBack)}</span>
+            <span class="xi-cat" title="${esc(it.categoryName)}"><span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><span class="ellipsis">${esc(it.categoryName)}</span></span>
+            <span class="xi-pct">${percent(Number(it.amount) / gross * 100, 0)}</span>
+            <span class="xi-amt">${itemBack > 0.004 ? `<s class="mono" title="Paid">${money(it.amount)}</s> ` : ''}<b class="mono">${money(it.netAmount)}</b></span>
+            <span class="xi-act">${manage && e.refundable && Number(it.netAmount) > 0 ? `<button type="button" class="btn xs ghost icon" data-xp-action="item-refund" data-line="${it.lineId}" data-key="${r.key}"
+                title="${esc(`Money came back on ${it.name || it.categoryName}`)}">${icon('arrow-in')}</button>` : ''}</span>
+        </div>`;
+    };
+    const foot = (label, value, cls = '') => `<div class="xi-row xi-sum ${cls}"><span class="xi-note">${cls === 'xi-total' ? note : ''}</span><span class="xi-label">${label}</span><span class="xi-amt"><b class="mono">${value}</b></span><span class="xi-act"></span></div>`;
+    return `<div class="xi-table">
+        <div class="xi-row xi-head"><span>Item</span><span>Category</span><span class="xi-pct">Share</span><span class="xi-amt">Amount</span><span class="xi-act"></span></div>
+        <div class="xi-rows">${e.items.map(row).join('')}</div>
+        ${back > 0.004 ? foot('Paid', money(e.billAmount)) + foot('Came back', `−${money(back)}`, 'pos') : ''}
+        ${foot(`Total · ${e.items.length} items`, money(net), 'xi-total')}
+    </div>`;
 }
 
 /** Colours of the parts of a cost breakdown: the expense first, then each charge. */
 const PART_COLORS = ['var(--ocean-600)', '#e0795f', '#e8b64a', '#2fae7a', '#7b5cd6', '#13a89a', '#d65c8f', '#5b8def'];
 
 /**
- * The items of a bill: one bar split into them (what came back on an item hatched at its end), then a line per item
- * (category, what it was, refund, share of the bill, amount) with a refund action, and the bill in the foot. The item
- * opened from the list is highlighted.
+ * The items of a bill: one bar split into them (what came back on an item hatched at its end), then the items as one
+ * compact table with the bill's total under the amounts. The item opened from the list is highlighted.
  */
 function billItemsHtml(r, manage) {
     const e = r.raw;
     const focus = r.isBill ? null : e.lineId;
     const total = Number(e.billAmount) || 1;
     const net = e.items.reduce((s, i) => s + Number(i.netAmount), 0);
-    const back = Number(e.billAmount) - net;
     const color = i => PART_COLORS[i % PART_COLORS.length];
     const label = it => it.name || it.categoryName;
     const bar = `<div class="xl-bar" role="img" aria-label="Items of the bill">${e.items.map((it, i) => `
         <i class="${it.lineId === focus ? 'focus' : ''}" style="width:${(Number(it.amount) / total) * 100}%" title="${esc(`${label(it)} · ${it.categoryName} · ${money(it.netAmount)} · ${percent(Number(it.amount) / total * 100, 0)}`)}">
             <em style="width:${Number(it.amount) ? (Number(it.netAmount) / Number(it.amount)) * 100 : 0}%;background:${color(i)}"></em></i>`).join('')}</div>`;
-    const line = (it, i) => {
-        const ci = categoryIcon(it.categoryName);
-        const itemBack = Number(it.refunded || 0);
-        return `<div class="xl-part ${it.lineId === focus ? 'focus' : ''}">
-            <i class="xl-swatch" style="background:${color(i)}"></i>
-            <span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span>
-            <span class="xl-what"><b class="ellipsis">${esc(label(it))}</b><small class="muted ellipsis">${esc(it.categoryName)}${it.lineId === focus ? ' · <b class="xl-this">this item</b>' : ''}</small></span>
-            ${refundPill(it.status, itemBack) || '<span></span>'}
-            <span class="xl-pct">${percent(Number(it.amount) / total * 100, 0)}</span>
-            <span class="xl-money">${itemBack > 0.004 ? `<s class="mono" title="Paid">${money(it.amount)}</s>` : ''}<b class="mono">${money(it.netAmount)}</b></span>
-            <span class="xl-acts">${manage && e.refundable && Number(it.netAmount) > 0 ? `<button type="button" class="btn xs ghost icon" data-xp-action="item-refund" data-line="${it.lineId}" data-key="${r.key}"
-                title="${esc(`Money came back on ${label(it)}`)}">${icon('arrow-in')}</button>` : ''}</span>
-        </div>`;
-    };
     return `
     <div class="xl-card xb-card">
         <div class="xl-head">
@@ -1684,11 +1702,7 @@ function billItemsHtml(r, manage) {
             ${manage && e.editable ? `<button type="button" class="btn xs" data-xp-action="split" data-key="${r.key}" title="Something else was on this bill">${icon('plus')}Add items</button>` : ''}
         </div>
         ${bar}
-        <div class="xl-parts">${e.items.map(line).join('')}</div>
-        <div class="xl-foot">
-            ${back > 0.004 ? `<span class="xl-flow"><span>Paid <b class="mono">${money(e.billAmount)}</b></span><span class="xr-back">${icon('arrow-in')}back <b class="mono">−${money(back)}</b></span></span>` : ''}
-            <span class="xl-label">Bill${back > 0.004 ? ' now' : ''}</span><b class="mono">${money(net)}</b>
-            <span class="muted">${new Set(e.items.map(i => i.categoryId)).size} categories, each counted in its own budget</span></div>
+        ${itemsTableHtml(r, { manage, net, swatch: it => color(e.items.indexOf(it)), note: `${new Set(e.items.map(i => i.categoryId)).size} categories, each counted in its own budget` })}
     </div>`;
 }
 

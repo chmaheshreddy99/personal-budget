@@ -900,6 +900,7 @@ async function addExpense({ resubmit = null } = {}) {
     const day = n => { const d = orgNow(); d.setDate(d.getDate() - n); return isoDate(d); };
     const el = sheet(`<form class="m-form" id="m-xp-form" autocomplete="off">
         <div class="m-sheet-title">${icon(resubmit ? 'edit' : 'receipt')}<b>${resubmit ? 'Fix and send again' : 'Add expense'}</b>${me.approval || resubmit ? '<span class="m-tag">needs approval</span>' : ''}</div>
+        ${resubmit ? '' : `<button type="button" class="m-scan-banner" id="m-scan">${icon('camera')}<span><b>Scan a bill</b><small>The phone reads the items, their categories and the total</small></span>${icon('chevron-right')}</button>`}
         ${resubmit?.reviewNote ? `<p class="m-note m-sent-back">${icon('x')} Sent back${resubmit.reviewedBy ? ` by ${esc(resubmit.reviewedBy)}` : ''}: “${esc(resubmit.reviewNote)}”</p>` : ''}
         <label class="m-amount"><span>₹</span><input name="amount" type="number" inputmode="decimal" step="any" min="0.01" required placeholder="0"></label>
         <div class="m-label">Category</div>
@@ -918,6 +919,13 @@ async function addExpense({ resubmit = null } = {}) {
         <button type="submit" class="m-btn primary block">${icon('check')}${resubmit ? 'Send again' : me.approval ? 'Send for approval' : 'Save expense'}</button>
     </form>`);
     const form = el.querySelector('form');
+    // loaded when opened: the scanner is large, and the rest of the site does not depend on it
+    el.querySelector('#m-scan')?.addEventListener('click', async () => {
+        try {
+            const { scanBill } = await import('./scan-bill.js');
+            await scanBill({ sheet, closeSheet, toast, me, onDone: route });
+        } catch (err) { toast(err.message || 'The scanner could not be opened'); }
+    });
     const evidence = bindEvidenceField(el);
     const picked = { category: '', payer: payers[0] ? String(payers[0].id) : '', date: isoDate() };
     if (resubmit) {   // what was sent, ready to correct

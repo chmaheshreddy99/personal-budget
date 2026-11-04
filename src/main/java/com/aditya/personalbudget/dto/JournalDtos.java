@@ -5,6 +5,7 @@ import com.aditya.personalbudget.domain.type.VoucherType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
@@ -34,7 +35,9 @@ public final class JournalDtos {
                            /* the hosted chit whose money the line moves (Host a Chit) */
                            Long hostedChitId,
                            /* the account's balance just before and just after this line (natural sign, ledger order) */
-                           BigDecimal balanceBefore, BigDecimal balanceAfter) {
+                           BigDecimal balanceBefore, BigDecimal balanceAfter,
+                           /* a chit's line: that chit's own balance just before and after it (balanceBefore / After are all of Chit Funds) */
+                           BigDecimal chitBalanceBefore, BigDecimal chitBalanceAfter) {
     }
 
     /** A full journal entry with its lines. */
@@ -47,7 +50,9 @@ public final class JournalDtos {
                             /* a hosted chit's money: where it stands (collection moved or awaiting, the move's type and payout) */
                             com.aditya.personalbudget.service.ChitTrailService.Trail chitTrail,
                             /* a construction project's entry: which project, and what it was */
-                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction) {
+                            com.aditya.personalbudget.service.ConstructionTagService.ProjectTag construction,
+                            /* an income: REGULAR or ONE_TIME, null when not said */
+                            String incomeNature) {
     }
 
     /**
@@ -106,7 +111,14 @@ public final class JournalDtos {
             @Size(max = 255) String narration,
             @Size(max = 60) String reference,
             @Size(max = 100) String party,
-            Long version) {
+            Long version,
+            /* REGULAR (every month: projected) or ONE_TIME (not projected); null keeps what it was */
+            @Pattern(regexp = "REGULAR|ONE_TIME") String incomeNature) {
+
+        public IncomeRequest(LocalDate entryDate, BigDecimal amount, Long categoryId, Long toAccountId, String narration,
+                             String reference, String party, Long version) {
+            this(entryDate, amount, categoryId, toAccountId, narration, reference, party, version, null);
+        }
     }
 
     /** A manual (multi-line) journal voucher. */
@@ -152,6 +164,13 @@ public final class JournalDtos {
             Long categoryId,
             @Size(max = 255) String narration,
             @Size(max = 60) String reference,
-            @Size(max = 100) String party) {
+            @Size(max = 100) String party,
+            /* for an income: REGULAR (every month: projected) or ONE_TIME (not projected) */
+            @Pattern(regexp = "REGULAR|ONE_TIME") String incomeNature) {
+
+        public QuickTransactionRequest(QuickKind kind, LocalDate entryDate, BigDecimal amount, Long fromAccountId, Long toAccountId,
+                                       Long categoryId, String narration, String reference, String party) {
+            this(kind, entryDate, amount, fromAccountId, toAccountId, categoryId, narration, reference, party, null);
+        }
     }
 }

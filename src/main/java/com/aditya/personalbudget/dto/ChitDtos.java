@@ -45,7 +45,18 @@ public final class ChitDtos {
             @PositiveOrZero Integer alreadyPaidInstallments,
             /* the version the form was loaded with; a stale edit is refused */
             Long version,
-            @Size(max = 20) String organizerPhone) {
+            @Size(max = 20) String organizerPhone,
+            /* a copy of each installment paid goes here (empty clears it, null keeps it) */
+            @Size(max = 120) @Pattern(regexp = "^$|^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", message = "must be an e-mail address") String organizerEmail) {
+
+        /** Without the organizer's e-mail (callers that do not know it). */
+        public ChitRequest(String name, String organizer, String ticketNo, BigDecimal maturityAmount, BigDecimal monthlyInstallment,
+                           Integer numberOfInstallments, LocalDate startDate, LocalDate endDate, BigDecimal interestRate,
+                           BigDecimal commissionPercent, String notes, String organizerUpi, String upiNote, Long defaultPaymentAccountId,
+                           Integer alreadyPaidInstallments, Long version, String organizerPhone) {
+            this(name, organizer, ticketNo, maturityAmount, monthlyInstallment, numberOfInstallments, startDate, endDate, interestRate,
+                    commissionPercent, notes, organizerUpi, upiNote, defaultPaymentAccountId, alreadyPaidInstallments, version, organizerPhone, null);
+        }
 
         /** Without the organizer's mobile number (callers that do not know it). */
         public ChitRequest(String name, String organizer, String ticketNo, BigDecimal maturityAmount, BigDecimal monthlyInstallment,
@@ -53,7 +64,7 @@ public final class ChitDtos {
                            BigDecimal commissionPercent, String notes, String organizerUpi, String upiNote, Long defaultPaymentAccountId,
                            Integer alreadyPaidInstallments, Long version) {
             this(name, organizer, ticketNo, maturityAmount, monthlyInstallment, numberOfInstallments, startDate, endDate, interestRate,
-                    commissionPercent, notes, organizerUpi, upiNote, defaultPaymentAccountId, alreadyPaidInstallments, version, null);
+                    commissionPercent, notes, organizerUpi, upiNote, defaultPaymentAccountId, alreadyPaidInstallments, version, null, null);
         }
     }
 
@@ -64,7 +75,13 @@ public final class ChitDtos {
     public record PayInstallmentRequest(
             LocalDate paidDate,
             @NotNull Long fromAccountId,
-            @PositiveOrZero BigDecimal dividend) {
+            @PositiveOrZero BigDecimal dividend,
+            /* the bank's reference for the payment (UTR, cheque no.): kept on the entry, shown to the organizer */
+            @Size(max = 60) String reference) {
+
+        public PayInstallmentRequest(LocalDate paidDate, Long fromAccountId, BigDecimal dividend) {
+            this(paidDate, fromAccountId, dividend, null);
+        }
     }
 
     /**
@@ -156,7 +173,8 @@ public final class ChitDtos {
             Long payoutEntryId,
             /* closed by the user (null while open), and whether it can be closed now */
             LocalDateTime closedAt,
-            boolean closable) {
+            boolean closable,
+            String organizerEmail) {
     }
 
     public record InstallmentView(
@@ -200,6 +218,25 @@ public final class ChitDtos {
     }
 
     /** {@code payoutReceipts}: the payout as it came in, oldest first (one when it was paid in one go). */
+    /**
+     * What lifting a chit gets and costs with its organizer: the monthly amount after lifting, the cut off the maturity
+     * amount if lifted in the first month allowed and in the last (straight line between), a one-time fee, the first
+     * month lifting is allowed, and the lift table: the payout by month, with what is paid after lifting in that month
+     * ("month=payout" or "month=payout@installment", comma separated).
+     */
+    public record LiftTerms(Long chitId, BigDecimal afterLiftInstallment, BigDecimal liftDiscountFirst, BigDecimal liftDiscountLast,
+                            BigDecimal liftFeePercent, Integer liftFromMonth, String liftChart) {
+    }
+
+    public record LiftTermsRequest(@PositiveOrZero BigDecimal afterLiftInstallment,
+                                   @PositiveOrZero @DecimalMax("90") BigDecimal liftDiscountFirst,
+                                   @PositiveOrZero @DecimalMax("90") BigDecimal liftDiscountLast,
+                                   @PositiveOrZero @DecimalMax("20") BigDecimal liftFeePercent,
+                                   @Min(1) @Max(600) Integer liftFromMonth,
+                                   @Size(max = 6000) @Pattern(regexp = "^\\s*$|^\\s*\\d{1,3}\\s*=\\s*\\d+(\\.\\d{1,2})?(\\s*@\\s*\\d+(\\.\\d{1,2})?)?\\s*(,\\s*\\d{1,3}\\s*=\\s*\\d+(\\.\\d{1,2})?(\\s*@\\s*\\d+(\\.\\d{1,2})?)?\\s*)*,?\\s*$",
+                                           message = "must be month=payout pairs (optionally @installment after lifting), like 3=82000@5000, 4=84500@5000") String liftChart) {
+    }
+
     public record ChitDetail(ChitView chit, List<InstallmentView> installments, List<InterestRow> interestSchedule,
                              List<PayoutReceiptView> payoutReceipts) {
     }

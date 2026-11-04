@@ -11,7 +11,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { ArrowDownLeft, Check, ChevronLeft, ChevronRight, HandCoins, HandHeart, MessageSquareText, Receipt, Search, Trash2, X } from 'lucide-react-native';
+import { ArrowDownLeft, Check, ChevronLeft, ChevronRight, HandCoins, HandHeart, MessageSquareText, Receipt, ScanLine, Search, Trash2, X } from 'lucide-react-native';
 import { useApp } from '../state';
 import { Account, LocalExpense, hasFeature, isExpense } from '../data';
 import { date, isoDate, money } from '../format';
@@ -42,7 +42,7 @@ const DUE: [number | null, string][] = [[null, 'No date'], [7, 'In a week'], [30
 /** "Dining Out" starts a word with "out" and with "din". */
 const startsWord = (name: string, q: string) => name.toLowerCase().split(/[\s&/,-]+/).some(w => w.startsWith(q)) || name.toLowerCase().startsWith(q);
 
-export function AddExpense({ visible, onClose, prefill, editing }: { visible: boolean; onClose: () => void; prefill?: Prefill; editing?: LocalExpense }) {
+export function AddExpense({ visible, onClose, prefill, editing, onScan }: { visible: boolean; onClose: () => void; prefill?: Prefill; editing?: LocalExpense; onScan?: () => void }) {
   const app = useApp();
   const [mode, setMode] = useState<RecordMode>('EXPENSE');
   const income = mode === 'INCOME';
@@ -197,6 +197,16 @@ export function AddExpense({ visible, onClose, prefill, editing }: { visible: bo
           })}
         </View>
       ) : null}
+      {onScan && !editing && mode === 'EXPENSE' && !prefill?.smsText ? (
+        <Pressable onPress={onScan} style={({ pressed }) => [st.scan, pressed && { opacity: 0.85 }]}>
+          <ScanLine color={colors.white} size={20} />
+          <View style={{ flex: 1 }}>
+            <Text style={st.scanTitle}>Scan a bill</Text>
+            <Text style={st.scanText}>The phone reads the items, total and tax; one bill with several things becomes one transaction.</Text>
+          </View>
+          <ChevronRight color={colors.white} size={18} />
+        </Pressable>
+      ) : null}
       {prefill?.smsText ? (
         <View style={st.sms}>
           <MessageSquareText color={colors.ocean} size={16} />
@@ -324,6 +334,9 @@ const st = StyleSheet.create({
   modeOn: { backgroundColor: colors.navy },
   modeText: { fontSize: 12.5, fontWeight: '800', color: colors.text2 },
   sms: { flexDirection: 'row', gap: 8, padding: space.m, borderRadius: radius.m, backgroundColor: colors.oceanSoft },
+  scan: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: space.m, borderRadius: radius.m, backgroundColor: colors.ocean },
+  scanTitle: { fontSize: 14.5, fontWeight: '800', color: colors.white },
+  scanText: { fontSize: 12, color: '#d7ebf9', lineHeight: 16 },
   smsText: { flex: 1, fontSize: 12.5, color: colors.text2, lineHeight: 18 },
   amountBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radius.l, paddingHorizontal: space.l, borderWidth: 1, borderColor: colors.line },
   rupee: { fontSize: 30, fontWeight: '700', color: colors.ocean, marginRight: 4 },

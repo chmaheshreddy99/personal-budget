@@ -66,6 +66,13 @@ public class JournalEntry implements TenantOwned {
     @Column(nullable = false)
     private BigDecimal amount;
 
+    /**
+     * For an income: REGULAR (comes every month, like a salary: the forecast projects it) or ONE_TIME (a bonus, a gift,
+     * a sale: not projected); null when not said.
+     */
+    @Column(length = 10)
+    private String incomeNature;
+
     /** Business object that generated the entry, e.g. "CHIT_INSTALLMENT" + its id. */
     @Column(length = 30)
     private String sourceType;

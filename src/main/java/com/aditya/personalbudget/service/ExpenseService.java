@@ -123,11 +123,14 @@ public class ExpenseService {
     private final CategoryService categories;
     private final com.aditya.personalbudget.repository.AttachmentRepository attachments;
     private final ClaimService claims;
+    private final NotificationService notifications;
 
     public ExpenseService(JournalEntryRepository entries, JournalLineRepository lines, AccountRepository accounts,
                           LedgerService ledger, CategoryService categories,
-                          com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimService claims) {
+                          com.aditya.personalbudget.repository.AttachmentRepository attachments, ClaimService claims,
+                          NotificationService notifications) {
         this.attachments = attachments;
+        this.notifications = notifications;
         this.claims = claims;
         this.entries = entries;
         this.lines = lines;
@@ -244,7 +247,9 @@ public class ExpenseService {
 
     @Transactional
     public EntryView create(ExpenseRequest request) {
-        return ledger.toViews(List.of(ledger.post(draft(request)))).getFirst();
+        EntryView posted = ledger.toViews(List.of(ledger.post(draft(request)))).getFirst();
+        notifications.entryPosted(posted);   // when it is large enough, or the dialog asked
+        return posted;
     }
 
     @Transactional

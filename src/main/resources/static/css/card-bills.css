@@ -1,0 +1,77 @@
+/* Accounts › a credit card › Bills (views/card-bills.js) */
+.p-card-bills .panel-body { overflow: auto; }
+#card-bills { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+.cb-setup { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
+
+.cb-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cb-card { display: flex; gap: 9px; align-items: flex-start; min-width: 0; padding: 9px 11px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-solid); }
+.cb-card-ico { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-sunken); color: var(--text-secondary); }
+.cb-card-ico svg { width: 16px; height: 16px; }
+.cb-card small { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-secondary); }
+.cb-card b { display: block; font-size: 17px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.cb-card-note { display: block; font-size: 11.5px; line-height: 1.35; color: var(--text-secondary); }
+.cb-card.warn { border-color: #e3b341; } .cb-card.warn .cb-card-ico { background: #fdf3d7; color: #9a6b00; }
+.cb-card.bad { border-color: #e08484; } .cb-card.bad .cb-card-ico { background: #fde8e8; color: #b42828; } .cb-card.bad b { color: #b42828; }
+.cb-card.good .cb-card-ico { background: #e4f6ea; color: #0b7a3b; }
+.cb-card.info .cb-card-ico { background: #e2f0fb; color: #0b5c94; }
+
+.cb-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.cb-plan { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); }
+.cb-plan svg { width: 14px; height: 14px; }
+.cb-plan .link-btn { margin-left: 4px; }
+.cb-month { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); }
+.cb-month b { min-width: 72px; text-align: center; font-size: 13.5px; color: var(--text-primary); }
+
+.cb-bill { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-solid); }
+.cb-bill-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cb-bill-head > div { display: flex; align-items: center; gap: 8px; }
+.cb-bill-title { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
+.cb-status { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.cb-status svg { width: 11px; height: 11px; }
+.cb-status.good { background: #e4f6ea; color: #0b7a3b; }
+.cb-status.info { background: #e2f0fb; color: #0b5c94; }
+.cb-status.warn { background: #fdf3d7; color: #8a6000; }
+.cb-status.bad { background: #fde8e8; color: #b42828; }
+
+.cb-figs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.cb-fig { display: flex; flex-direction: column; min-width: 0; }
+.cb-fig small { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
+.cb-fig b { font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text-primary); white-space: nowrap; }
+.cb-fig.total b { font-size: 16px; font-weight: 800; }
+.cb-fig.pos b { color: #0b7a3b; } .cb-fig.neg b { color: #b42828; }
+.cb-op { font-size: 16px; color: var(--text-muted); }
+.cb-gap { width: 1px; height: 28px; margin: 0 6px; background: var(--hairline-strong); }
+
+/* the cycle on a line, room for the labels under it */
+.cb-line { position: relative; height: 5px; margin: 16px 84px 36px 34px; border-radius: 3px; background: var(--surface-sunken); }
+.cb-seg { position: absolute; top: 0; height: 100%; }
+.cb-seg.cycle { background: #7dbbe6; border-radius: 3px 0 0 3px; }
+.cb-seg.pay { background: #2fbf7b; }
+.cb-seg.grace { background: #e3b341; border-radius: 0 3px 3px 0; }
+.cb-point { position: absolute; top: 8px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); white-space: nowrap; }
+.cb-point i { position: absolute; top: -11px; width: 9px; height: 9px; border-radius: 50%; background: var(--surface-solid); border: 2px solid #5b7c99; }
+.cb-point.due i { border-color: #b42828; right: -5px; }
+.cb-point.due { transform: translateX(-100%); align-items: flex-end; }
+.cb-point.last { transform: none; align-items: flex-start; }
+.cb-point.last i { left: -5px; }
+.cb-point b { font-size: 10.5px; font-weight: 650; color: var(--text-secondary); }
+.cb-point.due b { color: #b42828; }
+.cb-point small { font-size: 10.5px; color: var(--text-muted); }
+.cb-line u { position: absolute; top: -5px; width: 2px; height: 15px; background: var(--ocean-900, #0a3a5c); text-decoration: none; }
+.cb-line u em { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 9.5px; font-style: normal; font-weight: 700; color: var(--ocean-900, #0a3a5c); }
+
+.cb-tables { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+.cb-list, .cb-entries { min-width: 0; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; background: var(--surface-solid); }
+.cb-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; }
+.cb-head svg { width: 14px; height: 14px; color: var(--text-secondary); }
+.cb-head small { margin-left: auto; color: var(--text-muted); }
+.cb-scroll { overflow-x: auto; }
+.cb-open td { font-style: italic; }
+.cb-entries td.cb-what { max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cb-note { display: flex; gap: 6px; margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--text-secondary); }
+.cb-note svg { flex: none; width: 13px; height: 13px; margin-top: 2px; }
+
+@media (max-width: 1100px) {
+    .cb-cards, .cb-tables { grid-template-columns: minmax(0, 1fr); }
+    .cb-gap { display: none; }
+}

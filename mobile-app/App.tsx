@@ -29,6 +29,7 @@ import { CategoriesScreen } from './src/screens/Categories';
 import { MorePage, MoreScreen, morePageOn } from './src/screens/More';
 import { GiftsScreen } from './src/screens/Gifts';
 import { TransferSheet } from './src/screens/Transfer';
+import { ScanBill } from './src/screens/ScanBill';
 import { hasFeature, mobileOn } from './src/data';
 
 type Tab = 'accounts' | 'expenses' | 'chits' | 'more';
@@ -51,6 +52,7 @@ function Shell() {
   const [page, setPage] = useState<MorePage | null>(null);
   const [adding, setAdding] = useState<{ prefill?: Prefill; editing?: LocalExpense } | null>(null);
   const [transfer, setTransfer] = useState(false);
+  const [scanning, setScanning] = useState<{ editing?: LocalExpense } | null>(null);
   const [prompt, setPrompt] = useState<ParsedSms | null>(null);
   const prompted = useRef(new Set<string>());
   const insets = useSafeAreaInsets();
@@ -58,11 +60,11 @@ function Shell() {
   // Back: from another tab to Accounts first, then out of the app (an open account or sheet closes itself)
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!account && !adding && !page && tab !== 'accounts') { setTab('accounts'); return true; }
+      if (!account && !adding && !scanning && !page && tab !== 'accounts') { setTab('accounts'); return true; }
       return false;
     });
     return () => sub.remove();
-  }, [tab, account, adding, page]);
+  }, [tab, account, adding, scanning, page]);
 
   // a new bank SMS: ask whether to record it (once per SMS)
   useEffect(() => {
@@ -100,7 +102,7 @@ function Shell() {
               onTransfer={mobileOn(app.snapshot, 'TRANSFERS') && app.snapshot?.canRecord !== false ? () => setTransfer(true) : undefined}
               onRecord={app.snapshot?.canRecord !== false && (mobileOn(app.snapshot, 'EXPENSES') || mobileOn(app.snapshot, 'INCOME')) ? (mode: RecordMode) => setAdding({ prefill: { mode } }) : undefined}
               onChits={mobileOn(app.snapshot, 'CHITS') && app.snapshot?.canPayChits !== false && app.snapshot?.canRecord !== false ? () => setTab('chits') : undefined} />
-          : shownTab === 'expenses' ? <ExpensesScreen onEdit={e => setAdding({ editing: e })} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
+          : shownTab === 'expenses' ? <ExpensesScreen onEdit={e => (e.items && e.items.length > 1 ? setScanning({ editing: e }) : setAdding({ editing: e }))} onRecord={(mode: RecordMode) => setAdding({ prefill: { mode } })} />
           : shownTab === 'chits' ? <ChitsScreen />
           : shownPage === 'budget' ? <BudgetScreen onBack={() => setPage(null)} />
           : shownPage === 'categories' ? <CategoriesScreen onBack={() => setPage(null)} />
@@ -115,7 +117,9 @@ function Shell() {
       <TabBar tab={shownTab} tabs={tabsOn} onTab={t => { setAccount(null); if (t === shownTab && t === 'more') setPage(null); setTab(t); }} onAdd={() => setAdding({})} smsCount={smsOn ? app.detected.length : 0}
         canAdd={app.snapshot?.canRecord !== false && (hasFeature(app.snapshot, 'EXPENSES') || hasFeature(app.snapshot, 'INCOME'))} />
       <TransferSheet visible={transfer} onClose={() => setTransfer(false)} />
-      <AddExpense visible={!!adding} onClose={() => setAdding(null)} prefill={adding?.prefill} editing={adding?.editing} />
+      <AddExpense visible={!!adding} onClose={() => setAdding(null)} prefill={adding?.prefill} editing={adding?.editing}
+        onScan={hasFeature(app.snapshot, 'EXPENSES') ? () => { setAdding(null); setScanning({}); } : undefined} />
+      <ScanBill visible={!!scanning} onClose={() => setScanning(null)} editing={scanning?.editing} />
       <SmsPrompt p={prompt} onLater={() => setPrompt(null)} onRecord={record} onDismiss={id => { app.dismissSms([id]); setPrompt(null); }} />
     </View>
   );

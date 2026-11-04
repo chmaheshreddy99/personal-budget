@@ -41,10 +41,12 @@ public class TransactionService {
     private final JournalEntryRepository entries;
     private final CategoryRepository categories;
     private final ConstructionTagService projectTags;
+    private final NotificationService notifications;
 
     public TransactionService(LedgerService ledger, AccountRepository accounts, JournalEntryRepository entries,
-                              CategoryRepository categories, ConstructionTagService projectTags) {
+                              CategoryRepository categories, ConstructionTagService projectTags, NotificationService notifications) {
         this.projectTags = projectTags;
+        this.notifications = notifications;
         this.ledger = ledger;
         this.accounts = accounts;
         this.entries = entries;
@@ -134,8 +136,11 @@ public class TransactionService {
                 .credit(from.getId(), request.amount()).category(request.kind() == QuickKind.INCOME ? category.getId() : null)
                 .reference(request.reference())
                 .party(request.party())
+                .incomeNature(request.kind() == QuickKind.INCOME ? request.incomeNature() : null)
                 .source(request.kind() == QuickKind.EXPENSE ? LedgerService.SOURCE_EXPENSE : LedgerService.SOURCE_QUICK, null);
-        return get(ledger.post(draft).getId());
+        EntryView posted = get(ledger.post(draft).getId());
+        notifications.entryPosted(posted);   // a transfer, or an expense large enough
+        return posted;
     }
 
     // ================================================================== transfers
@@ -210,6 +215,7 @@ public class TransactionService {
                 .credit(ledger.systemAccount(DefaultChartOfAccounts.INCOME).getId(), request.amount()).category(category.getId())
                 .reference(blankToNull(request.reference()))
                 .party(blankToNull(request.party()))
+                .incomeNature(request.incomeNature() != null ? request.incomeNature() : existing.getIncomeNature())
                 .source(existing.getSourceType(), existing.getSourceId());
         return get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
     }

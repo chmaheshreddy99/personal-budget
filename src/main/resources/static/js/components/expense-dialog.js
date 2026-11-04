@@ -24,7 +24,8 @@
  */
 import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, categoriesOf } from '../core/store.js';
-import { openModal, esc, toast, readForm, accountOptions } from '../core/ui.js';
+import { openModal, routeNextDialog, esc, toast, readForm, accountOptions } from '../core/ui.js';
+import { attachNotify } from './notify-toggle.js';
 import { interestAccountFilter } from './claim-panel.js';
 import { icon, categoryIcon, accountTypeIcon } from '../core/icons.js';
 import { loadSuggestions } from '../core/autocomplete.js';
@@ -62,6 +63,7 @@ const MODES = {
 };
 
 export async function openExpenseDialog({ expense = null, copy = false, claim = null, emi = null, mode = 'EXPENSE', split = false, onSaved } = {}) {
+    if (!expense && !claim && !emi) routeNextDialog(mode === 'LENT' ? 'lent' : 'expense');
     let saveKey = newRequestKey();   // one key per save: a retry or a second click saves once (renewed after each save)
     if (expense && !copy && expense.viaJournal) {
         // part of a manual journal voucher: edited as a full journal
@@ -295,7 +297,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                 entryId = expense.entryId;
                 toast(`${several ? `Bill updated · ${split.items.length} items` : 'Expense updated'} · ${money(data.amount)}`);
             } else {
-                const saved = await api.post('/expenses', payload, { key: saveKey });
+                const saved = await api.post('/expenses', payload, { key: saveKey, notify: mail.value() });
                 if (saved?.pending) {   // this user's expenses wait for a checker
                     await evidence.uploadTo(null, { pendingId: saved.id });
                     toast(`${money(saved.amount)} sent for approval`, 'info');
@@ -319,7 +321,7 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                 interestCollection: current === 'LENT' && data.interestRate ? form.interestCollection.value : null,
                 interestAccountId: current === 'LENT' && form.interestAccountId.value ? Number(form.interestAccountId.value) : null,
             };
-            const saved = editingClaim ? await api.put(`/claims/${claim.id}`, payload, { key: saveKey }) : await api.post('/claims', payload, { key: saveKey });
+            const saved = editingClaim ? await api.put(`/claims/${claim.id}`, payload, { key: saveKey }) : await api.post('/claims', payload, { key: saveKey, notify: mail.value() });
             entryId = saved.journalEntryId;
             toast(`${saved.kindLabel} · ${money(saved.amount)} to collect from ${saved.party}`);
         }
@@ -350,6 +352,10 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
         allPayers: accounts.filter(a => a.active && ['BANK', 'CREDIT_CARD', 'CASH', 'WALLET', 'MEAL_CARD'].includes(a.accountType))
             .sort((a, b) => (usage.credit[b.id] || 0) - (usage.credit[a.id] || 0) || typeRank(a) - typeRank(b)) });
     const evidence = bindEvidenceField(modal.el);
+    // an alert by e-mail: a large expense, money given, a bill paid for someone (new entries only: a change sends none)
+    const mail = attachNotify(modal, { event: () => (editingExpense || editingClaim || editingEmi ? null
+        : { EXPENSE: 'LARGE_EXPENSE', LENT: 'MONEY_GIVEN', PAID_FOR: 'PAID_FOR' }[current]),
+        amount: () => evalAmount(modal.el.querySelector('[name=amount]')?.value || '') || 0 });   // "120+45" counts as 165
     // a bill opens with its items; "add items" opens with a new one to fill in
     const startItems = itemizedBill ? expense.items.map(i => ({ categoryId: i.categoryId, name: i.name || '', amount: String(Number(i.amount)) }))
         : split && expense ? [{ categoryId: expense.categoryId, name: '', amount: '' }] : null;

@@ -60,10 +60,11 @@ export function newRequestKey() {
     return (crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 }
 
-async function request(method, path, { params, body, key } = {}) {
+async function request(method, path, { params, body, key, notify } = {}) {
     const headers = { 'Accept': 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (key) headers['Idempotency-Key'] = key;
+    if (notify === 'on' || notify === 'off') headers['X-Notify'] = notify;   // the e-mail switch of a dialog (components/notify-toggle.js)
     if (session.token) headers['Authorization'] = 'Bearer ' + session.token;
 
     const mutating = method !== 'GET';
@@ -158,7 +159,7 @@ export const api = {
     blob,
     upload,
     get: (path, params) => request('GET', path, { params }),
-    post: (path, body, { key } = {}) => request('POST', path, { body: body ?? {}, key }),
-    put: (path, body, { key } = {}) => request('PUT', path, { body, key }),
+    post: (path, body, { key, notify } = {}) => request('POST', path, { body: body ?? {}, key, notify }),
+    put: (path, body, { key, notify } = {}) => request('PUT', path, { body, key, notify }),
     del: (path) => request('DELETE', path),
 };

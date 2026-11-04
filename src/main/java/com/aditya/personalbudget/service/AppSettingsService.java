@@ -170,6 +170,24 @@ public class AppSettingsService {
         write(p);
     }
 
+    /** Every setting under a prefix (e.g. {@code notify.7.}), keyed without it. */
+    public java.util.Map<String, String> readPrefixed(String prefix) {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        Properties p = read();
+        for (String k : p.stringPropertyNames()) {
+            if (k.startsWith(prefix)) out.put(k.substring(prefix.length()), p.getProperty(k));
+        }
+        return out;
+    }
+
+    /** Replaces every setting under a prefix with these (keyed without it); a null value is left out. */
+    public synchronized void writePrefixed(String prefix, java.util.Map<String, String> values) {
+        Properties p = read();
+        p.stringPropertyNames().stream().filter(k -> k.startsWith(prefix)).forEach(p::remove);
+        values.forEach((k, v) -> { if (v != null) p.setProperty(prefix + k, v); });
+        write(p);
+    }
+
 
     private final Path file;
 

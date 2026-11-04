@@ -1,0 +1,366 @@
+/* =====================================================================
+   Pearl: Breeze, compact and glossy, with a banking look (Settings → Appearance).
+   Loaded on top of breeze.css (index.html turns both on; js/core/theme.js isBreeze() is true here too, so the open
+   rows Breeze draws are the same), and only overrides:
+   - denser everywhere: smaller type and icons, shorter table rows, panel heads, metric chips and list cards,
+     the accounts and chits lists most of all
+   - no bold text: emphasis is a medium weight, never bold
+   - a glossy finish: panels, chips and list cards on a white-to-glacier gradient with a bright top edge
+   - a banking look of its own: a navy frame with a crimson accent line, white panels on a light grey page, navy
+     primary buttons (see "a banking look" below)
+   - open rows as bank statement cards: a navy head band with a crimson line, white figure boxes ruled in navy
+   The column header keeps Breeze's colours at its new height; the sticky day / group heads sit under it.
+   ===================================================================== */
+
+:root {
+    --font-size: 11.5px;
+    --font-size-sm: 10.5px;
+    --font-size-xs: 9.5px;
+    --gap: 8px;
+    --gap-sm: 5px;
+    --control-height: 26px;
+    --radius: 10px;
+    --radius-lg: 12px;
+    --pl-th-h: 23px;   /* the column header's full height: 4 + 14 + 4 + the 1px rule */
+
+    --pl-gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 247, 252, 0.86));
+    --pl-gloss-edge: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    --pl-shadow: 0 1px 2px rgba(10, 46, 79, 0.06), 0 4px 14px rgba(10, 46, 79, 0.07);
+}
+
+/* ===================================================================== no bold
+   Every weight drops to regular; the things that carry emphasis (amounts, names, headings, headers, buttons, the
+   active tab) keep a medium weight so they still read first. */
+*, *::before, *::after { font-weight: 400 !important; }
+:is(b, strong, th, h1, h2, h3, h4, h5, h6, .title, .strong, .btn, .tab.active, .seg-chip.active, .badge, .mono) { font-weight: 500 !important; }
+
+/* ===================================================================== tables: shorter rows */
+table.grid { line-height: 1.3; }
+table.grid td, table.grid.compact td { padding-top: 2px; padding-bottom: 2px; }
+table.grid.dense td { height: 24px; padding: 2px 7px; }
+table.grid > thead > tr > th, table.grid.compact > thead > tr > th, table.grid.dense > thead > tr > th {
+    padding-top: 4px; padding-bottom: 4px; line-height: 14px; letter-spacing: 0.03em;
+}
+.xp-table td { padding-top: 2px; padding-bottom: 2px; }
+.tile-scroll table.grid td, .tile-scroll table.grid th, .da-body table.grid td, .da-body table.grid th { padding-top: 2px; padding-bottom: 2px; }
+.day-row td, table.grouped tr.group-row td { top: var(--pl-th-h); }
+.day-head-inner { padding-top: 2px; padding-bottom: 2px; }
+.grp-head { padding-top: 3px; padding-bottom: 3px; }
+
+/* ===================================================================== icons: smaller */
+.chip-icon { width: 22px; height: 22px; border-radius: 7px; }
+.chip-icon svg { width: 12px; height: 12px; }
+.chip-icon.sm { width: 18px; height: 18px; border-radius: 6px; }
+.chip-icon.sm svg { width: 10px; height: 10px; }
+.chip-icon.lg { width: 34px; height: 34px; border-radius: 10px; }
+.btn svg { width: 12px; height: 12px; }
+.btn.sm { height: 22px; padding: 0 7px; border-radius: 6px; }
+.btn.sm svg, .btn.xs svg { width: 11px; height: 11px; }
+.btn.icon, .btn.sm.icon { width: 22px; padding: 0; }
+.metric-icon { width: 16px; height: 16px; border-radius: 4px; }
+.metric-icon svg { width: 9px; height: 9px; }
+.tl-dot { width: 16px; height: 16px; }
+.tl-dot svg { width: 8px; height: 8px; }
+
+/* ===================================================================== panels: lower heads, glossy */
+.panel {
+    background: var(--pl-gloss);
+    border-color: rgba(255, 255, 255, 0.9);
+    box-shadow: var(--pl-gloss-edge), var(--pl-shadow);
+}
+.panel::before { height: 24px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0)); }
+.panel-head { min-height: 30px; padding: 3px 8px 3px 10px; gap: 6px; }
+.panel-head h3 { font-size: 11.5px; gap: 6px; }
+.panel-head h3 .ico { width: 18px; height: 18px; border-radius: 6px; }
+.panel-head h3 .ico svg { width: 11px; height: 11px; }
+.panel-head::after { left: 10px; right: 10px; }
+.panel-body { padding: 4px 10px 7px; }
+.panel-body.chart { padding: 3px 6px 4px; }
+.list-item { padding-top: 3px; padding-bottom: 3px; }
+.list-item.clickable { padding: 3px 7px; }
+
+/* ===================================================================== metric chips and figure tiles: lower, glossy */
+:is(.metric, .ov-chip, .bo-tile, .stat, .cstat, .cfig, .info-chip, .ov-card) {
+    background: var(--pl-gloss);
+    box-shadow: var(--pl-gloss-edge), 0 1px 2px rgba(10, 46, 79, 0.05);
+}
+.metric { padding: 3px 7px; gap: 1px; }
+.metric .label, .cfig .label, .bo-tile small, .bs-stat small, .bs-label { font-size: 8.5px; letter-spacing: 0.05em; }
+.metric .value { font-size: 12px; }
+.metric .note, .bo-tile .bo-note, .bs-stat span, .cfig small { font-size: 9px; }
+.ov-chip { padding: 3px 7px; }
+.ov-chip b { font-size: 12.5px; }
+.ov-chip small { font-size: 9px; }
+.bo-hero { padding: 6px 10px; gap: 4px; }
+.bo-tile { padding: 5px 8px; gap: 6px; }
+.bo-tile .bo-icon { width: 20px; height: 20px; border-radius: 6px; }
+.bo-tile .bo-icon svg { width: 11px; height: 11px; }
+.bo-tile b { font-size: 13px; }
+.stat { padding: 4px 7px; }
+.cstat .value { font-size: 12px; }
+.cfig { padding: 2px 6px; }
+.cfig b { font-size: 11.5px; }
+.cc-fig b { font-size: 11.5px; }
+
+/* the budget month strip */
+.budget-strip > * { padding: 5px 10px; }
+.bs-spent { font-size: 16px; }
+.bs-stat b { font-size: 13px; }
+.bs-track { height: 8px; }
+.bs-ring { width: 34px; height: 34px; }
+.bs-ring b { width: 27px; height: 27px; font-size: 11px; }
+.bp-amounts b { font-size: 16px; }
+.bp-track { height: 8px; }
+.budget-progress { padding: 7px 10px 6px; }
+
+/* ===================================================================== accounts and chits: compact list cards */
+.acct-item, .acct-item.rich {
+    grid-template-columns: 22px minmax(0, 1fr); gap: 7px;
+    padding: 4px 8px 4px 9px; margin: 0 0 3px; border-radius: 9px;
+    background: var(--pl-gloss);
+    box-shadow: var(--pl-gloss-edge), 0 1px 2px rgba(10, 46, 79, 0.05);
+}
+.acct-item.rich .chip-icon.sm { width: 22px; height: 22px; border-radius: 7px; }
+.acct-item.rich .chip-icon.sm svg { width: 12px; height: 12px; }
+.acct-item.rich::before { top: 6px; bottom: 6px; }
+.acct-item.rich:hover { transform: none; }
+.acct-name { font-size: 11.5px; }
+.acct-bal { font-size: 12px; }
+.acct-meta, .fact { font-size: 9.5px; }
+.fact { padding-top: 0; padding-bottom: 0; }
+.chit-item { padding-top: 4px; padding-bottom: 4px; margin-bottom: 3px; }
+.chit-item .acct-line.sub { margin-top: 1px; }
+.chit-item .acct-util { margin-top: 3px; }
+.acct-overview { gap: 5px; }
+.ov-net-card, .cp-card { padding-top: 6px; padding-bottom: 6px; }
+
+/* ===================================================================== open rows: a touch tighter */
+.xp-detail2 { gap: 4px; padding: 5px 8px; }
+.xd-card { padding: 2px 6px; }
+.xd-line { font-size: 11px; }
+.entry-detail { gap: 4px; }
+.ed-pill { min-height: 20px; padding-top: 2px; padding-bottom: 2px; }
+.btn.bz-act { height: 22px; padding: 0 9px; }
+.btn.bz-close { width: 22px; height: 22px; }
+.ed-bar .btn.sm.bz-act, .ed-bar .btn.sm.bz-close { height: 22px; }
+.bz-claim-card { padding: 5px 8px 6px; gap: 4px; }
+.claim-panel { gap: 4px; padding: 5px 8px; }
+
+/* ===================================================================== controls and tabs */
+.tab { padding-top: 0; padding-bottom: 0; }
+.seg-chip { height: 24px; padding: 0 9px; }
+.seg-chips.sm .seg-chip { height: 20px; padding: 0 7px; }
+.badge, .tag { font-size: 9.5px; }
+.section-title { font-size: 9.5px; margin: 4px 0; }
+
+/* ===================================================================== a banking look
+   Pearl's own brand, in the manner of online banking: a deep navy frame (top bar, column headers, hero cards) with a
+   thin crimson accent line, crisp white panels on a light grey page, navy-blue in place of the ocean tones, navy
+   primary buttons and crimson for what removes money or data. */
+:root {
+    --pl-navy: #012169;
+    --pl-navy-2: #0b2e74;
+    --pl-blue: #1f4fa3;
+    --pl-red: #c8102e;
+    --pl-red-soft: rgba(200, 16, 46, 0.09);
+
+    --ocean-950: #00113a; --ocean-900: #012169; --ocean-800: #0b2e74; --ocean-700: #143d8a;
+    --ocean-600: #1f4fa3; --ocean-500: #2a63c2; --ocean-400: #5a8ae0; --ocean-300: #9db9ef;
+    --glacier-200: #dce6f7; --glacier-100: #edf2fb; --glacier-50: #f6f8fd;
+    --link: #1f4fa3;
+    --info: #2a63c2;
+    --page-bg: linear-gradient(180deg, #f3f5f8 0%, #eceff4 100%);
+    --surface: rgba(255, 255, 255, 0.96);
+    --surface-solid: #ffffff;
+    --surface-sunken: #f4f6fa;
+    --surface-hover: rgba(31, 79, 163, 0.06);
+    --surface-selected: rgba(31, 79, 163, 0.1);
+    --hairline: rgba(1, 33, 105, 0.1);
+    --hairline-strong: rgba(1, 33, 105, 0.2);
+    --glass-border: #dfe4ec;
+    --text-primary: #1b2533;
+    --text-secondary: #4a5668;
+    --text-muted: #7a8596;
+    --grad-ocean: linear-gradient(100deg, #00164d 0%, #012169 45%, #0b2e74 100%);
+    --grad-navy: linear-gradient(135deg, #00164d 0%, #012169 55%, #12398f 100%);
+    --grad-brand: linear-gradient(135deg, #012169 0%, #1f4fa3 100%);
+    --grad-button: linear-gradient(180deg, #1f4fa3, #012169);
+    --brand-accent: #c8102e;
+    --radius: 8px;
+    --radius-lg: 9px;
+
+    /* Breeze's tones, in the banking colours */
+    --bz-th-bg: linear-gradient(180deg, #0b2e74, #012169);
+    --bz-th-ink: #ffffff;
+    --bz-th-rule: #c8102e;
+    --bz-ocean: #1f4fa3; --bz-ocean-tint: rgba(31, 79, 163, 0.08); --bz-ocean-line: rgba(31, 79, 163, 0.24);
+    --bz-value: #012169;
+    --bz-wash: linear-gradient(180deg, #eef2f8, #f6f8fb);
+    --pl-gloss: linear-gradient(180deg, #ffffff, #f6f8fb);
+    --pl-shadow: 0 1px 2px rgba(1, 33, 105, 0.06), 0 3px 10px rgba(1, 33, 105, 0.06);
+}
+
+/* the frame: navy top bar with a crimson line under it, the open menu item a white tab with a crimson underline */
+.topbar { background: var(--grad-ocean); box-shadow: 0 2px 10px rgba(0, 17, 58, 0.3); }
+.topbar::before { background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0)); }
+.topbar::after { height: 3px; opacity: 1; background: linear-gradient(90deg, #c8102e, #e0384f 50%, #c8102e); }
+.brand-text strong em { color: #ff8a9b; }
+.brand-text small { color: #c9d5ec; }
+.menu a { height: 28px; padding: 0 9px; border-radius: 6px; color: #dfe7f6; font-size: 11.5px; }
+.menu a svg { width: 13px; height: 13px; }
+.menu a:hover { background: rgba(255, 255, 255, 0.1); }
+.menu a.active { background: #ffffff; color: var(--pl-navy); box-shadow: inset 0 -2px 0 var(--pl-red), 0 1px 4px rgba(0, 0, 0, 0.2); }
+.footer { background: #ffffff; border-top: 1px solid var(--glass-border); color: var(--text-muted); }
+
+/* panels: crisp white cards, a navy title with a navy icon, a hairline from navy fading out under it */
+.panel { background: var(--pl-gloss); border: 1px solid var(--glass-border); box-shadow: var(--pl-gloss-edge), var(--pl-shadow); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.panel::before { height: 18px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0)); }
+.panel-head h3 { color: var(--pl-navy); }
+.panel-head h3 .ico { background: var(--grad-brand); box-shadow: 0 1px 3px rgba(1, 33, 105, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.panel-head::after { background: linear-gradient(90deg, rgba(1, 33, 105, 0.35), rgba(200, 16, 46, 0.25) 35%, transparent 70%); }
+
+/* buttons: navy primary, white secondary with a navy edge, crimson for danger */
+.btn { background: linear-gradient(180deg, #ffffff, #f2f5fa); border-color: rgba(1, 33, 105, 0.22); color: var(--pl-navy); box-shadow: 0 1px 1px rgba(1, 33, 105, 0.06), inset 0 1px 0 #fff; border-radius: 6px; }
+.btn:hover { border-color: rgba(1, 33, 105, 0.4); }
+.btn.primary, .btn.bz-edit { background: var(--grad-button); border-color: #011a55; color: #fff; box-shadow: 0 1px 3px rgba(1, 33, 105, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+.btn.primary:hover, .btn.bz-edit:hover { background: linear-gradient(180deg, #2a5fbd, #0b2e74); }
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.btn.danger { color: var(--pl-red); }
+.btn.danger.solid { background: linear-gradient(180deg, #e0384f, #c8102e); border-color: #a50d26; color: #fff; }
+.btn.bz-delete { --bz-tone: var(--pl-red); --bz-tint: var(--pl-red-soft); --bz-line: rgba(200, 16, 46, 0.3); }
+.btn.bz-act { border-radius: 999px; }
+.seg-chip.active { background: var(--grad-navy); color: #ffffff; }
+.seg-chip.active svg { color: currentColor; }
+input:focus, select:focus, textarea:focus { border-color: var(--pl-blue); box-shadow: 0 0 0 3px rgba(31, 79, 163, 0.16); }
+
+/* lists and day heads in navy tints; the selected list card a white card with a crimson edge */
+.day-head-inner, .grp-head { background: linear-gradient(90deg, rgba(1, 33, 105, 0.09), rgba(1, 33, 105, 0.02)); box-shadow: inset 3px 0 0 var(--pl-navy); }
+.acct-item.selected, .acct-item.rich.selected { background: linear-gradient(180deg, #ffffff, #eef2fa); border-color: rgba(1, 33, 105, 0.3); box-shadow: inset 3px 0 0 var(--pl-red), 0 2px 8px rgba(1, 33, 105, 0.12); color: var(--text-primary); }
+.acct-item.selected .acct-meta, .acct-item.selected .fact { color: var(--text-secondary); }
+.acct-item.selected .acct-bal { color: var(--pl-navy); }
+.acct-item.selected .fact { background: rgba(1, 33, 105, 0.05); border-color: var(--hairline); }
+.acct-item.selected .acct-delta.pos { color: var(--positive); }
+.acct-item.selected .acct-delta.neg { color: var(--negative); }
+.acct-item.selected .chip-icon { box-shadow: 0 0 0 1.5px rgba(1, 33, 105, 0.35); }
+.acct-item.selected .lock svg { color: var(--text-muted); }
+.account-list:focus .acct-item.selected { box-shadow: inset 3px 0 0 var(--pl-red), 0 0 0 2px rgba(31, 79, 163, 0.35); }
+.bn-item.selected { background: linear-gradient(90deg, rgba(1, 33, 105, 0.09), rgba(1, 33, 105, 0.02)); box-shadow: inset 3px 0 0 var(--pl-red), 0 0 0 1px rgba(1, 33, 105, 0.18); }
+
+/* the open expense: Breeze's thin line along the top in navy to crimson */
+.xp-detail2 {
+    border-color: rgba(1, 33, 105, 0.16);
+    background: linear-gradient(90deg, #012169, #1f4fa3 55%, #c8102e) top / 100% 2px no-repeat,
+        linear-gradient(180deg, rgba(237, 242, 251, 0.95), rgba(255, 255, 255, 0) 64px), #ffffff;
+}
+.xd-card { --tone: #1f4fa3; --tone-ink: #0b2e74; --tone-tint: rgba(31, 79, 163, 0.06); --tone-line: rgba(31, 79, 163, 0.2); }
+.xd-fact svg { color: var(--pl-blue); }
+.xd-bar em { background: linear-gradient(90deg, #2a63c2, #012169); }
+.budget-strip { background: linear-gradient(180deg, #ffffff, #f3f6fb); border-color: var(--glass-border); box-shadow: inset 0 3px 0 var(--pl-navy), var(--pl-shadow); }
+.bs-track .seg.s { background: linear-gradient(90deg, #2a63c2, #012169); }
+.bs-legend .sw.s { background: #1f4fa3; }
+
+/* ===================================================================== accounts and chits: smaller icons still */
+.acct-item, .acct-item.rich { grid-template-columns: 18px minmax(0, 1fr); gap: 6px; }
+.acct-item .chip-icon, .acct-item.rich .chip-icon.sm { width: 18px; height: 18px; border-radius: 5px; }
+.acct-item .chip-icon svg, .acct-item.rich .chip-icon.sm svg { width: 10px; height: 10px; }
+.acct-item .chip-icon.art, .acct-item.rich .chip-icon.sm.art { width: 18px; height: 18px; }
+.acct-item .chip-icon.art svg.icon.art, .acct-item.rich .chip-icon.sm.art svg.icon.art { width: 17px; height: 17px; }
+.chip-icon.art { width: 26px; height: 26px; border-radius: 7px; }
+.chip-icon.art svg.icon.art, .chip-icon.art svg { width: 24px; height: 24px; }
+.chip-icon.sm.art { width: 20px; height: 20px; border-radius: 6px; }
+.chip-icon.sm.art svg.icon.art, .chip-icon.sm.art svg { width: 18px; height: 18px; }
+svg.icon.art { width: 18px; height: 18px; }
+.art-mark svg.icon.art, .hero-icon.art-mark svg.icon.art { width: 22px; height: 22px; }
+.hero-icon { width: 24px; height: 24px; border-radius: 6px; }
+.hero-icon svg { width: 12px; height: 12px; }
+.ov-ico, .accounts-page .ov-ico { width: 16px; height: 16px; border-radius: 4px; }
+.ov-ico svg, .accounts-page .ov-ico svg { width: 9px; height: 9px; }
+.ck-tile .ck-icon { width: 16px; height: 16px; border-radius: 4px; }
+.ck-tile .ck-icon svg { width: 9px; height: 9px; }
+
+/* ===================================================================== open rows, in the banking look
+   Every row opened under a list (an expense, a journal entry, money lent or borrowed in Journals, an item in
+   Expenses › Lent / Borrowed) is a white statement card on a pale navy wash. Its head (the facts and the actions of an
+   expense, the head of a lent entry or item) is a navy band with a crimson line under it, as on a bank statement; the
+   figure boxes are white with a navy rule along their top and navy amounts; Dr / Cr read navy / crimson. */
+tr.detail-row > td { background: linear-gradient(180deg, #e9eef6, #f2f5f9); border-bottom: 1px solid rgba(1, 33, 105, 0.18); }
+
+/* the cards */
+.xp-detail2, tr.detail-row .entry-detail, .claim-panel {
+    background: linear-gradient(180deg, #ffffff, #fbfcfe) !important;
+    border: 1px solid #d9e0ea; border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(1, 33, 105, 0.07), 0 4px 14px rgba(1, 33, 105, 0.08);
+}
+tr.detail-row .entry-detail { margin: 3px 8px 6px 18px; padding: 6px 9px 6px 10px; border-left: 1px solid #d9e0ea; }
+.claim-details-modal .claim-panel { border: 0; box-shadow: none; background: none !important; }
+
+/* the navy band: an expense's facts and actions, the head of a lent / borrowed entry or item */
+.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head {
+    background: linear-gradient(100deg, #00164d, #012169 55%, #0b2e74) !important;
+    color: #e3eaf7;
+    box-shadow: inset 0 -2px 0 #c8102e;
+    border: 0 !important;
+}
+.xd-top { margin: -5px -8px 0; padding: 5px 8px 6px; border-radius: 7px 7px 0 0; }
+.bz-claim .ce-main { margin: -6px -9px 2px -10px; padding: 6px 9px 7px 10px; border-radius: 7px 7px 0 0; }
+.claim-panel > .claim-head { margin: 0 -8px; padding: 6px 8px 7px; border-radius: 7px 7px 0 0; }
+.claim-panel:not(.in-row) > .claim-head { margin-top: -5px; }
+.claim-details-modal .claim-panel > .claim-head { margin: 0 0 4px; border-radius: 8px; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(b, strong, .mono, .title) { color: #ffffff; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.muted, .small, small, .secondary) { color: rgba(227, 234, 247, 0.74); }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .xd-fact svg { color: #9db9ef; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.neg, .bs-verdict.neg b) { color: #ffb3bf; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .pos { color: #8fe3b5; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) a:not(.btn), :is(.xd-top, .claim-panel > .claim-head) .link-btn { color: #bcd0f5; }
+.claim-panel > .claim-head .split-bar { background: rgba(255, 255, 255, 0.18); }
+.claim-panel > .claim-head .chip-icon, .bz-claim .ce-main .chip-icon { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.35); }
+
+/* buttons on the band: white outlines; the main one solid white with navy text; delete in a light crimson */
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .btn {
+    background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.3); color: #ffffff; box-shadow: none;
+}
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .btn svg { color: currentColor; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .btn:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.55); transform: none; box-shadow: none; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.btn.primary, .btn.bz-edit) { background: #ffffff; border-color: #ffffff; color: #012169; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.btn.primary, .btn.bz-edit):hover { background: #e9effa; color: #012169; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.btn.danger, .btn.bz-delete, [data-xp-action="delete"]) { color: #ffb3bf; border-color: rgba(255, 179, 191, 0.45); }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) :is(.btn.danger, .btn.bz-delete, [data-xp-action="delete"]):hover { background: #c8102e; border-color: #c8102e; color: #ffffff; }
+:is(.xd-top, .bz-claim .ce-main, .claim-panel > .claim-head) .btn.ghost:not(:hover) { background: transparent; border-color: transparent; }
+:is(.bz-claim .ce-main) .bz-group + .bz-group { border-left-color: rgba(255, 255, 255, 0.25); }
+
+/* the figure boxes: white, a navy rule along the top, small caps labels in navy, navy amounts */
+.xd-card, .bz-claim-card, .cfig {
+    background: #ffffff !important;
+    border: 1px solid #dfe4ec !important;
+    box-shadow: inset 0 2px 0 #012169, 0 1px 2px rgba(1, 33, 105, 0.05) !important;
+}
+.xd-card.xd-category, .bz-claim-card.bz-tone-aqua { box-shadow: inset 0 2px 0 #1f4fa3, 0 1px 2px rgba(1, 33, 105, 0.05) !important; }
+.xd-card.xd-payee, .bz-claim-card.bz-tone-violet { box-shadow: inset 0 2px 0 #c8102e, 0 1px 2px rgba(1, 33, 105, 0.05) !important; }
+.xd-card-head, .xd-card-head svg, .bz-card-head, .bz-card-head svg, .cfig .label, .cc-fig small { color: #0b2e74; }
+.xd-card b.mono, .bz-card-head b, .cfig b, .cc-fig b, .xd-line b { color: #012169; }
+.xd-side { color: #1f4fa3; }
+.cfig b.warn { color: #9a6a08; }
+.cfig b.strong { color: #012169; }
+
+/* a journal entry: Dr navy, Cr crimson; its facts and actions on a light footer strip */
+.ed-pill { background: #ffffff; border-color: #d9e0ea; }
+.ed-pill.dr small { background: #012169; color: #ffffff; }
+.ed-pill.cr small { background: #c8102e; color: #ffffff; }
+.ed-pill.dr .mono { color: #012169; }
+.ed-pill.cr .mono { color: #a50d26; }
+.ed-arrow { background: rgba(1, 33, 105, 0.08); color: #012169; }
+.ed-balances { background: #f6f8fb; border-color: #dfe4ec; }
+.edb-head { color: #0b2e74; }
+.edb-row b { color: #012169; }
+tr.detail-row .entry-detail > .ed-bar { margin: 2px -9px 0 -10px; padding: 4px 9px 4px 10px; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec; background: linear-gradient(180deg, #f6f8fb, #eef2f8); }
+.ed-fact svg { color: #1f4fa3; }
+.ed-fact b { color: #012169; }
+
+/* sections inside open rows: navy titles with a short crimson mark */
+:is(.xp-detail2, .claim-panel, .entry-detail) .section-title { color: #012169; }
+:is(.xp-detail2, .claim-panel, .entry-detail) .section-title svg { color: #c8102e; }
+.payable-strip { background: linear-gradient(100deg, #00164d, #012169 60%, #0b2e74); box-shadow: inset 0 -2px 0 #c8102e; }
+.claim-panel .split-bar .seg.paid, .bz-claim-card .split-bar .seg.paid { background: linear-gradient(90deg, #2a63c2, #012169); }
+.claim-panel > .claim-head .split-bar .seg.paid { background: linear-gradient(90deg, #ffffff, #bcd0f5); }
+.xd-note { background: #fffaf2; border-color: rgba(200, 16, 46, 0.18); color: #4a3a22; }
+.xd-note svg { color: #c8102e; }

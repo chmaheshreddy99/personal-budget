@@ -8,7 +8,7 @@
  *   #/construction/new        start a project
  */
 import { api } from '../core/api.js';
-import { showRoute } from '../core/route.js';
+import { showRoute, routeHash, readQuery, setQuery } from '../core/route.js';
 import { can, invalidateAccounts } from '../core/store.js';
 import { esc, toast, panel, emptyState, confirmDialog, loading, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
@@ -41,6 +41,10 @@ const tabsOf = p => p.kind === 'CONTRACT'
 let current = null;
 
 export async function render(container, params, isCurrent) {
+    // ...?range=all on the accounts, ...?ag=signed on the agreements
+    const asked = readQuery();
+    if (asked.get('range')) view.range = asked.get('range');
+    if (params[1] === 'agreements' || asked.has('ag')) view.agFilter = asked.get('ag') || 'all';
     // Construction › Accounts: the construction book, one project at a time (#/construction/accounts[/<project>])
     if (params[0] === 'accounts') return renderAccounts(container, params.slice(1), isCurrent);
     const overview = await api.get('/construction');
@@ -88,7 +92,7 @@ export async function render(container, params, isCurrent) {
         const d = await api.get(`/construction/${id}`);
         if (view.selectedId !== id) return;
         if (!tabsOf(d.project).some(([k]) => k === view.tab)) view.tab = 'overview';
-        showRoute(`#/construction/${id}/${view.tab}`, { push });
+        showRoute(routeHash(`construction/${id}/${view.tab}`, { ag: view.tab === 'agreements' && view.agFilter !== 'all' ? view.agFilter : null }), { push });
         current = d;
         drawDetail(container, d);
         container.querySelector('#cn-brand').innerHTML = brandHtml('projects');
@@ -279,7 +283,7 @@ function drawAccounts(container, book) {
     const keys = items.filter(i => i.a).map(i => i.a.id);
     if (!keys.includes(view.acct)) view.acct = (p ? book.accounts.find(a => a.id === p.bankAccountId) : null)?.id ?? keys[0] ?? null;
     if (!keys.includes(view.acct)) view.acct = keys[0] ?? null;
-    showRoute(`#/construction/accounts${p ? `/${p.id}` : ''}`);
+    showRoute(routeHash(`construction/accounts${p ? `/${p.id}` : ''}`, { range: view.range }));
 
     container.innerHTML = `
     <div class="page chits-page cn-page cn-acct-page">
@@ -407,7 +411,7 @@ function drawAcctDetail(container, book, p, reload) {
         const el = e.target.closest('[data-act]');
         if (!el) return;
         try {
-            if (el.dataset.act === 'range') { view.range = el.dataset.range; drawAcctDetail(container, book, p, reload); }
+            if (el.dataset.act === 'range') { view.range = el.dataset.range; setQuery({ range: view.range }); drawAcctDetail(container, book, p, reload); }
             if (el.dataset.act === 'move-in') await moveMoney(book, p || project, { projectId: a.projectId || a.bankOf[0], toId: a.id }, reload);
             if (el.dataset.act === 'move-out') await moveMoney(book, p || project, { projectId: a.projectId || a.bankOf[0], fromId: a.id }, reload);
             if (el.dataset.act === 'pick-project') { view.acctProject = Number(el.dataset.id); view.selectedId = view.acctProject; drawAccounts(container, book); }
@@ -522,7 +526,7 @@ async function onClick(e, d, target, body, drawTab) {
     const tab = e.target.closest('[data-tab]');
     if (tab && tab.closest('#cn-tabs')) {
         view.tab = tab.dataset.tab;
-        showRoute(`#/construction/${d.project.id}/${view.tab}`);
+        showRoute(routeHash(`construction/${d.project.id}/${view.tab}`, { ag: view.tab === 'agreements' && view.agFilter !== 'all' ? view.agFilter : null }));
         target.querySelectorAll('#cn-tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
         drawTab();
         body.scrollTop = 0;
@@ -608,7 +612,7 @@ async function onClick(e, d, target, body, drawTab) {
             case 'agreement': openProjectAgreement(p, { id }, reload); break;
             case 'make-agreement': openProjectAgreement(p, { kind: el.dataset.kind, refId: id, defaults: agreementDefaults(d, el.dataset.kind, id) }, reload); break;
             case 'transfer': openTransfer(d, after); break;
-            case 'ag-filter': view.agFilter = el.dataset.to; drawTab(); break;
+            case 'ag-filter': view.agFilter = el.dataset.to; setQuery({ ag: view.agFilter === 'all' ? null : view.agFilter }); drawTab(); break;
             case 'common': openCommonAccount(async (_, m) => { toast(m); reload(); }); break;
             default:
         }

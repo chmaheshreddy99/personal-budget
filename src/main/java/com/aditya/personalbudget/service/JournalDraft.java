@@ -53,6 +53,7 @@ public final class JournalDraft {
     private boolean lastSkipped;
     private String reference;
     private String party;
+    private String incomeNature;
     private String sourceType;
     private Long sourceId;
 
@@ -126,6 +127,16 @@ public final class JournalDraft {
     public JournalDraft party(String party) {
         this.party = party;
         return this;
+    }
+
+    /** REGULAR or ONE_TIME for an income; anything else is not kept. */
+    public JournalDraft incomeNature(String nature) {
+        this.incomeNature = "REGULAR".equals(nature) || "ONE_TIME".equals(nature) ? nature : null;
+        return this;
+    }
+
+    public String incomeNature() {
+        return incomeNature;
     }
 
     public JournalDraft source(String sourceType, Long sourceId) {

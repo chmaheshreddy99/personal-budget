@@ -9,7 +9,8 @@ import { api, session, setUnauthorizedHandler, setConflictHandler, lastOwnMutati
 import { state, loadOptions, can, readOnly, invalidateAccounts, hasFeature } from './core/store.js';
 import { setCurrency, setTimeZone } from './core/format.js';
 import { icon, hydrateIcons } from './core/icons.js';
-import { esc, toast } from './core/ui.js';
+import { esc, toast, dialogOpen } from './core/ui.js';
+import { readQuery } from './core/route.js';
 import { openQuickEntry, openJournalEditor } from './components/transaction-forms.js';
 import { openExpenseDialog } from './components/expense-dialog.js';
 import { openDebtDialog } from './components/debt-dialog.js';
@@ -385,15 +386,14 @@ function bindShell() {
         if (isTyping() || e.ctrlKey || e.metaKey || e.altKey) return;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
         const post = can('POST_TRANSACTIONS');
-        const xp = post && hasFeature('EXPENSES');
         const actions = {
-            e: () => xp && openExpenseDialog({ onSaved: route }),
-            i: () => post && hasFeature('INCOME') && openQuickEntry({ kind: 'INCOME', onSaved: route }),
-            t: () => post && hasFeature('ACCOUNTS') && openQuickEntry({ kind: 'TRANSFER', onSaved: route }),
-            l: () => xp && openExpenseDialog({ mode: 'LENT', onSaved: route }),
-            b: () => xp && openDebtDialog({ onSaved: route }),
-            n: () => xp && openQuickEntry({ onSaved: route }),
-            v: () => can('MANAGE_JOURNALS') && hasFeature('JOURNAL') && openJournalEditor({ onSaved: route }),
+            e: APP_DIALOGS.expense,
+            i: APP_DIALOGS.income,
+            t: APP_DIALOGS.transfer,
+            l: APP_DIALOGS.lent,
+            b: APP_DIALOGS.borrowed,
+            n: APP_DIALOGS.quick,
+            v: APP_DIALOGS.voucher,
             r: () => route(),
             '?': () => openShortcutMap(),
             '/': () => document.querySelector('#view .search-box input, #view input[type=search]')?.focus(),
@@ -416,6 +416,19 @@ function bindShell() {
 }
 
 // ===================================================================== router
+
+/** The dialogs of the whole app, by their name in the address and behind their shortcut keys, for who may use them. */
+const canPost = () => can('POST_TRANSACTIONS');
+const canSpend = () => canPost() && hasFeature('EXPENSES');
+const APP_DIALOGS = {
+    expense: () => canSpend() && openExpenseDialog({ onSaved: route }),
+    income: () => canPost() && hasFeature('INCOME') && openQuickEntry({ kind: 'INCOME', onSaved: route }),
+    transfer: () => canPost() && hasFeature('ACCOUNTS') && openQuickEntry({ kind: 'TRANSFER', onSaved: route }),
+    lent: () => canSpend() && openExpenseDialog({ mode: 'LENT', onSaved: route }),
+    borrowed: () => canSpend() && openDebtDialog({ onSaved: route }),
+    quick: () => canSpend() && openQuickEntry({ onSaved: route }),
+    voucher: () => can('MANAGE_JOURNALS') && hasFeature('JOURNAL') && openJournalEditor({ onSaved: route }),
+};
 
 let renderToken = 0;
 /** The page on screen: moving within it (e.g. Host a Chit's Chits and Chit accounts) keeps it until the new view is drawn. */
@@ -453,6 +466,8 @@ async function route({ silent = false } = {}) {
             });
         }
         hydrateIcons(container);
+        // ...?dialog=expense: a dialog of the whole app, on whatever page
+        if (!dialogOpen()) APP_DIALOGS[readQuery().get('dialog')]?.();
     } catch (error) {
         if (token !== renderToken) return;
         shownPath = null;

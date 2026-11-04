@@ -3,6 +3,8 @@ package com.aditya.personalbudget.dto;
 import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.AccountType;
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -43,7 +45,18 @@ public final class AccountDtos {
             /* bank and wallet accounts: the account holder's name, IFSC and UPI ID (for chit members paying in) */
             @Size(max = 100) String holderName,
             @Size(max = 11) String ifsc,
-            @Size(max = 60) String upiId) {
+            @Size(max = 60) String upiId,
+            /* credit cards: the statement day of the month and the days from it to the due date */
+            @Min(1) @Max(31) Integer billingDay,
+            @Min(14) @Max(30) Integer paymentDueDays) {
+
+        public AccountRequest(String code, String name, AccountType accountType, String institution, String accountNumber,
+                              BigDecimal openingBalance, LocalDate openingDate, BigDecimal interestRate, BigDecimal creditLimit,
+                              LocalDate maturityDate, BigDecimal quantity, String description, Boolean active, Long version,
+                              String holderName, String ifsc, String upiId) {
+            this(code, name, accountType, institution, accountNumber, openingBalance, openingDate, interestRate, creditLimit,
+                    maturityDate, quantity, description, active, version, holderName, ifsc, upiId, null, null);
+        }
 
         public AccountRequest(String code, String name, AccountType accountType, String institution, String accountNumber,
                               BigDecimal openingBalance, LocalDate openingDate, BigDecimal interestRate, BigDecimal creditLimit,
@@ -98,6 +111,14 @@ public final class AccountDtos {
             Long projectId,
             String projectRole,
             /* what is owed on an EMI (Expenses › EMIs): listed only when asked for */
-            boolean emiAccount) {
+            boolean emiAccount,
+            /* credit cards with a billing cycle: the latest bill and the cycle still open */
+            CardBillSummary cardBill) {
+    }
+
+    /** Where a credit card's billing stands, for its row and banner (the full list: {@code /accounts/{id}/card-bills}). */
+    public record CardBillSummary(int billingDay, int paymentDueDays, LocalDate statementDate, LocalDate dueDate, BigDecimal totalDue,
+                                  BigDecimal minimumDue, BigDecimal outstanding, String status, Long daysToDue,
+                                  LocalDate nextStatementDate, LocalDate nextDueDate, BigDecimal nextBillSoFar) {
     }
 }

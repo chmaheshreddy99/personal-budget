@@ -869,35 +869,16 @@ tr.detail-row .xo-glance .section-title .xb-add { margin-left: auto; font-size: 
 .xb-amt { text-align: right; font-size: 12.5px; color: var(--pc-strong); }
 .xb-cat-month { display: grid; gap: 2px; padding-left: 15px; font-size: 10.5px; color: var(--pc-soft); }
 .xb-cat-month .neg { color: var(--w-blush-ink); font-weight: 650; } .xb-cat-month .pos { color: var(--w-mint-ink); font-weight: 650; }
-.xb-item { display: grid; grid-template-columns: minmax(0, 1fr) auto 86px 24px; gap: 7px; align-items: center; min-height: 22px; padding-left: 15px;
-    font-size: 11.5px; color: var(--pc-ink); border-top: 1px dotted var(--lv-line-soft); }
-.xb-item > b { text-align: right; font-size: 11.5px; font-weight: 600; }
-.xb-item > b s { font-weight: 400; color: var(--pc-faint); }
-.xb-item.focus { background: rgba(14, 165, 200, 0.08); border-radius: 4px; }
-.xb-act { display: inline-flex; justify-content: flex-end; opacity: 0.5; }
-.xb-item:hover .xb-act { opacity: 1; }
-.xb-total { display: flex; align-items: baseline; gap: 14px; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: #fff;
-    border: 1px solid var(--lv-line); font-size: 11.5px; color: var(--pc-soft); }
-.xb-total .pos { color: var(--w-mint-ink); }
-.xb-total-main { margin-left: auto; font-weight: 700; color: var(--lv-ink); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; }
-.xb-total-main b { margin-left: 8px; font-size: 14px; letter-spacing: 0; color: var(--pc-strong); }
 .xb-cat-month > span { line-height: 1.35; }
 
 /* ===================================================================== a bill keeps a regular height (Ocean only)
-   However many items it has: the categories and their items scroll inside the panel, the mix bar stays on top and the
-   total stays at the foot; the panel beside it is held to the same height. */
+   However many items it has: the items scroll inside the panel, the mix bar stays on top and the total stays at the
+   foot; the panel beside it is held to the same height. */
 tr.detail-row .xo-panel .claim-body { align-items: start; }
 tr.detail-row .xo-panel .xo-glance { display: flex; flex-direction: column; max-height: 360px; }
-tr.detail-row .xo-panel .xo-glance .xb-cats { flex: 1 1 auto; min-height: 0; max-height: 236px; overflow-y: auto; padding-right: 4px;
-    scrollbar-width: thin; scrollbar-color: rgba(14, 165, 200, 0.35) transparent; }
-tr.detail-row .xo-panel .xo-glance .xb-cats::-webkit-scrollbar { width: 6px; }
-tr.detail-row .xo-panel .xo-glance .xb-cats::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(14, 165, 200, 0.35); }
-tr.detail-row .xo-panel .xo-glance .xb-total, tr.detail-row .xo-panel .xo-glance .xb-mix,
+tr.detail-row .xo-panel .xo-glance .xb-mix,
 tr.detail-row .xo-panel .xo-glance > .section-title { flex: none; }
 tr.detail-row .xo-panel .xo-insights { max-height: 360px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(19, 168, 154, 0.35) transparent; }
-/* a hint that there is more below */
-tr.detail-row .xo-panel .xo-glance .xb-cats { mask-image: linear-gradient(180deg, #000 calc(100% - 14px), transparent); }
-tr.detail-row .xo-panel .xo-glance .xb-cats:not(:has(.xb-cat:nth-child(3))) { mask-image: none; }
 
 /* ===================================================================== a bill in the expenses list: one row, as tall as any other (Ocean only) */
 .xp-table tr.xp-bill td.c-cat .xb-cats { flex-wrap: nowrap; }
@@ -910,7 +891,7 @@ tr.detail-row .xo-panel .xo-glance .xb-cats:not(:has(.xb-cat:nth-child(3))) { ma
 
 /* ===================================================================== a bill opened: its items open, the details folded (Ocean only) */
 tr.detail-row .xo-panel .xo-bill-only { max-height: none; }
-tr.detail-row .xo-panel .xo-bill-only .xb-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; max-height: 300px; }
+tr.detail-row .xo-panel .xo-more .xb-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; padding: 0 10px 8px; }
 .xo-more { border-radius: 10px; border: 1px solid var(--pc-line); background: var(--pc-panel); }
 .xo-more > summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; list-style: none; font-size: 11.5px; color: var(--pc-soft); }
 .xo-more > summary::-webkit-details-marker { display: none; }

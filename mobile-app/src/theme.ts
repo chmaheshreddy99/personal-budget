@@ -37,7 +37,9 @@ export function accountTone(type: string, group?: string): { fg: string; bg: str
   if (group === 'EMI') return { fg: colors.violet, bg: colors.violetSoft };
   switch (type) {
     case 'CREDIT_CARD': return { fg: colors.coral, bg: colors.coralSoft };
-    case 'CASH': case 'WALLET': return { fg: colors.aqua, bg: colors.aquaSoft };
+    case 'CASH': return { fg: '#3e5b2b', bg: '#e6eedc' };   // the ₹500 note's stone green
+    case 'WALLET': return { fg: colors.aqua, bg: colors.aquaSoft };
+    case 'CHIT_FUND': return { fg: '#a06d00', bg: colors.goldSoft };
     case 'MEAL_CARD': return { fg: colors.coral, bg: colors.coralSoft };
     case 'BANK': return { fg: colors.ocean, bg: colors.oceanSoft };
     case 'PAYABLE': case 'LOAN': case 'HOME_LOAN': case 'VEHICLE_LOAN': case 'PERSONAL_LOAN': case 'GOLD_LOAN': case 'EDUCATION_LOAN':

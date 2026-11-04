@@ -2,13 +2,13 @@
  * Chits: the portfolio card over the chit list (paid in against the whole commitment, interest so far, the
  * yearly return, running / closed, matured chits optionally counted), beside it cards with a meter each (net
  * gain, take home now, future value, still to pay, next due or overdue, dividends); chit rows on the left
- * (running, then matured & closed; a closed chit can be reopened),
+ * (running, then matured & closed, listed with the "with matured" switch of the portfolio card; a closed chit can be reopened),
  * and for the selected chit a branded banner, key figures, its installments and month-by-month interest.
  * Installments are booked on their due date; each chit can have its own default payment account.
  */
 import { api } from '../core/api.js';
 import { loadAccounts, can } from '../core/store.js';
-import { panel, esc, field, readForm, openModal, toast, confirmDialog, emptyState, statusBadge, accountOptions, accountChip } from '../core/ui.js';
+import { panel, esc, field, readForm, openModal, routeNextDialog, dialogOpen, toast, confirmDialog, emptyState, statusBadge, accountOptions, accountChip } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, percent, isoDate, daysFromToday } from '../core/format.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
@@ -16,13 +16,20 @@ import { openUpiDialog, upiCardHtml, upiNote, bindUpiCopy } from '../components/
 import { getPref, setPref } from '../core/prefs.js';
 import { setPageKeys, listNavigator } from '../core/keys.js';
 import { evidenceFieldHtml, bindEvidenceField } from '../components/evidence.js';
+import { attachNotify } from '../components/notify-toggle.js';
 import { exportButton, bindExport } from '../core/export.js';
-import { showRoute } from '../core/route.js';
+import { showRoute, routeHash, readQuery, setQuery } from '../core/route.js';
 import { openChitShareDialog } from '../components/chit-link.js';
 import { openReceiptSend, openPayoutSend, receiptsTabHtml, handleReceiptClick, ackByInstallment, ackBadge, isFinal } from '../components/chit-receipt.js';
+import { liftable, payoutFor, hasTerms } from './chit-math.js';
+import { chitInsights } from './chit-insight.js';
+import { liftTabHtml, drawLiftTabCharts } from './chit-insight-view.js';
+import { mountLiftTable } from './chit-lift-table.js';
 
-const view = { selectedId: null, tab: 'installments', interestFilter: 'all', search: '' };
-const CHIT_TABS = ['installments', 'receipts', 'interest', 'payout', 'details'];
+const view = { selectedId: null, pinnedId: null, tab: 'installments', interestFilter: 'all', search: '' };
+const CHIT_TABS = ['installments', 'receipts', 'interest', 'lift', 'payout', 'details'];
+// the yardsticks of the Lift or hold tab, the same for every chit
+const YARDSTICKS = { investRate: 8, loanRate: 12, inflation: 6, fdRate: 7, volatility: 3, risk: 1, view: 'overview' };
 
 const prefs = getPref('chits', { includeMatured: false });
 const savePrefs = () => setPref('chits', prefs);
@@ -35,6 +42,7 @@ export async function render(container, params, isCurrent) {
     let focusEntry = null;
     if (/^\d+$/.test(params[0] || '')) {
         view.selectedId = Number(params[0]);
+        view.pinnedId = view.selectedId;   // a chit asked for by its address stays listed, even matured or closed
         view.search = '';
         if (params[1] === 'entry' && /^\d+$/.test(params[2] || '')) focusEntry = Number(params[2]);
         else if (CHIT_TABS.includes(params[1])) view.tab = params[1];
@@ -42,6 +50,14 @@ export async function render(container, params, isCurrent) {
     const chits = await api.get('/chits');
     if (!isCurrent()) return;
     Object.assign(prefs, getPref('chits', { includeMatured: false }));
+    // ...?matured=1&q=…&interest=earned: the address goes first
+    const asked = params.query;
+    if (asked?.has('matured')) prefs.includeMatured = asked.get('matured') === '1';
+    if (asked?.toString()) {
+        view.search = asked.get('q') || '';
+        view.interestFilter = asked.get('interest') || 'all';
+    }
+    if (asked?.get('view')) setPref('chitInsight', { ...getPref('chitInsight', {}), view: asked.get('view') });
     const reload = () => render(container, [], isCurrent);
 
     container.innerHTML = `
@@ -59,7 +75,7 @@ export async function render(container, params, isCurrent) {
                         ${can('MANAGE_CHITS') ? `<button class="btn primary icon lt-add" id="new-chit" title="Add chit">${icon('plus')}</button>` : ''}
                     </div>
                 </div>
-                <div class="chit-rows scroll" id="chit-list" tabindex="0" aria-label="Chits, use the arrow keys to move">${chits.length ? chitRows(chits) : emptyState('Add your first chit', 'chit')}</div>
+                <div class="chit-rows scroll" id="chit-list" tabindex="0" aria-label="Chits, use the arrow keys to move"></div>
             </div>
         </section>
         <div class="chit-detail" id="chit-detail">${chits.length ? '' : panel({ title: 'Chit', iconName: 'chit', body: emptyState('No chits yet') })}</div>
@@ -75,32 +91,40 @@ export async function render(container, params, isCurrent) {
         if (e.target.id !== 'include-matured') return;
         prefs.includeMatured = e.target.checked;
         savePrefs();
+        setQuery({ matured: prefs.includeMatured ? '1' : '0' });
         drawStrip();
+        view.pinnedId = null;
+        openFirstListed(drawRows());
     });
     drawStrip();
 
-    container.querySelector('#new-chit')?.addEventListener('click', () => openChitForm(null, saved => { view.selectedId = saved.chit.id; reload(); }));
+    const openNew = () => { routeNextDialog('new-chit'); openChitForm(null, saved => { view.selectedId = saved.chit.id; reload(); }); };
+    container.querySelector('#new-chit')?.addEventListener('click', openNew);
+    if (readQuery().get('dialog') === 'new-chit' && can('MANAGE_CHITS') && !dialogOpen()) openNew();
     container.querySelector('#chit-list').addEventListener('click', e => {
         const card = e.target.closest('[data-id]');
         if (card) show(Number(card.dataset.id), { push: true });
     });
 
-    // the search narrows the list on name, organizer, ticket, status and the account it is paid from
+    // the search narrows the list on name, organizer, ticket, status and the account it is paid from; it looks through
+    // the matured and closed chits too, listed or not. Without them the list keeps a chit with payout still to come.
     const matching = () => {
         const term = view.search.trim().toLowerCase();
-        return term ? chits.filter(c => [c.name, c.organizer, c.ticketNo, c.status, c.accountName, c.notes]
-            .some(v => v && String(v).toLowerCase().includes(term))) : chits;
+        if (term) return chits.filter(c => [c.name, c.organizer, c.ticketNo, c.status, c.accountName, c.notes]
+            .some(v => v && String(v).toLowerCase().includes(term)));
+        return prefs.includeMatured ? chits : chits.filter(c => isRunning(c) || Number(c.payoutPending) > 0 || c.id === view.pinnedId);
     };
     const drawRows = () => {
         const list = matching();
         container.querySelector('#chit-list').innerHTML = list.length ? chitRows(list)
-            : emptyState(chits.length ? 'No chits match' : 'Add your first chit', 'chit');
+            : emptyState(!chits.length ? 'Add your first chit' : view.search.trim() ? 'No chits match' : 'Every chit has matured or closed: switch on “with matured” above to see them', 'chit');
         container.querySelector('#chit-count').textContent = view.search.trim() ? `${list.length} of ${chits.length}` : `${chits.filter(isRunning).length} running`;
         return list;
     };
     const search = container.querySelector('#chit-search');
     search.addEventListener('input', () => {
         view.search = search.value;
+        setQuery({ q: view.search });
         const list = drawRows();
         if (list.length && !list.some(c => c.id === view.selectedId)) show(list[0].id);
     });
@@ -108,16 +132,25 @@ export async function render(container, params, isCurrent) {
         if (e.key === 'Escape' && search.value) { search.value = ''; view.search = ''; drawRows(); }
     });
 
+    // the chit selected stays open while it is listed; else the first one listed, or nothing
+    function openFirstListed(list) {
+        if (list.some(c => c.id === view.selectedId)) return show(view.selectedId);
+        if (list.length) return show(list[0].id);
+        view.selectedId = null;
+        if (chits.length) container.querySelector('#chit-detail').innerHTML = panel({ title: 'Chit', iconName: 'chit', body: emptyState('No chit listed') });
+    }
+
     async function show(id, { push = false } = {}) {
         if (push && id !== view.selectedId) view.tab = 'installments';   // another chit starts on its installments
         view.selectedId = id;
+        if (id !== view.pinnedId) view.pinnedId = null;
         container.querySelectorAll('#chit-list [data-id]').forEach(el => el.classList.toggle('selected', Number(el.dataset.id) === id));
         const detail = await api.get(`/chits/${id}`);
         const entry = focusEntry;
         focusEntry = null;
         if (entry) view.tab = detail.payoutReceipts.some(p => p.entryId === entry) ? 'payout' : 'installments';
         drawDetail(container.querySelector('#chit-detail'), detail, reload);
-        showRoute(`#/chits/${id}/${view.tab}`, { push });
+        showRoute(routeHash(`chits/${id}/${view.tab}`, { matured: readQuery().get('matured'), q: view.search, interest: view.interestFilter === 'all' ? null : view.interestFilter, view: view.tab === 'lift' ? readQuery().get('view') : null, dialog: readQuery().get('dialog') }), { push });
         if (entry) focusEntryRow(container.querySelector('#chit-detail'), entry, { onChanged: reload });
     }
 
@@ -138,8 +171,7 @@ export async function render(container, params, isCurrent) {
         allowWhileTyping: search,
     }));
 
-    const shown = view.search.trim() ? drawRows() : chits;
-    if (shown.length) await show(shown.some(c => c.id === view.selectedId) ? view.selectedId : shown[0].id);
+    await openFirstListed(drawRows());
 }
 
 /**
@@ -179,7 +211,7 @@ function portfolioStrip(chits) {
     const dueThisMonth = running.filter(c => c.nextDueDate && c.nextDueDate.slice(0, 7) === month);
     const dividends = sum(pool, 'dividendsEarned');
     const card = `
-        <div class="cp-head"><span class="cp-mark art-mark">${icon('chit-book')}</span>
+        <div class="cp-head"><span class="cp-mark">${icon('chit-book')}</span>
             <div class="min-0"><small>Chit portfolio · <span class="cp-count">${running.length} running${done.length ? ` · ${done.length} done` : ''}</span></small>
                 <div class="cp-line"><b>${moneyShort(sum(pool, 'paidIn'))} <em>paid in</em></b>
                 ${stillToPay > 0 ? `<span class="cp-still" title="${pending} installments left in the running chits">${moneyShort(stillToPay)} to pay · ${pending} left</span>` : '<span class="cp-still done">all installments paid</span>'}</div></div>
@@ -187,7 +219,7 @@ function portfolioStrip(chits) {
         <div class="cp-progress" title="${percent(paidPct, 0)} of the ${moneyShort(total)} the running chits ask for: paid in, then still to pay">
             <i class="onc-bar cp-split"><em style="width:${Math.min(100, paidPct)}%"></em></i>
             <span><b>${percent(paidPct, 0)}</b> paid of ${moneyShort(total)} · ${moneyShort(stillToPay)} to go · interest <b class="up">+${moneyShort(interest)}</b>
-                ${done.length ? `<label class="cs-mini-switch" title="Count chits that already matured or paid out in the figures"><input type="checkbox" id="include-matured" ${prefs.includeMatured ? 'checked' : ''}><i></i>with matured</label>` : ''}</span></div>`;
+                ${done.length ? `<label class="cs-mini-switch" title="List the matured and closed chits and count them in the figures"><input type="checkbox" id="include-matured" ${prefs.includeMatured ? 'checked' : ''}><i></i>with matured</label>` : ''}</span></div>`;
     const cells = `
         ${cell('trending', 'Net gain', `<span class="${expected + realised >= 0 ? 'up' : 'down'}">${moneyShort(expected + realised)}</span>`,
             realised ? `${moneyShort(expected)} expected · ${moneyShort(realised)} realised` : 'expected at maturity', expected + realised >= 0 ? 'good' : 'warn')}
@@ -350,6 +382,9 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     const paidOut = c.payoutAmount !== null;
     const toCome = paidOut ? Number(c.payoutPending || 0) : 0;   // the organizer still owes this part of the payout
     if (view.tab === 'payout' && !paidOut) view.tab = 'installments';
+    const canLift = liftable(c);
+    if (view.tab === 'lift' && !canLift) view.tab = 'installments';
+    let terms = null;   // the chit table (lift terms), loaded after the page is drawn
     const nextPending = installments.find(i => i.status === 'PENDING');
     const total = Number(c.totalContribution) || 1;
     const upcoming = Number(c.stillToPay) - Number(c.overdueAmount);
@@ -360,35 +395,58 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     const anyPaid = installments.some(i => i.status === 'PAID');
     const payoutReady = paidOut && toCome === 0;   // the whole payout is in: the organizer can be asked to confirm it
 
-    // The banner keeps what is done most (pay, the next step of the chit, edit); the rest sits in a "More" menu
-    const menu = [{ act: 'share', icon: 'link', label: 'Share chit…', hint: 'A link that expires: what is paid, what is left, the payout and when' }];
-    if (anyPaid) menu.push({ act: 'ack', icon: 'shield', label: 'Acknowledge payments', hint: 'Ask the organizer to sign for what you paid' });
-    if (payoutReady) menu.push({ act: 'payout-ack', icon: 'gift', label: 'Payout receipt', hint: 'Organizer confirms the payout; earlier acknowledgements are cancelled' });
+    // The banner's actions, side by side: the next thing to do as a large button saying how much and by when (pay, joined to
+    // its UPI QR; a payout part due, or closing, when that is what the chit is waiting for), then everything else as captioned
+    // tiles, coloured by what they are about
     const step = closed ? null : toCome ? 'payout-part' : c.closable ? 'close' : !paidOut ? 'payout' : null;
-    if (!closed && !paidOut && step !== 'payout') menu.push({ act: 'payout', icon: 'gift', label: 'Record the payout', hint: 'The prize or maturity amount you received' });
-    if (!closed && paidOut) menu.push({ act: 'undo-payout', icon: 'undo', label: 'Undo payout', hint: 'Takes the payout out of the books' });
-    if (!closed) menu.push({ sep: true }, { act: 'delete', icon: 'trash', label: 'Delete chit', danger: true });
-    const moreBtn = menu.length ? `<button class="btn sm on-dark" data-cm='${esc(JSON.stringify(menu))}' title="More actions" aria-haspopup="menu">${icon('more')}More${icon('chevron-down')}</button>` : '';
-    const stepBtn = {
-        'payout-part': `<button class="btn sm gold-btn" data-act="payout-part" title="The organizer paid another part of the payout">${icon('plus')}Record part · ${moneyShort(toCome)} due</button>`,
-        close: `<button class="btn sm gold-btn" data-act="close" title="Finished: put it away (it can be reopened)">${icon('lock')}Close chit</button>`,
-        payout: `<button class="btn sm gold-btn" data-act="payout" title="Record the prize or maturity amount you received">${icon('gift')}Payout</button>`,
-    }[step] || '';
-    const actions = !manage ? '' : closed ? `
-        <button class="btn sm primary" data-act="reopen" title="Open the chit again to pay, undo or edit">${icon('refresh')}Reopen</button>
-        <button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>${moreBtn}` : `
-        <div class="ca-main">
-            ${nextPending && c.organizerUpi ? `<button class="btn sm on-dark" data-upi="${nextPending.id}" title="Pay #${nextPending.installmentNo} by UPI QR">${icon('qr')}UPI</button>` : ''}
-            ${nextPending ? `<button class="btn sm primary" data-pay="${nextPending.id}">${icon('check')}Pay #${nextPending.installmentNo}</button>` : ''}
-            ${stepBtn}
-        </div>
-        <div class="ca-side"><button class="btn sm on-dark icon" data-act="edit" title="Edit">${icon('edit')}</button>${moreBtn}</div>`;
+    // recording the payout is a step only once nothing is left to pay; until then it waits among the tiles
+    const stepShown = step === 'payout' && nextPending ? null : step;
+    const tile = (act, iconName, caption, label, hint = '', { cls = '', extra = '' } = {}) => `<button type="button" class="ca-tile ${cls}" data-act="${act}" title="${esc(hint ? `${label}: ${hint}` : label)}" aria-label="${esc(label)}">
+            <span class="ca-tile-ico">${icon(iconName)}${extra}</span><span class="ca-tile-cap">${esc(caption)}</span></button>`;
+    const big = (cls, attr, iconName, label, note, title) => `<button type="button" class="btn ${cls} ca-big" ${attr} title="${esc(title)}">${icon(iconName)}<span class="ca-big-txt"><b>${esc(label)}</b><small>${esc(note)}</small></span></button>`;
+    const left = Number(c.installmentsPending);
+    const partHint = 'the organizer paid another part of the payout';
+    const closeHint = 'finished: put it away (it can be reopened)';
+    // one large button at a time: paying comes first, and a step waiting beside it is a gold tile
+    const stepBtn = nextPending ? '' : {
+        'payout-part': big('gold-btn', 'data-act="payout-part"', 'plus', 'Record part', `${moneyShort(toCome)} due`, partHint),
+        close: big('gold-btn', 'data-act="close"', 'lock', 'Close chit', left ? `${left} still unpaid` : 'Nothing left to pay', closeHint),
+        payout: big('gold-btn', 'data-act="payout"', 'gift', 'Record payout', `${moneyShort(c.maturityAmount)} expected`, 'The prize or maturity amount you received'),
+    }[stepShown] || '';
+    const stepTile = !nextPending ? '' : {
+        'payout-part': tile('payout-part', 'plus', 'Record part', `Record part, ${moneyShort(toCome)} due`, partHint, { cls: 'is-step' }),
+        close: tile('close', 'lock', 'Close chit', 'Close chit', closeHint, { cls: 'is-step' }),
+    }[stepShown] || '';
+    const payBtn = !nextPending ? '' : `<span class="ca-pay">${big('primary', `data-pay="${nextPending.id}"`, 'check', `Pay #${nextPending.installmentNo}`,
+            `${money(nextPending.dueAmount)} · ${nextPending.overdue ? dueText(nextPending.dueDate, true) : `due ${shortDate(nextPending.dueDate)}`}`, `Record installment ${nextPending.installmentNo}`)}${c.organizerUpi
+            ? `<button type="button" class="btn primary icon ca-big-side" data-upi="${nextPending.id}" title="Pay #${nextPending.installmentNo} by UPI QR" aria-label="Pay by UPI QR">${icon('qr')}</button>` : ''}</span>`;
+    const nextUp = closed ? big('primary', 'data-act="reopen"', 'refresh', 'Reopen', 'To pay, undo or edit', 'Open the chit again to pay, undo or edit') : `${stepBtn}${payBtn}`;
+    // the groups that are always there come last: the tiles are right-aligned, so they keep their place from chit to chit
+    const tools = [
+        ['Payout', 'gold', [
+            stepTile,
+            !closed && !paidOut && !stepShown && tile('payout', 'gift', 'Payout', 'Record the payout', 'the prize or maturity amount you received'),
+            !closed && paidOut && tile('undo-payout', 'undo', 'Undo', 'Undo payout', 'takes the payout out of the books'),
+        ]],
+        ['With the organizer', 'aqua', [
+            anyPaid && tile('ack', 'shield', 'Acknowledge', 'Acknowledge payments', 'ask the organizer to sign for what you paid', { extra: '<i class="ca-tile-badge" data-ack-count hidden></i>' }),
+            payoutReady && tile('payout-ack', 'receipt', 'Receipt', 'Payout receipt', 'the organizer confirms the payout; earlier acknowledgements are cancelled'),
+        ]],
+        ['This chit', 'sky', [
+            tile('edit', 'edit', 'Edit', 'Edit', 'its terms, organizer and accounts'),
+            tile('share', 'share', 'Share', 'Share chit', 'a link that expires: what is paid, what is left, the payout and when'),
+            tile('copy', 'copy', 'Copy', 'Copy chit', 'a new chit with these terms and chit table: change what differs'),
+        ]],
+        ['Delete', 'red', [!closed && tile('delete', 'trash', 'Delete', 'Delete chit')]],
+    ].map(([label, tone, group]) => [label, tone, group.filter(Boolean)]).filter(([, , group]) => group.length);
+    const toolTray = `<div class="ca-tools" role="toolbar" aria-label="Chit actions">${tools.map(([label, tone, group]) => `<div class="ca-tool-group ca-tone-${tone}" role="group" aria-label="${esc(label)}">${group.join('')}</div>`).join('')}</div>`;
+    const actions = !manage ? '' : `${nextUp ? `<div class="ca-next">${nextUp}</div>` : ''}${toolTray}`;
     const gain = paidOut ? Number(c.realizedGain) : Number(c.projectedNetGain);
 
     target.innerHTML = `
         <section class="panel p-chit-head">
             <div class="chit-banner">
-                <span class="hero-icon art-mark">${icon('chit-book')}</span>
+                <span class="hero-icon">${icon('chit-book')}</span>
                 <div class="ab-id">
                     <div class="ab-name">${esc(c.name)} ${statusBadge(c.status)}${closed && c.closedAt ? `<span class="ab-closed">${icon('lock')}closed ${date(c.closedAt.slice(0, 10))}</span>` : ''}</div>
                     <div class="ab-meta">${[c.organizer, c.ticketNo ? 'Ticket ' + c.ticketNo : '', `${c.numberOfInstallments} × ${money(c.monthlyInstallment)}`]
@@ -432,24 +490,52 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
                 <button class="tab ${view.tab === 'installments' ? 'active' : ''}" data-tab="installments">${icon('list')}Installments</button>
                 <button class="tab ${view.tab === 'receipts' ? 'active' : ''}" data-tab="receipts">${icon('shield')}Acknowledgements<span class="count warn" data-ack-count hidden></span></button>
                 <button class="tab ${view.tab === 'interest' ? 'active' : ''}" data-tab="interest">${icon('trending')}Interest by month</button>
+                ${canLift ? `<button class="tab ${view.tab === 'lift' ? 'active' : ''}" data-tab="lift">${icon('scale')}Lift or hold</button>` : ''}
                 ${paidOut ? `<button class="tab ${view.tab === 'payout' ? 'active' : ''}" data-tab="payout">${icon('gift')}Payout${toCome ? `<span class="count warn">${payoutReceipts.length}</span>` : ''}</button>` : ''}
                 <button class="tab ${view.tab === 'details' ? 'active' : ''}" data-tab="details">${icon('info')}Details</button></div>`,
             body: '<div class="scroll chit-tab-body" id="chit-tab-body"></div>',
         })}`;
 
     const tabBody = target.querySelector('#chit-tab-body');
+    const yardsticks = () => ({ ...YARDSTICKS, ...getPref('chitInsight', {}), today: isoDate() });
     const drawTab = () => {
+        if (view.tab === 'lift') {
+            const y = yardsticks();
+            const ins = chitInsights(c, installments, terms, y);
+            tabBody.innerHTML = liftTabHtml(c, installments, ins, y, manage && !closed);
+            drawLiftTabCharts(tabBody, c, installments, ins, y);
+            return;
+        }
         tabBody.innerHTML = view.tab === 'installments' ? installmentsHtml(installments, manage, Boolean(c.organizerUpi), ackByInstallment(acks, installments))
             : view.tab === 'receipts' ? receiptsTabHtml(acks, manage, { payoutReady, payoutDone: acks.some(a => a.kind === 'PAYOUT' && isFinal(a)) })
-            : view.tab === 'interest' ? interestHtml(c, interestSchedule)
+            : view.tab === 'interest' ? interestHtml(c, interestSchedule, canLift ? terms : undefined)
             : view.tab === 'payout' ? payoutHtml(c, payoutReceipts, manage && !closed) : detailsHtml(c, installments, interestSchedule);
     };
     drawTab();
+    if (canLift) api.get('/chits/lift-terms').then(list => {
+        terms = list.find(t => t.chitId === c.id) || null;
+        if (view.tab === 'lift' || view.tab === 'interest') drawTab();
+    }).catch(() => { /* estimated from the chit's own rate */ });
+    // the yardsticks: kept for every chit, the tab redrawn as they change
+    tabBody.addEventListener('change', e => {
+        const input = e.target.closest('[data-ci]');
+        if (!input || input.value === '' || !Number.isFinite(Number(input.value))) return;
+        setPref('chitInsight', { ...getPref('chitInsight', {}), [input.dataset.ci]: Number(input.value) });
+        drawTab();
+    });
+    // the views of Lift or hold (overview, month by month, odds & risk, dividends & returns), remembered
+    tabBody.addEventListener('click', e => {
+        const v = e.target.closest('[data-ci-view]');
+        if (!v) return;
+        e.stopPropagation();
+        setPref('chitInsight', { ...getPref('chitInsight', {}), view: v.dataset.ciView });
+        setQuery({ view: v.dataset.ciView });
+        drawTab();
+    });
     const loadAcks = () => api.get(`/chits/${c.id}/receipts`).then(list => {
         acks = list;
         const waiting = acks.filter(a => a.status === 'PENDING' || a.status === 'DISPUTED').length;
-        const badge = target.querySelector('[data-ack-count]');
-        if (badge) { badge.hidden = !waiting; badge.textContent = waiting; }
+        target.querySelectorAll('[data-ack-count]').forEach(badge => { badge.hidden = !waiting; badge.textContent = waiting; });
         drawTab();
     }).catch(() => { /* the passbook works without them */ });
     loadAcks();
@@ -476,16 +562,6 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
     }));
 
     target.addEventListener('click', async e => {
-        const more = e.target.closest('[data-cm]');
-        if (more) { openMoreMenu(more, JSON.parse(more.dataset.cm), act => {
-            // the menu lives outside this page (the banner clips it): its choice is passed on as a click of the same button
-            const proxy = document.createElement('button');
-            proxy.dataset.act = act;
-            proxy.hidden = true;
-            target.append(proxy);
-            proxy.click();
-            proxy.remove();
-        }); return; }
         const tab = e.target.closest('[data-tab]');
         if (tab) {
             view.tab = tab.dataset.tab;
@@ -496,7 +572,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
         }
         if (await handleReceiptClick(e, ctx)) return;
         const filter = e.target.closest('[data-interest-filter]');
-        if (filter) { view.interestFilter = filter.dataset.interestFilter; drawTab(); return; }
+        if (filter) { view.interestFilter = filter.dataset.interestFilter; setQuery({ interest: view.interestFilter === 'all' ? null : view.interestFilter }); drawTab(); return; }
         const entryRow = e.target.closest('tr[data-entry]');
         const btn = e.target.closest('button');
         if (entryRow && !btn) { toggleEntryRow(entryRow, null, { onChanged: reload }); return; }
@@ -549,6 +625,15 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
                 toast(`${c.name} reopened`);
                 reload();
             } else if (btn.dataset.act === 'edit') openChitForm(c, reload);
+            else if (btn.dataset.act === 'copy') openChitForm(null, saved => { view.selectedId = saved.chit.id; reload(); }, { copyFrom: c });
+            else if (btn.dataset.act === 'chit-table') {
+                const lt = openModal({ title: `Chit table · ${c.name}`, sub: `${c.numberOfInstallments} months · ${moneyShort(c.maturityAmount)}`, iconName: 'list', size: 'xl lift-table-modal',
+                    body: '<div data-lt-host></div>', actions: [{ label: 'Close' }] });
+                mountLiftTable(lt.el.querySelector('[data-lt-host]'), c, { installments }, {
+                    terms, others: [], prefs: yardsticks(),
+                    onSaved: out => { terms = out[0] || null; lt.close(); toast('Chit table saved'); drawTab(); },
+                });
+            }
             else if (btn.dataset.act === 'delete') {
                 if (await confirmDialog(`Delete chit "${c.name}" and its schedule?`)) {
                     await api.del(`/chits/${c.id}`);
@@ -561,46 +646,6 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
             toast(error.message, 'error');
         }
     });
-}
-
-/**
- * The "More" menu of the chit banner: a popover under the button (fixed, so the banner cannot clip it) that closes on a
- * choice, a click elsewhere, Escape or scrolling.
- */
-function openMoreMenu(anchor, items, onPick) {
-    document.querySelector('.cm-pop')?.remove();
-    const pop = document.createElement('div');
-    pop.className = 'cm-pop';
-    pop.setAttribute('role', 'menu');
-    pop.innerHTML = items.map(i => i.sep ? '<hr>' : `<button type="button" role="menuitem" class="cm-item ${i.danger ? 'danger' : ''}" data-pick="${i.act}">
-        <span class="cm-ico">${icon(i.icon)}</span><span class="cm-txt"><b>${esc(i.label)}</b>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</span></button>`).join('');
-    document.body.append(pop);
-    const r = anchor.getBoundingClientRect();
-    const w = pop.offsetWidth, h = pop.offsetHeight;
-    pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.right - w))}px`;
-    pop.style.top = `${r.bottom + 6 + h > innerHeight && r.top - h - 6 > 0 ? r.top - h - 6 : r.bottom + 6}px`;
-    anchor.setAttribute('aria-expanded', 'true');
-    const close = () => {
-        pop.remove();
-        anchor.removeAttribute('aria-expanded');
-        document.removeEventListener('pointerdown', away, true);
-        document.removeEventListener('keydown', key, true);
-        removeEventListener('scroll', close, true);
-        removeEventListener('resize', close);
-    };
-    const away = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
-    const key = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); anchor.focus(); } };
-    pop.addEventListener('click', e => {
-        const item = e.target.closest('[data-pick]');
-        if (!item) return;
-        close();
-        onPick(item.dataset.pick);
-    });
-    document.addEventListener('pointerdown', away, true);
-    document.addEventListener('keydown', key, true);
-    addEventListener('scroll', close, true);
-    addEventListener('resize', close);
-    pop.querySelector('.cm-item')?.focus();
 }
 
 /** A key figure of the selected chit: label, value, a short note and an optional bar. */
@@ -692,8 +737,20 @@ const INTEREST_STATUS = {
     AFTER_PAYOUT: ['aqua', 'gift', 'After payout'],
 };
 
-function interestHtml(c, rows) {
+/**
+ * Interest by month. With the chit's lift terms (terms !== undefined: a chit that can still be lifted) each month also
+ * shows what lifting it then pays, and how far that falls short of the maturity amount.
+ */
+function interestHtml(c, rows, terms) {
     const earned = rows.filter(r => r.status === 'EARNED');
+    const withLift = terms !== undefined;
+    const lifted = r => {
+        if (r.period >= c.numberOfInstallments) return '<td class="r muted">—</td>';
+        const p = payoutFor(c, terms, r.period, c.maturityDate, r.installmentDate);
+        const cut = Number(c.maturityAmount) - p.payout;
+        return `<td class="r col-lift" title="Lifting in month ${r.period} pays ${money(Math.round(p.payout))}${p.estimated ? ' (estimated: fill in the chit table)' : ''}: ${money(Math.round(cut))} less than the ${money(c.maturityAmount)} at maturity, and the installments after it are still paid">
+            ${p.estimated ? '<span class="muted">~</span>' : ''}${moneyShort(p.payout)}<small class="neg">−${moneyShort(cut)} · ${percent(cut / Number(c.maturityAmount) * 100, 0)}</small></td>`;
+    };
     const last = rows[rows.length - 1];
     const visible = rows.filter(r => view.interestFilter === 'all'
         || (view.interestFilter === 'earned' ? r.status === 'EARNED' : r.status !== 'EARNED'));
@@ -702,7 +759,7 @@ function interestHtml(c, rows) {
         let divider = '';
         if (!dividerShown && r.status !== 'EARNED' && view.interestFilter === 'all' && earned.length) {
             dividerShown = true;
-            divider = `<tr class="today-divider"><td colspan="12"><span>${icon('flag')} Today · ${date(isoDate())} — earned so far
+            divider = `<tr class="today-divider"><td colspan="${withLift ? 13 : 12}"><span>${icon('flag')} Today · ${date(isoDate())} — earned so far
                 <b>${money(c.compoundInterestEarned)}</b> compound, <b>${money(c.simpleInterestEarned)}</b> simple</span></td></tr>`;
         }
         const [tone, ico, label] = INTEREST_STATUS[r.status];
@@ -718,6 +775,7 @@ function interestHtml(c, rows) {
             <td class="r col-simple">${money(r.simpleInterest, { decimals: 2 })}</td>
             <td class="r col-simple">${money(r.cumulativeSimple)}</td>
             <td class="r ${Number(r.compoundAdvantage) > 0 ? 'pos' : 'muted'}">${Number(r.compoundAdvantage) ? '+' + money(r.compoundAdvantage) : '—'}</td>
+            ${withLift ? lifted(r) : ''}
             <td><span class="badge ${tone}">${icon(ico)}${label}</span></td>
         </tr>`;
     }).join('');
@@ -744,12 +802,13 @@ function interestHtml(c, rows) {
     <table class="grid compact dense interest-table">
         <thead><tr><th>#</th><th>Paid in on</th><th>Interest on</th><th class="r">Installment</th><th class="r">Balance</th>
             <th class="r">Compound int.</th><th class="r">Balance + int.</th><th class="r">Total compound</th>
-            <th class="r col-simple">Simple int.</th><th class="r col-simple">Total simple</th><th class="r">Compound edge</th><th>Status</th></tr></thead>
+            <th class="r col-simple">Simple int.</th><th class="r col-simple">Total simple</th><th class="r">Compound edge</th>
+            ${withLift ? `<th class="r col-lift" title="What lifting the chit in that month pays, and how much less that is than the maturity amount (Lift or hold weighs it)">If lifted then${hasTerms(terms) ? '' : ' <span class="muted">~</span>'}</th>` : ''}<th>Status</th></tr></thead>
         <tbody>${body}</tbody>
         <tfoot><tr class="total"><td colspan="3">At maturity (${date(c.maturityDate)})</td><td class="r">${money(c.totalContribution)}</td><td></td>
             <td class="r pos">${money(c.projectedCompoundInterest)}</td><td class="r">${money(last?.closingBalance)}</td><td></td>
             <td class="r col-simple">${money(c.projectedSimpleInterest)}</td><td></td>
-            <td class="r pos">+${money(Number(c.projectedCompoundInterest) - Number(c.projectedSimpleInterest))}</td><td></td></tr></tfoot>
+            <td class="r pos">+${money(Number(c.projectedCompoundInterest) - Number(c.projectedSimpleInterest))}</td>${withLift ? `<td class="r col-lift">${moneyShort(c.maturityAmount)}<small>held</small></td>` : ''}<td></td></tr></tfoot>
     </table>`;
 }
 
@@ -791,6 +850,7 @@ function detailsHtml(c, installments = [], schedule = []) {
             ${item('Status', statusBadge(c.status))}
             ${item('Pays from', esc(c.defaultPaymentAccountName || '—'))}
             ${item('Organizer mobile', c.organizerPhone ? `<span class="mono">${esc(c.organizerPhone)}</span>` : '—')}
+            ${c.organizerEmail ? item('Organizer e-mail', `<span class="mono">${esc(c.organizerEmail)}</span>`) : ''}
             ${item('Organizer UPI', c.organizerUpi ? `<span class="mono">${esc(c.organizerUpi)}</span>` : '—')}
             ${item('Commission', commission ? `${percent(c.commissionPercent, 2)} · ${money(Math.round(commission))}` : '—')}
             ${c.notes ? item('Notes', esc(c.notes)) : ''}
@@ -840,6 +900,7 @@ async function openPayForm(chit, installment, reload) {
     const due = Number(installment.dueAmount);
     const upi = Boolean(chit.organizerUpi);
     let payEvidence = null;
+    let mail = null;
     openModal({
         title: `Pay installment ${installment.installmentNo} · ${chit.name}`, iconName: 'chit', size: upi ? 'lg' : '',
         body: `<div class="${upi ? 'pay-layout' : ''}">
@@ -852,12 +913,15 @@ async function openPayForm(chit, installment, reload) {
                 ${field({ label: 'Dividend (discount share)', name: 'dividend', type: 'number', value: 0, hint: 'Reduces the cash you pay this month' })}
                 <div class="stat"><div class="label">Cash to pay</div><div class="value" data-cash>${money(due)}</div>
                     <div class="note">Installment ${money(due)} · due ${date(installment.dueDate)}</div></div>
+                ${field({ label: 'Bank reference', name: 'reference', placeholder: 'UTR, IMPS ref or cheque no.', span: 'span-2', attrs: 'maxlength="60" data-plain autocomplete="off"',
+                          hint: chit.organizerEmail ? `Kept on the entry; shown in the organizer's copy (${esc(chit.organizerEmail)})` : 'Kept on the entry' })}
                 <div class="span-2">${evidenceFieldHtml({ hint: 'Chit receipt or UPI screenshot' })}</div>
             </form>
             ${upi ? '<div data-upi-card></div>' : ''}
         </div>`,
         onOpen: m => {
             payEvidence = bindEvidenceField(m.el);
+            mail = attachNotify(m, { event: 'CHIT_PAYMENT', organizer: chit.organizerEmail || null });
             const drawCash = () => {
                 const cash = Math.max(0, due - Number(m.el.querySelector('[name=dividend]').value || 0));
                 m.el.querySelector('[data-cash]').textContent = money(cash);
@@ -872,7 +936,7 @@ async function openPayForm(chit, installment, reload) {
             onClick: async m => {
                 const form = m.el.querySelector('form');
                 if (!form.reportValidity()) return true;
-                const detail = await api.post(`/chits/${chit.id}/installments/${installment.id}/pay`, readForm(form));
+                const detail = await api.post(`/chits/${chit.id}/installments/${installment.id}/pay`, readForm(form), { notify: mail?.value() });
                 toast(`Installment ${installment.installmentNo} paid · counted under Chit Payments in Budgets`);
                 await payEvidence.uploadTo(detail.installments.find(i => i.id === installment.id)?.journalEntryId);
                 reload();
@@ -997,17 +1061,36 @@ function impliedAnnualRate(m, n, maturity) {
     return (Math.pow(1 + (lo + hi) / 2, 12) - 1) * 100;
 }
 
-async function openChitForm(chit, onSaved) {
-    const accounts = await loadAccounts();
-    const c = chit || { numberOfInstallments: 20, startDate: isoDate(), commissionPercent: 5 };
+/**
+ * The chit form: new, edit, or a copy of another chit (copyFrom: its terms and chit table, a new name, starting today).
+ * Its fields are as they always were; beside them, optionally, the chit table (what lifting gives and what is paid after,
+ * month by month; chit-lift-table.js), filled from a button and saved with the chit. A new chit can also start from any
+ * existing one (Start from).
+ */
+async function openChitForm(chit, onSaved, { copyFrom = null } = {}) {
+    const [accounts, allChits, allTerms] = await Promise.all([loadAccounts(), chit ? Promise.resolve([]) : api.get('/chits').catch(() => []),
+        api.get('/chits/lift-terms').catch(() => [])]);
+    const termsOf = id => allTerms.find(t => t.chitId === id) || null;
+    const copyOf = src => ({ ...src, name: `${src.name} (copy)`, ticketNo: '', startDate: isoDate(), endDate: null, notes: src.notes });
+    const c = chit || (copyFrom ? copyOf(copyFrom) : { numberOfInstallments: 20, startDate: isoDate(), commissionPercent: 5 });
+    // the chit table: what it holds now (undefined: untouched), and the saved one it started from
+    const savedTerms = chit ? termsOf(chit.id) : copyFrom ? termsOf(copyFrom.id) : null;
+    let table = savedTerms && (savedTerms.liftChart || savedTerms.liftDiscountFirst != null || savedTerms.afterLiftInstallment != null) ? { ...savedTerms } : null;
+    let tableTouched = !!copyFrom && !!table;
+    let chitMail = null;
     openModal({
-        title: chit ? `Edit ${chit.name}` : 'New chit', iconName: 'chit', size: 'lg',
-        body: `<form class="form-grid three" id="chit-form">
+        title: chit ? `Edit ${chit.name}` : copyFrom ? `Copy of ${copyFrom.name}` : 'New chit', iconName: copyFrom ? 'copy' : 'chit', size: 'lg chf-modal',
+        body: `<div class="chf-layout"><form class="form-grid three" id="chit-form">
+            ${!chit && allChits.length ? `<div class="span-3 chf-from">${icon('copy')}<span>Start from an existing chit</span>
+                <select data-copy-from><option value="">— a new chit —</option>${allChits.map(x => `<option value="${x.id}" ${copyFrom?.id === x.id ? 'selected' : ''}>${esc(x.name)} · ${moneyShort(x.maturityAmount)} · ${x.numberOfInstallments} months</option>`).join('')}</select>
+                <small class="muted">fills the form and the chit table; change anything before saving</small></div>` : ''}
             ${field({ label: 'Chit name', name: 'name', value: c.name, required: true, span: 'span-2' })}
             ${field({ label: 'Ticket / group no.', name: 'ticketNo', value: c.ticketNo })}
             ${field({ label: 'Organizer / foreman', name: 'organizer', value: c.organizer })}
             ${field({ label: 'Organizer mobile', name: 'organizerPhone', type: 'tel', value: c.organizerPhone, placeholder: '10-digit mobile',
                       attrs: 'maxlength="16" inputmode="tel" data-plain', hint: 'To send receipts for acknowledgement' })}
+            ${field({ label: 'Organizer e-mail', name: 'organizerEmail', type: 'email', value: c.organizerEmail, placeholder: 'office@chitfund.com',
+                      attrs: 'maxlength="120" data-plain autocomplete="off"', hint: 'Gets a copy of each payment (Settings › Alerts)' })}
             ${field({ label: 'Organizer UPI ID', name: 'organizerUpi', value: c.organizerUpi, placeholder: 'name@bank',
                       attrs: 'pattern="[A-Za-z0-9._\\-]{2,}@[A-Za-z0-9.\\-]{2,}" data-plain', hint: 'Shows a QR code to pay installments' })}
             ${field({ label: 'UPI note', name: 'upiNote', value: c.upiNote, attrs: 'maxlength="40" data-plain', placeholder: 'Auto: chit name + ticket',
@@ -1031,9 +1114,12 @@ async function openChitForm(chit, onSaved) {
                 </div>
             </div>
             <div class="span-3 stat-strip" style="grid-template-columns:repeat(4,1fr)" id="chit-preview"></div>
-        </form>`,
+            <div class="span-3 chf-table" data-chf-table></div>
+        </form>
+        <aside class="chf-side" data-chf-side hidden><div data-lt-host></div></aside></div>`,
         onOpen: m => {
             const form = m.el.querySelector('#chit-form');
+            if (!chit) chitMail = attachNotify(m, { event: 'CHIT_CREATED' });
             const preview = () => {
                 const d = readForm(form);
                 const n = d.numberOfInstallments || 0;
@@ -1054,19 +1140,113 @@ async function openChitForm(chit, onSaved) {
                     box('Projected interest', money(maturity - total)) +
                     box('Implied return', rate === null ? '—' : percent(rate, 2) + ' p.a.', d.interestRate ? `Schedule uses ${percent(d.interestRate, 2)}` : 'Used for the interest schedule') +
                     box('Matures on', end, 'One month after the last installment');
+                drawTableRow();
             };
+            /** The chit as the form describes it, with its installments, for the chit table (an edited chit uses its real ones). */
+            const draft = async () => {
+                const d = readForm(form);
+                const n = Math.max(2, Math.min(600, Number(d.numberOfInstallments) || 0));
+                const monthly = Number(d.monthlyInstallment) || 0, M = Number(d.maturityAmount) || 0;
+                const start = new Date((d.startDate || isoDate()) + 'T00:00:00');
+                const at = k => isoDate(new Date(start.getFullYear(), start.getMonth() + k, start.getDate()));
+                if (chit) {
+                    const detail = await api.get(`/chits/${chit.id}`);
+                    return { c: { ...detail.chit, maturityAmount: M || detail.chit.maturityAmount, monthlyInstallment: monthly || detail.chit.monthlyInstallment }, d: detail };
+                }
+                const paid = Math.min(n, Number(d.alreadyPaidInstallments) || 0);
+                const installments = Array.from({ length: n }, (_, k) => ({ installmentNo: k + 1, dueDate: at(k), dueAmount: monthly, dividend: k < paid ? 0 : null,
+                    paidAmount: k < paid ? monthly : null, paidDate: k < paid ? at(k) : null, status: k < paid ? 'PAID' : 'PENDING' }));
+                const rate = impliedAnnualRate(monthly, n, M) ?? 8;
+                return { c: { id: 0, name: d.name || 'New chit', organizer: d.organizer, maturityAmount: M, monthlyInstallment: monthly, numberOfInstallments: n,
+                    installmentsPaid: paid, installmentsPending: n - paid, dividendsEarned: 0, rateUsed: d.interestRate ?? rate, impliedAnnualRate: rate,
+                    commissionPercent: d.commissionPercent, maturityDate: at(n), status: 'ACTIVE', payoutAmount: null }, d: { installments } };
+            };
+            // the chit table opens beside the form, in the same dialog widened to the window; every change is kept live
+            const side = m.el.querySelector('[data-chf-side]');
+            let open = false;
+            /** The chit table's row in the form: what it holds, and the buttons to open, hide or remove it. */
+            const drawTableRow = () => {
+                const box = form.querySelector('[data-chf-table]');
+                const chart = table?.liftChart ? table.liftChart.split(',').length : 0;
+                box.innerHTML = `<span class="chf-table-icon">${icon('calendar')}</span>
+                    <div class="min-0"><b>Chit table <small class="muted">(optional)</small></b>
+                        <small>${table ? `${chart ? `${chart} months filled` : 'a cut that falls'}${table.afterLiftInstallment != null ? ` · after lifting ${money(table.afterLiftInstallment)}` : ''} · saved with the chit`
+                            : open ? 'Fill it on the right: what lifting gives each month and what you pay after' : 'What lifting gives each month and what you pay after: Lift or hold uses it to say when to lift'}</small></div>
+                    <span class="spacer"></span>
+                    ${table ? `<button type="button" class="btn sm ghost" data-cf="remove" title="Save the chit without a chit table">${icon('x')}Remove</button>` : ''}
+                    <button type="button" class="btn sm ${table || open ? '' : 'primary'}" data-cf="${open ? 'hide' : 'fill'}">${icon(open ? 'chevron-left' : table ? 'edit' : 'list')}${open ? 'Hide the table' : table ? 'Open the table' : 'Fill the chit table'}</button>`;
+            };
+            const ready = () => {
+                const d = readForm(form);
+                return Number(d.maturityAmount) > 0 && Number(d.monthlyInstallment) > 0 && Number(d.numberOfInstallments) >= 2 && !!d.startDate;
+            };
+            const mountTable = async () => {
+                const { c: dc, d: dd } = await draft();
+                mountLiftTable(side.querySelector('[data-lt-host]') || side.firstElementChild, dc, dd, {
+                    terms: table, others: [], prefs: { investRate: 8, loanRate: 12, today: isoDate() }, inline: true,
+                    onPreview: t => { if (t) { table = t; tableTouched = true; drawTableRow(); } },
+                });
+            };
+            const showTable = async show => {
+                if (show && !ready()) { toast('Fill in the maturity value, the monthly installment, the installments and the start first', 'error'); return; }
+                open = show;
+                side.hidden = !show;
+                m.el.classList.toggle('chf-wide', show);
+                drawTableRow();
+                if (show) await mountTable();
+            };
+            // the amount, installment, months or start changed: the table is drawn again, keeping what was typed into it
+            let remountTimer = 0;
+            form.addEventListener('change', e => {
+                if (!open || !['maturityAmount', 'monthlyInstallment', 'numberOfInstallments', 'startDate', 'alreadyPaidInstallments'].includes(e.target.name) || !ready()) return;
+                clearTimeout(remountTimer);
+                remountTimer = setTimeout(() => mountTable().catch(err => toast(err.message, 'error')), 150);
+            });
             form.addEventListener('input', preview);
             form.querySelector('[data-toggle-advanced]').addEventListener('click', () => form.querySelector('[data-advanced]').classList.toggle('open'));
+            form.addEventListener('click', e => {
+                const b = e.target.closest('[data-cf]');
+                if (!b) return;
+                if (b.dataset.cf === 'fill') showTable(true).catch(err => toast(err.message, 'error'));
+                if (b.dataset.cf === 'hide') showTable(false);
+                if (b.dataset.cf === 'remove') { table = null; tableTouched = true; showTable(false); }
+            });
+            // a new chit can start from an existing one: its fields and its chit table
+            form.querySelector('[data-copy-from]')?.addEventListener('change', e => {
+                const src = allChits.find(x => x.id === Number(e.target.value));
+                if (!src) return;
+                const v = copyOf(src);
+                ['name', 'ticketNo', 'organizer', 'organizerPhone', 'organizerEmail', 'organizerUpi', 'upiNote', 'maturityAmount', 'monthlyInstallment', 'numberOfInstallments', 'startDate',
+                    'notes', 'commissionPercent', 'interestRate'].forEach(k => { if (form[k]) form[k].value = v[k] ?? ''; });
+                if (form.endDate) form.endDate.value = '';
+                if (form.defaultPaymentAccountId) form.defaultPaymentAccountId.value = v.defaultPaymentAccountId ?? '';
+                const t = termsOf(src.id);
+                table = t && (t.liftChart || t.liftDiscountFirst != null || t.afterLiftInstallment != null) ? { ...t } : null;
+                tableTouched = !!table;
+                preview();
+                if (open) mountTable().catch(err => toast(err.message, 'error'));
+                toast(`Filled from ${src.name}: change what differs`);
+            });
             preview();
         },
         actions: [{ label: 'Cancel' }, {
-            label: chit ? 'Save changes' : 'Create chit', kind: 'primary', iconName: 'check',
+            label: chit ? 'Save changes' : copyFrom ? 'Create the copy' : 'Create chit', kind: 'primary', iconName: 'check',
             onClick: async m => {
                 const form = m.el.querySelector('form');
                 if (!form.reportValidity()) return true;
                 const data = { ...readForm(form), version: chit?.version ?? null };
-                const saved = chit ? await api.put(`/chits/${chit.id}`, data) : await api.post('/chits', data);
-                toast(`Chit "${saved.chit.name}" saved`);
+                delete data.copyFrom;
+                const saved = chit ? await api.put(`/chits/${chit.id}`, data) : await api.post('/chits', data, { notify: chitMail?.value() });
+                if (tableTouched) {
+                    const t = table || {};
+                    try {
+                        await api.put(`/chits/${saved.chit.id}/lift-terms`, { afterLiftInstallment: t.afterLiftInstallment ?? null, liftDiscountFirst: t.liftDiscountFirst ?? null,
+                            liftDiscountLast: t.liftDiscountLast ?? null, liftFeePercent: t.liftFeePercent ?? null, liftFromMonth: t.liftFromMonth ?? null, liftChart: t.liftChart || null });
+                    } catch (error) {
+                        toast(`Chit saved, but its chit table was not: ${error.message}`, 'error');
+                    }
+                }
+                toast(`Chit "${saved.chit.name}" saved${tableTouched && table ? ' with its chit table' : ''}`);
                 onSaved?.(saved);
             },
         }],

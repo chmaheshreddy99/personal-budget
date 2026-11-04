@@ -25,7 +25,7 @@ import { donutChart, foldOthers, seriesColor } from '../core/charts.js';
 import { evidenceFieldHtml, bindEvidenceField, evidenceBadge } from '../components/evidence.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
-import { showRoute, routeHash, fromAddress } from '../core/route.js';
+import { showRoute, routeHash, fromAddress, readQuery } from '../core/route.js';
 
 export const KINDS = {
     CASH: { label: 'Cash', iconName: 'cash', tone: 'aqua', unit: '' },
@@ -58,10 +58,19 @@ const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p
 
 /** The address: #/gifts?dir=GIVEN&year=2026&person=<key>. */
 function giftsRoute(push = false) {
-    showRoute(routeHash('gifts', { dir: view.dir === 'all' ? null : view.dir, year: view.year === 'all' ? null : view.year, person: view.person }), { push });
+    showRoute(routeHash('gifts', { dir: view.dir === 'all' ? null : view.dir, year: view.year === 'all' ? null : view.year, person: view.person,
+        bal: view.bal === 'all' ? null : view.bal, circle: view.circle, sort: prefs.sort === 'total' ? null : prefs.sort, group: prefs.group === 'family' ? null : prefs.group }), { push });
 }
 
 export async function render(container, _params, isCurrent) {
+    // #/gifts?bal=owe&circle=fam:Reddy&sort=name&group=relation
+    const askedPeople = readQuery();
+    if (askedPeople.toString()) {
+        view.bal = askedPeople.get('bal') || 'all';
+        view.circle = askedPeople.get('circle') || '';
+        if (askedPeople.get('sort')) prefs.sort = askedPeople.get('sort');
+        if (askedPeople.get('group')) prefs.group = askedPeople.get('group');
+    }
     if (fromAddress(_params)) {
         const q = _params.query;
         view.dir = ['GIVEN', 'RECEIVED', 'DONATION'].includes(q.get('dir')) ? q.get('dir') : 'all';
@@ -285,10 +294,10 @@ export async function render(container, _params, isCurrent) {
             if (first) { pickPerson(first.dataset.person); first.scrollIntoView({ block: 'nearest' }); }
         }
     });
-    on('#gf-bal', 'click', e => { const b = e.target.closest('[data-bal]'); if (b && !b.disabled) { view.bal = b.dataset.bal; drawPeople(); } });
-    on('#gf-circle', 'change', e => { view.circle = e.target.value; drawPeople(); });
-    on('#gf-sort', 'change', e => { prefs.sort = e.target.value; savePrefs(); drawPeople(); });
-    on('#gf-group', 'change', e => { prefs.group = e.target.value; savePrefs(); drawPeople(); });
+    on('#gf-bal', 'click', e => { const b = e.target.closest('[data-bal]'); if (b && !b.disabled) { view.bal = b.dataset.bal; giftsRoute(); drawPeople(); } });
+    on('#gf-circle', 'change', e => { view.circle = e.target.value; giftsRoute(); drawPeople(); });
+    on('#gf-sort', 'change', e => { prefs.sort = e.target.value; savePrefs(); giftsRoute(); drawPeople(); });
+    on('#gf-group', 'change', e => { prefs.group = e.target.value; savePrefs(); giftsRoute(); drawPeople(); });
     const personClick = e => {
         const give = e.target.closest('[data-give]');
         if (give) {   // "To return the favour": a gift to them, at what they last gave

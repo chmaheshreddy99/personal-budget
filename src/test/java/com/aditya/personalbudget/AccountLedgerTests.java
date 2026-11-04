@@ -123,6 +123,34 @@ class AccountLedgerTests {
     }
 
     @Test
+    void aCardsBillingCycleIsKeptAndWorkedOutAndOnlyACardHasOne() {
+        AccountView card = accountService.create(new AccountRequest(null, "Billing Card", AccountType.CREDIT_CARD, null, null, null, null, null, bd(50000), null, null, null,
+                true, null, null, null, null, 15, null));
+        Long cash = accountService.systemAccount(DefaultChartOfAccounts.CASH).getId();
+        LocalDate lastCycle = com.aditya.personalbudget.service.CardBilling.cycleEnd(LocalDate.now(), 15).minusMonths(1).minusDays(5);
+        ledger.post(JournalDraft.of(lastCycle, VoucherType.TRANSFER, "Cash on the card").debit(cash, bd(4000)).credit(card.id(), bd(4000)));
+
+        AccountView seen = accountService.get(card.id());
+        assertThat(seen.cardBill().billingDay()).isEqualTo(15);
+        assertThat(seen.cardBill().paymentDueDays()).isEqualTo(20);
+        assertThat(seen.cardBill().totalDue()).isEqualByComparingTo("4000");
+        var bills = accountService.cardBills(card.id(), 12);
+        assertThat(bills.configured()).isTrue();
+        assertThat(bills.statements().get(0).dueDate()).isEqualTo(bills.statements().get(0).statementDate().plusDays(20));
+
+        // an edit that clears the day ends it
+        AccountView cleared = accountService.update(card.id(), new AccountRequest(seen.code(), seen.name(), AccountType.CREDIT_CARD, null, null, null, null, null, bd(50000), null, null, null,
+                true, seen.version()));
+        assertThat(cleared.cardBill()).isNull();
+        assertThat(accountService.cardBills(card.id(), 12).configured()).isFalse();
+
+        AccountView bank = accountService.create(new AccountRequest(null, "No Billing Bank", AccountType.BANK, null, null, null, null, null, null, null, null, null,
+                true, null, null, null, null, 15, 20));
+        assertThat(bank.cardBill()).isNull();
+        assertThatThrownBy(() -> accountService.cardBills(bank.id(), 12)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
     void theOpeningBalanceCannotBeEdited() {
         AccountView bank = accountService.create(request("Opening Bank", bd(2500), LocalDate.of(2026, 1, 1), null));
         assertThatThrownBy(() -> accountService.update(bank.id(), request("Opening Bank", bd(3000), LocalDate.of(2026, 1, 1), bank.version())))

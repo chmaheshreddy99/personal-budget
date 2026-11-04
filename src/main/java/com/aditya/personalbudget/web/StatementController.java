@@ -44,6 +44,13 @@ public class StatementController {
         return statements.overview();
     }
 
+    /** Whether statements are locked unless they say otherwise, and the common password. */
+    @PutMapping("/protection")
+    @RequiresPermission(Permission.MANAGE_USERS)
+    public StatementService.Protection protection(@Valid @RequestBody StatementService.ProtectionRequest request) {
+        return statements.saveProtection(request);
+    }
+
     @PostMapping("/subscriptions")
     @RequiresPermission(Permission.MANAGE_USERS)
     public SubscriptionView create(@Valid @RequestBody SubscriptionRequest request) {

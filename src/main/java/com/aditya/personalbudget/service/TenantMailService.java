@@ -9,6 +9,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.env.Environment;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -34,11 +36,14 @@ import java.util.Properties;
 @Service
 public class TenantMailService {
 
-    /** What the settings page shows: everything but the password (only whether one is saved). */
+    /**
+     * What the settings page shows: everything but the password (only whether one is saved, and whether it can still be
+     * read: one saved under another installation's key, or before the key changed, cannot, and has to be typed again).
+     */
     public record MailSettingsView(boolean saved, boolean enabled, String host, Integer port, String security, String username,
                                    boolean hasPassword, String fromAddress, String fromName, String replyTo, String updatedBy,
                                    LocalDateTime updatedAt, LocalDateTime testedAt, String testResult,
-                                   boolean serverConfigured, String serverFrom, String activeSource) {
+                                   boolean serverConfigured, String serverFrom, String activeSource, boolean passwordUnreadable) {
     }
 
     /** password: blank keeps the saved one; clearPassword removes it. */
@@ -55,6 +60,7 @@ public class TenantMailService {
     public record Sender(JavaMailSender mail, String from, String fromName, String replyTo, String source) {
     }
 
+    private static final Logger log = LoggerFactory.getLogger(TenantMailService.class);
     private static final String KEY = "mail.secret-key";
 
     private final TenantMailSettingsRepository repository;
@@ -80,11 +86,11 @@ public class TenantMailService {
         boolean server = serverSender.getIfAvailable() != null && serverFrom != null;
         if (s == null) {
             return new MailSettingsView(false, false, null, null, TenantMailSettings.STARTTLS, null, false, null, null, null, null, null,
-                    null, null, server, serverFrom, active == null ? null : active.source());
+                    null, null, server, serverFrom, active == null ? null : active.source(), false);
         }
         return new MailSettingsView(true, Boolean.TRUE.equals(s.getEnabled()), s.getHost(), s.getPort(), s.getSecurity(), s.getUsername(),
                 s.getPasswordEnc() != null, s.getFromAddress(), s.getFromName(), s.getReplyTo(), s.getUpdatedBy(), s.getUpdatedAt(),
-                s.getTestedAt(), s.getTestResult(), server, serverFrom, active == null ? null : active.source());
+                s.getTestedAt(), s.getTestResult(), server, serverFrom, active == null ? null : active.source(), !readable(s));
     }
 
     @Transactional
@@ -111,6 +117,9 @@ public class TenantMailService {
         s.setUsername(trim(r.username()));
         if (Boolean.TRUE.equals(r.clearPassword())) s.setPasswordEnc(null);
         else if (r.password() != null && !r.password().isBlank()) s.setPasswordEnc(encrypt(r.password()));
+        if (enabled && s.getUsername() != null && s.getPasswordEnc() != null && !readable(s)) {
+            throw new BusinessException("The saved password cannot be read any more: type it again (for Gmail, an app password)");
+        }
         if (enabled && s.getUsername() != null && s.getPasswordEnc() == null) {
             throw new BusinessException("Enter the password (for Gmail, an app password)");
         }
@@ -154,7 +163,11 @@ public class TenantMailService {
     public Optional<Sender> sender() {
         TenantMailSettings s = repository.findForTenant(UserContext.tenantId()).orElse(null);
         if (s != null && Boolean.TRUE.equals(s.getEnabled()) && s.getHost() != null && s.getFromAddress() != null) {
-            return Optional.of(new Sender(build(s), s.getFromAddress(), s.getFromName(), s.getReplyTo(), "HOUSEHOLD"));
+            // a password that cannot be read any more leaves the account unusable (Settings › E-mail asks for it again),
+            // rather than failing every page that only asks whether e-mail works
+            if (readable(s)) return Optional.of(new Sender(build(s), s.getFromAddress(), s.getFromName(), s.getReplyTo(), "HOUSEHOLD"));
+            log.warn("Organization {}: the saved e-mail password cannot be decrypted with this installation's key; it has to be entered again",
+                    s.getTenantId());
         }
         JavaMailSender server = serverSender.getIfAvailable();
         String from = serverFrom();
@@ -165,6 +178,17 @@ public class TenantMailService {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Whether the saved password (if any) can be decrypted with this installation's key. */
+    private boolean readable(TenantMailSettings s) {
+        if (s.getPasswordEnc() == null) return true;
+        try {
+            decrypt(s.getPasswordEnc());
+            return true;
+        } catch (BusinessException e) {
+            return false;
+        }
+    }
 
     private JavaMailSender build(TenantMailSettings s) {
         JavaMailSenderImpl mail = new JavaMailSenderImpl();

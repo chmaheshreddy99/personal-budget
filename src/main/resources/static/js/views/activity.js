@@ -18,6 +18,7 @@ import { can, FEATURES } from '../core/store.js';
 import { panel, esc, emptyState, toast, confirmDialog, openModal, field, readForm } from '../core/ui.js';
 import { icon, categoryIcon } from '../core/icons.js';
 import { money, date, dateTime, isoDate } from '../core/format.js';
+import { setQuery } from '../core/route.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { qrSvg } from '../core/qr.js';
@@ -42,6 +43,13 @@ const filters = defaults();
 let approvalStatus = 'PENDING';
 
 export async function render(container, params, isCurrent) {
+    // #/activity/log?from=…&to=…&actor=…&area=…&q=…
+    const asked = params.query;
+    if (asked?.get('status')) approvalStatus = asked.get('status');
+    if (asked?.toString()) {
+        const d = defaults();
+        Object.assign(filters, { from: asked.get('from') || d.from, to: asked.get('to') || d.to, actor: asked.get('actor') || '', area: asked.get('area') || '', q: asked.get('q') || '' });
+    }
     const tabs = TABS.filter(t => can(t.permission));
     const active = tabs.find(t => t.key === params[0]) || tabs[0];
     const pending = can('APPROVE_ENTRIES') ? (await api.get('/approvals/count').catch(() => ({ pending: 0 }))).pending : 0;
@@ -66,6 +74,8 @@ export async function render(container, params, isCurrent) {
 // ===================================================================== activity log
 
 async function drawLog(body, actions, reload, isCurrent) {
+    const shownDefaults = defaults();
+    setQuery({ from: filters.from === shownDefaults.from ? null : filters.from, to: filters.to === shownDefaults.to ? null : filters.to, actor: filters.actor, area: filters.area, q: filters.q });
     const all = await api.get('/activity', { from: filters.from, to: filters.to, limit: 5000 });
     if (!isCurrent()) return;
     const actors = [...new Set(all.map(a => a.actor))].sort();
@@ -136,6 +146,7 @@ function row(a) {
 // ===================================================================== approvals (maker-checker)
 
 async function drawApprovals(body, actions, reload, isCurrent) {
+    setQuery({ status: approvalStatus === 'PENDING' ? null : approvalStatus });
     const list = await api.get('/approvals', { status: approvalStatus });
     if (!isCurrent()) return;
     actions.innerHTML = `<div class="seg-chips sm" id="ap-status">${['PENDING', 'APPROVED', 'REJECTED', 'ALL'].map(s =>

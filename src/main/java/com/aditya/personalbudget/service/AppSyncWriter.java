@@ -60,8 +60,10 @@ public class AppSyncWriter {
             AppSyncKey k = done.get();
             return new SyncResult(e.clientId(), "DUPLICATE", k.getEntryId(), k.getEntryNo(), "Already synced", k.getPendingId());
         }
-        ExpenseRequest req = new ExpenseRequest(e.date(), e.amount(), e.categoryId(), e.paidFromId(),
-                e.narration() == null || e.narration().isBlank() ? null : e.narration().trim(), blank(e.party()), blank(e.reference()), blank(e.notes()), null);
+        // two or more items: one itemized bill (the items must add up to the amount, which the expense service checks)
+        var items = e.items() != null && e.items().size() > 1 ? e.items() : null;
+        ExpenseRequest req = new ExpenseRequest(e.date(), e.amount(), items == null ? e.categoryId() : null, e.paidFromId(),
+                e.narration() == null || e.narration().isBlank() ? null : e.narration().trim(), blank(e.party()), blank(e.reference()), blank(e.notes()), null, items);
         AppSyncKey k = new AppSyncKey();
         k.setTenantId(tenant);
         k.setClientId(e.clientId());
@@ -79,7 +81,7 @@ public class AppSyncWriter {
             result = new SyncResult(e.clientId(), "CREATED", v.id(), v.entryNo(), null, null);
         }
         keys.save(k);
-        activity.record("ADDED", "Expenses", "Synced from the phone app · " + ActivityService.money(e.amount())
+        activity.record("ADDED", "Expenses", "Synced from the phone app · " + ActivityService.money(e.amount()) + (items != null ? " · " + items.size() + " items" : "")
                 + (e.narration() != null ? " · " + ActivityService.cut(e.narration(), 60) : ""));
         return result;
     }

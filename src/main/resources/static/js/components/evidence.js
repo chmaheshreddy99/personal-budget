@@ -615,6 +615,8 @@ export function bindEvidenceField(root) {
 
     return {
         get count() { return pending.length; },
+        /** A file already in hand (the photos of a scanned bill) added to the field. */
+        add,
         /**
          * Uploads the pending files to a saved entry (or, with { pendingId }, to an entry waiting for approval);
          * failures are reported, the entry stays saved.

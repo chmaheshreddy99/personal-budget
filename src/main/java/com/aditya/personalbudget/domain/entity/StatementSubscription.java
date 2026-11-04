@@ -16,8 +16,9 @@ import java.time.LocalDateTime;
 
 /**
  * An organization's subscription to a monthly statement by e-mail: which statement (see StatementService.KINDS), who
- * receives it, on which day of the month the previous month's statement goes out, and whether the PDF is locked with
- * a password (kept encrypted, never sent back to the browser). Table file: {@code data/statement_subscriptions.tbl}
+ * receives it, on which day of the month the previous month's statement goes out, and whether the PDF is locked: as all
+ * statements are ({@link StatementSettings}), or its own way, and with the common password or its own (kept encrypted,
+ * never sent back to the browser). Table file: {@code data/statement_subscriptions.tbl}
  */
 @Entity
 @Table(name = "statement_subscriptions")
@@ -49,10 +50,14 @@ public class StatementSubscription implements TenantOwned {
     /** The day of the month (1 to 28) the previous month's statement is sent. */
     private Integer dayOfMonth;
 
-    /** Lock the PDF with the password below. */
+    /** Rows from before {@link #protection}: lock the PDF with the password below. */
     private Boolean protect;
 
-    /** Encrypted: base64 of IV + AES-GCM cipher text. */
+    /** Whether the PDF is locked: GLOBAL (as Settings, Statements says for all), ON or OFF. */
+    @Column(length = 10)
+    private String protection;
+
+    /** Its own password; empty: the common one. Encrypted: base64 of IV + AES-GCM cipher text. */
     @Column(length = 300)
     private String passwordEnc;
 

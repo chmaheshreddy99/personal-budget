@@ -108,6 +108,27 @@ class AppSyncTests {
     }
 
     @Test
+    void aScannedBillSyncsAsOneTransactionWithALinePerItem() {
+        Long bank = accounts.create(new AccountRequest(null, "Bill bank " + System.nanoTime(), AccountType.BANK, "HDFC", null, BigDecimal.valueOf(5000),
+                LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
+        var mine = categories.list().stream().filter(c -> c.kind() == CategoryKind.EXPENSE && !c.system()).limit(2).toList();
+        var items = List.of(new com.aditya.personalbudget.dto.JournalDtos.ExpenseItem(mine.get(0).id(), new BigDecimal("312.40"), "Milk, curd"),
+                new com.aditya.personalbudget.dto.JournalDtos.ExpenseItem(mine.get(1).id(), new BigDecimal("207.60"), "Surf Excel 1kg"));
+        SyncExpense bill = new SyncExpense("phone-bill-" + System.nanoTime(), LocalDate.now(), new BigDecimal("520.00"), mine.get(0).id(), bank,
+                "Fresh Mart bill", "Fresh Mart", "FM/2410/0456", null, items);
+        var result = app.sync(new SyncRequest(List.of(bill), null));
+        assertThat(result).singleElement().satisfies(r -> assertThat(r.status()).isEqualTo("CREATED"));
+        assertThat(ledger.snapshot().balanceAsOf(bank, LocalDate.now())).isEqualByComparingTo("4480");
+        assertThat(app.statement(bank, 30).rows()).hasSize(2);   // the opening balance and one transaction for the whole bill
+
+        // items that do not add up to the bill are refused, not booked
+        SyncExpense wrong = new SyncExpense("phone-bill-bad-" + System.nanoTime(), LocalDate.now(), new BigDecimal("600.00"), mine.get(0).id(), bank,
+                null, null, null, null, items);
+        assertThat(app.sync(new SyncRequest(List.of(wrong), null))).singleElement()
+                .satisfies(r -> assertThat(r.status()).isEqualTo("FAILED"));
+    }
+
+    @Test
     void transfersSyncOnceAndASectionSwitchedOffOnTheWebIsRefused() {
         Long bank = accounts.create(new AccountRequest(null, "Transfer bank " + System.nanoTime(), AccountType.BANK, "HDFC", null, BigDecimal.valueOf(10000),
                 LocalDate.now().minusDays(10), null, null, null, null, null, true, null)).id();
@@ -190,6 +211,27 @@ class AppSyncTests {
             appSettings.saveMobileConfig(tenant, new AppSettingsService.MobileConfig(all, true, false, null, true, new java.util.LinkedHashSet<>(AppSettingsService.APP_ROLES),
                     everything, java.util.Set.of("VIEWER"), java.util.Set.of(), 30));
         }
+    }
+
+    @Test
+    void aChitsLiftTermsAreKeptAndAChartMustFitTheChit() {
+        var chit = chits.create(new com.aditya.personalbudget.dto.ChitDtos.ChitRequest("Lift chit " + System.nanoTime(), "Sri Ram", "T8",
+                BigDecimal.valueOf(100000), BigDecimal.valueOf(5000), 20, LocalDate.now().minusMonths(2), null, null, null, null, null, null, null, null, null));
+        Long id = chit.chit().id();
+        var saved = chits.saveLiftTerms(id, new com.aditya.personalbudget.dto.ChitDtos.LiftTermsRequest(BigDecimal.valueOf(5000), BigDecimal.valueOf(30),
+                BigDecimal.ZERO, BigDecimal.ONE, 3, " 3 = 72000@5000, 4=74500 ,"));
+        assertThat(saved.liftChart()).isEqualTo("3=72000@5000,4=74500");
+        assertThat(chits.liftTerms()).anySatisfy(t -> {
+            assertThat(t.chitId()).isEqualTo(id);
+            assertThat(t.afterLiftInstallment()).isEqualByComparingTo("5000");
+            assertThat(t.liftFromMonth()).isEqualTo(3);
+        });
+        // a chart month beyond the chit is refused; clearing the terms empties them
+        assertThatThrownBy(() -> chits.saveLiftTerms(id, new com.aditya.personalbudget.dto.ChitDtos.LiftTermsRequest(null, null, null, null, null, "25=99000")))
+                .isInstanceOf(com.aditya.personalbudget.exception.BusinessException.class).hasMessageContaining("25");
+        var cleared = chits.saveLiftTerms(id, new com.aditya.personalbudget.dto.ChitDtos.LiftTermsRequest(null, null, null, null, null, null));
+        assertThat(cleared.afterLiftInstallment()).isNull();
+        assertThat(cleared.liftChart()).isNull();
     }
 
     @Test

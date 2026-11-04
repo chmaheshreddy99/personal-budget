@@ -8,6 +8,7 @@ import { hasFeature, isExpense, mobileOn } from '../data';
 import { ago, money } from '../format';
 import { Card, IconBubble } from '../ui';
 import { colors, space } from '../theme';
+import { smsSupported } from '../native';
 
 export type MorePage = 'budget' | 'categories' | 'gifts' | 'sheet' | 'sms' | 'settings';
 
@@ -57,7 +58,7 @@ export function morePageOn(snap: Parameters<typeof mobileOn>[0], page: MorePage)
     case 'sheet': return hasFeature(snap, 'BALANCE_SHEET');
     case 'gifts': return hasFeature(snap, 'GIFTS');
     case 'categories': return mobileOn(snap, 'CATEGORIES');
-    case 'sms': return mobileOn(snap, 'SMS');
+    case 'sms': return smsSupported && mobileOn(snap, 'SMS');
     default: return true;
   }
 }

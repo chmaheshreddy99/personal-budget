@@ -7,7 +7,7 @@
  */
 import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, categoriesOf } from '../core/store.js';
-import { esc, field, readForm, openModal, toast, accountOptions, categoryOptions } from '../core/ui.js';
+import { esc, field, readForm, openModal, routeNextDialog, toast, accountOptions, categoryOptions } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, isoDate } from '../core/format.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
@@ -19,6 +19,7 @@ const KINDS = {
 };
 
 export async function openDebtDialog({ kind = 'BORROWED', claim = null, payableAccountId = null, onSaved } = {}) {
+    if (!claim && !payableAccountId) routeNextDialog('borrowed');
     const saveKey = newRequestKey();   // one key per dialog: a retry or a second click saves once
     const accounts = await loadAccounts();
     const categories = await categoriesOf('EXPENSE', claim?.categoryId);

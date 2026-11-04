@@ -80,6 +80,23 @@ class ChitUndoSafeguardTests {
     }
 
     @Test
+    void aChitLineCarriesTheChitsOwnBalanceBesideTheChitFundsAccounts() {
+        ChitDetail other = chits.create(new ChitRequest("Other chit " + System.nanoTime(), "Sri Ram", "T2", bd(55000), bd(2500), 20,
+                LocalDate.now().minusMonths(2), null, null, null, null, null, null, bank, null, null));
+        chits.payInstallment(other.chit().id(), other.installments().get(0).id(), new PayInstallmentRequest(null, bank, null));
+        Long installment = firstInstallment();
+        chits.payInstallment(chit.chit().id(), installment, new PayInstallmentRequest(null, bank, null));
+
+        var line = ledger.toViews(entries.findBySource(UserContext.tenantId(), LedgerService.SOURCE_CHIT_INSTALLMENT, installment)).get(0).lines().stream()
+                .filter(l -> l.chitId() != null).findFirst().orElseThrow();
+        assertThat(line.accountName()).startsWith("Undo chit");
+        assertThat(line.chitBalanceBefore()).isEqualByComparingTo("0");
+        assertThat(line.chitBalanceAfter()).isEqualByComparingTo("5000");
+        // the account holds the other chit's money too
+        assertThat(line.balanceAfter().subtract(line.chitBalanceAfter())).isGreaterThanOrEqualTo(bd(2500));
+    }
+
+    @Test
     void undoTakesTheInstallmentsEntryOutOfTheBooks() {
         Long installment = firstInstallment();
         chits.payInstallment(chit.chit().id(), installment, new PayInstallmentRequest(null, bank, null));

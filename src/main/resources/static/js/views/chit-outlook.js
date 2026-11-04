@@ -9,6 +9,9 @@
  *     holding to maturity instead of lifting the prize today (IRR of: give up the take-home value now, pay the
  *     remaining installments, receive the maturity amount), with a plain recommendation
  *   - gains by year of maturity
+ *   - earnings month by month: each chit's interest (its interest schedule, by the month it is reckoned) and dividends
+ *     (by the month the installment was paid; for installments to come, the chit's average so far), earned and
+ *     projected, as stacked bars (by chit or by kind) beside a table with the running total
  */
 import { api } from '../core/api.js';
 import { panel, esc, emptyState } from '../core/ui.js';
@@ -17,6 +20,8 @@ import { money, moneyShort, percent, date, shortDate, isoDate, monthLabel } from
 import { lineChart, barChart, legend } from '../core/charts.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { chitReturns, takeHomeNow } from './chits.js';
+import { getPref, setPref } from '../core/prefs.js';
+import { readQuery, setQuery } from '../core/route.js';
 
 const FD_RATE = 7;   // the yardstick for "is waiting worth it"
 
@@ -61,6 +66,9 @@ export async function renderChitOutlook(body, toolbar) {
                 actions: legend([{ label: 'Installments due', color: 'var(--series-4)' }, { label: 'Maturity payouts', color: 'var(--series-3)' }]), body: '<div class="chart" id="co-flow"></div>' })}
         </div>
 
+        ${panel({ title: 'Earnings month by month', iconName: 'coins', cls: 'co-earn-panel', bodyClass: 'flush',
+            sub: 'interest and dividends, earned and projected', actions: '<div class="co-earn-tools" data-earn-tools></div>', body: '<div data-earn></div>' })}
+
         ${panel({ title: 'Wait or lift · chit by chit', iconName: 'scale', cls: 'co-cards-panel', bodyClass: 'flush',
             sub: `holding is compared with a ${FD_RATE}% fixed deposit`,
             body: `<div class="co-cards">${open.map(cardHtml).join('') || emptyState('No running chits', 'chit')}</div>` })}
@@ -71,6 +79,7 @@ export async function renderChitOutlook(body, toolbar) {
         </div>`;
 
     drawCharts(body, items, span);
+    mountEarnings(body, items);
     bindExport(body.querySelector('.co-runway-panel'), () => ({
         title: 'Chit outlook', subtitle: `${open.length} running chits · expected gain ${money(Math.round(expected))}`, filename: `chit-outlook-${today}`,
         summary: [['Expected gain', Math.round(expected)], ['Realised so far', Math.round(realised)], ['Earning now / month', Math.round(perMonthNow)],
@@ -267,4 +276,103 @@ function drawCharts(body, items, span) {
     const payouts = ahead.map(m => items.filter(x => x.c.payoutAmount === null && x.c.maturityDate.slice(0, 7) === m).reduce((s, x) => s + Number(x.c.maturityAmount), 0));
     barChart(body.querySelector('#co-flow'), { labels: ahead, labelFormat: monthLabel, format: moneyShort,
         series: [{ name: 'Installments due', values: dues, color: 'var(--series-4)' }, { name: 'Maturity payouts', values: payouts, color: 'var(--series-3)' }] });
+}
+
+// ===================================================================== earnings month by month
+
+const EARN_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
+
+/** Each chit's earnings by month: interest by the month it is reckoned, dividends by the month the installment is paid. */
+function earningsByMonth(items) {
+    const months = new Map();
+    const at = m => { if (!months.has(m)) months.set(m, { month: m, chits: new Map(), interest: 0, dividends: 0 }); return months.get(m); };
+    const thisMonth = isoDate().slice(0, 7);
+    items.forEach((x, k) => {
+        const paid = x.detail.installments.filter(i => i.status === 'PAID' && i.dividend !== null);
+        const avgDiv = paid.length ? paid.reduce((s, i) => s + Number(i.dividend), 0) / paid.length : 0;
+        const add = (m, kind, v) => {
+            if (!v) return;
+            const b = at(m);
+            const cur = b.chits.get(k) || { interest: 0, dividends: 0 };
+            cur[kind] += v;
+            b.chits.set(k, cur);
+            b[kind] += v;
+        };
+        x.detail.interestSchedule.filter(r => r.status !== 'AFTER_PAYOUT').forEach(r => add(r.interestDate.slice(0, 7), 'interest', Number(r.compoundInterest)));
+        x.detail.installments.forEach(i => {
+            if (i.status === 'PAID') add((i.paidDate || i.dueDate).slice(0, 7), 'dividends', Number(i.dividend || 0));
+            else if (x.c.payoutAmount === null) add(i.dueDate.slice(0, 7), 'dividends', avgDiv);
+        });
+    });
+    const list = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
+    let run = 0;
+    list.forEach(b => { b.total = b.interest + b.dividends; run += b.total; b.running = run; b.state = b.month < thisMonth ? 'past' : b.month === thisMonth ? 'now' : 'ahead'; });
+    return list;
+}
+
+function mountEarnings(body, items) {
+    const all = earningsByMonth(items);
+    const host = body.querySelector('[data-earn]');
+    const tools = body.querySelector('[data-earn-tools]');
+    if (!all.length) { host.innerHTML = emptyState('No earnings yet', 'coins'); return; }
+    const prefs = getPref('chitEarnings', { range: 'next12', by: 'chit' });
+    if (readQuery().get('range')) prefs.range = readQuery().get('range');   // #/forecast/chits?range=all&by=kind
+    if (readQuery().get('by')) prefs.by = readQuery().get('by');
+    const thisMonth = isoDate().slice(0, 7);
+    const named = items.map((x, k) => ({ k, name: x.c.name, color: EARN_COLORS[k % EARN_COLORS.length] }));
+    const sum = (list, f) => list.reduce((t, b) => t + f(b), 0);
+    const ofChit = (b, k) => { const v = b.chits.get(k); return v ? v.interest + v.dividends : 0; };
+    const draw = () => {
+        const rows = prefs.range === 'past12' ? all.filter(b => b.month <= thisMonth).slice(-12)
+            : prefs.range === 'next12' ? all.filter(b => b.month >= thisMonth).slice(0, 12) : all;
+        const shown = named.filter(n => rows.some(b => b.chits.has(n.k)));
+        const earned = sum(all.filter(b => b.month < thisMonth), b => b.total);
+        const now = all.find(b => b.month === thisMonth);
+        const next12 = sum(all.filter(b => b.month > thisMonth).slice(0, 12), b => b.total);
+        const toCome = sum(all.filter(b => b.month > thisMonth), b => b.total);
+        const best = rows.reduce((m, b) => (!m || b.total > m.total ? b : m), null);
+        const chip = (attr, cur, list) => `<span class="seg-chips sm">${list.map(([k, l]) => `<button type="button" class="seg-chip ${cur === k ? 'active' : ''}" ${attr}="${k}">${l}</button>`).join('')}</span>`;
+        tools.innerHTML = chip('data-earn-range', prefs.range, [['past12', 'Last 12 months'], ['next12', 'Next 12 months'], ['all', 'Whole life']])
+            + chip('data-earn-by', prefs.by, [['chit', 'By chit'], ['kind', 'By kind']]);
+        host.innerHTML = `
+            <div class="co-earn-sum">
+                <div><small>Earned so far</small><b class="pos">${money(Math.round(earned))}</b><span>before ${monthLabel(thisMonth)}</span></div>
+                <div class="now"><small>This month</small><b>${money(Math.round(now?.total || 0))}</b><span>${now ? `${moneyShort(now.interest)} interest · ${moneyShort(now.dividends)} dividends` : 'nothing reckoned'}</span></div>
+                <div><small>Next 12 months</small><b>${money(Math.round(next12))}</b><span>about ${money(Math.round(next12 / 12))} a month</span></div>
+                <div><small>Still to come</small><b>${money(Math.round(toCome))}</b><span>to the last maturity</span></div>
+                <div><small>Best month shown</small><b>${best ? money(Math.round(best.total)) : '—'}</b><span>${best ? monthLabel(best.month) : ''}</span></div>
+            </div>
+            <div class="co-earn">
+                <div class="co-earn-chart">
+                    <div class="chart" id="co-earn-chart"></div>
+                    ${legend(prefs.by === 'chit' ? shown.map(n => ({ label: n.name, color: n.color })) : [{ label: 'Interest', color: 'var(--series-1)' }, { label: 'Dividends', color: 'var(--series-3)' }])}
+                    <p class="co-earn-note">${icon('info')}Interest: each chit's interest schedule, in the month it is reckoned. Dividends: in the month the installment is paid; for installments to come, the chit's average dividend so far. Months to come are projected.</p>
+                </div>
+                <div class="co-earn-table scroll"><table class="grid compact dense">
+                    <thead><tr><th>Month</th>${shown.map(n => `<th class="r" title="${esc(n.name)}"><i class="co-dot" style="background:${n.color}"></i>${esc(n.name.length > 14 ? n.name.slice(0, 13) + '…' : n.name)}</th>`).join('')}
+                        <th class="r">Interest</th><th class="r">Dividends</th><th class="r">Total</th><th class="r">Running</th></tr></thead>
+                    <tbody>${rows.map(b => `<tr class="co-earn-${b.state}"><td><b>${monthLabel(b.month)}</b>${b.state === 'now' ? ' <span class="tag info">now</span>' : b.state === 'ahead' ? ' <small class="muted">proj.</small>' : ''}</td>
+                        ${shown.map(n => `<td class="r">${ofChit(b, n.k) ? money(Math.round(ofChit(b, n.k))) : '<span class="muted">—</span>'}</td>`).join('')}
+                        <td class="r">${money(Math.round(b.interest))}</td><td class="r">${b.dividends ? money(Math.round(b.dividends)) : '<span class="muted">—</span>'}</td>
+                        <td class="r"><b class="pos">${money(Math.round(b.total))}</b></td><td class="r muted">${moneyShort(b.running)}</td></tr>`).join('')}</tbody>
+                    <tfoot><tr class="total"><td>Shown</td>${shown.map(n => `<td class="r">${money(Math.round(sum(rows, b => ofChit(b, n.k))))}</td>`).join('')}
+                        <td class="r">${money(Math.round(sum(rows, b => b.interest)))}</td><td class="r">${money(Math.round(sum(rows, b => b.dividends)))}</td>
+                        <td class="r"><b>${money(Math.round(sum(rows, b => b.total)))}</b></td><td></td></tr></tfoot>
+                </table></div>
+            </div>`;
+        const series = prefs.by === 'chit'
+            ? shown.map(n => ({ name: n.name, color: n.color, values: rows.map(b => Math.round(ofChit(b, n.k))) }))
+            : [{ name: 'Interest', color: 'var(--series-1)', values: rows.map(b => Math.round(b.interest)) }, { name: 'Dividends', color: 'var(--series-3)', values: rows.map(b => Math.round(b.dividends)) }];
+        barChart(host.querySelector('#co-earn-chart'), { labels: rows.map(b => b.month), labelFormat: monthLabel, format: moneyShort, stacked: true, series });
+    };
+    draw();
+    tools.addEventListener('click', e => {
+        const r = e.target.closest('[data-earn-range]'), b = e.target.closest('[data-earn-by]');
+        if (r) prefs.range = r.dataset.earnRange;
+        else if (b) prefs.by = b.dataset.earnBy;
+        else return;
+        setQuery({ range: prefs.range, by: prefs.by });
+        setPref('chitEarnings', prefs);
+        draw();
+    });
 }

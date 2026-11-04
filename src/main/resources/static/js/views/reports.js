@@ -126,7 +126,7 @@ export async function render(container, params, isCurrent) {
                          'cash-flow': cashFlow, 'expense-analysis': expenseAnalysis, emi: emiReport, 'deep-analysis': deepAnalysis, 'investment-plan': investmentPlan }[active.key];
         // a report's own tab and side panel (#/reports/deep-analysis?…&tab=trend) stay when only the period changes
         const keep = {};
-        if (currentPath() === `reports/${active.key}`) ['tab', 'side'].forEach(k => { if (readQuery().get(k)) keep[k] = readQuery().get(k); });
+        if (currentPath() === `reports/${active.key}`) ['tab', 'side', 'closed', 'rate', 'risk', 'age', 'horizon', 'goal', 'alt'].forEach(k => { if (readQuery().get(k)) keep[k] = readQuery().get(k); });
         if (isCurrent()) showRoute(routeHash(`reports/${active.key}`, ownToolbar || periodless ? keep : usesAsOf ? { asOf: period.asOf, ...keep } : { from: period.from, to: period.to, ...keep }));
         exportRows = await drawer(content, toolbar, period);
     };

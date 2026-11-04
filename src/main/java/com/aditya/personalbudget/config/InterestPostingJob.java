@@ -6,6 +6,7 @@ import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.repository.OrganizationRepository;
 import com.aditya.personalbudget.security.CurrentUser;
 import com.aditya.personalbudget.security.UserContext;
+import com.aditya.personalbudget.service.BankInterestService;
 import com.aditya.personalbudget.service.ClaimService;
 import com.aditya.personalbudget.service.EmiService;
 import com.aditya.personalbudget.storage.TsvDataStore;
@@ -20,7 +21,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Posts each finished month of interest on money lent or owed that asks for it ("post interest every month"),
- * and the EMIs that fell due on plans that book themselves, at startup and every night shortly after midnight. Entries are created by "system".
+ * the EMIs that fell due on plans that book themselves, and the finished periods of interest on bank accounts that post
+ * by themselves, at startup and every night shortly after midnight. Entries are created by "system".
  */
 @Component
 @EnableScheduling
@@ -32,9 +34,11 @@ public class InterestPostingJob implements ApplicationRunner {
     private final OrganizationRepository tenants;
     private final ClaimService claims;
     private final EmiService emis;
+    private final BankInterestService bankInterest;
     private final TsvDataStore store;
 
-    public InterestPostingJob(OrganizationRepository tenants, ClaimService claims, EmiService emis, TsvDataStore store) {
+    public InterestPostingJob(OrganizationRepository tenants, ClaimService claims, EmiService emis, BankInterestService bankInterest, TsvDataStore store) {
+        this.bankInterest = bankInterest;
         this.store = store;
         this.tenants = tenants;
         this.claims = claims;
@@ -81,6 +85,14 @@ public class InterestPostingJob implements ApplicationRunner {
                 }
             } catch (RuntimeException e) {
                 log.warn("Organization {}: could not post monthly interest: {}", tenant.getCode(), e.getMessage());
+            }
+            try {
+                int periods = bankInterest.postDueForAll();
+                if (periods > 0) {
+                    log.info("Organization {}: posted {} period(s) of bank interest", tenant.getCode(), periods);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Organization {}: could not post bank interest: {}", tenant.getCode(), e.getMessage());
             }
             try {
                 int emiCount = emis.postDueForAll();

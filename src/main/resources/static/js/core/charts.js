@@ -126,25 +126,39 @@ function barPath(x, width, y0, y1) {
  * Grouped vertical bars.
  * config: { labels: string[], series: [{ name, values, color? }], format: v => string, labelFormat? }
  */
-export function barChart(el, { labels, series, format, labelFormat = l => l }) {
+/** Bars, grouped side by side; stacked: one bar a label, the series on top of each other (positives up, negatives down). */
+export function barChart(el, { labels, series, format, labelFormat = l => l, stacked = false }) {
     mount(el, (W, H) => {
         const pad = { top: 10, right: 6, bottom: 22, left: 54 };
-        const all = series.flatMap(s => s.values.map(Number));
+        const all = stacked
+            ? labels.flatMap((_, i) => [series.reduce((t, s) => t + Math.max(0, Number(s.values[i] || 0)), 0), series.reduce((t, s) => t + Math.min(0, Number(s.values[i] || 0)), 0)])
+            : series.flatMap(s => s.values.map(Number));
         const [min, max] = extent(all);
         const ticks = niceTicks(min, max);
         const lo = ticks[0], hi = ticks[ticks.length - 1];
         const plotW = W - pad.left - pad.right;
         const plotH = H - pad.top - pad.bottom;
         const y = v => pad.top + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
-        const band = plotW / labels.length;
-        const groupW = Math.min(band * 0.72, series.length * 26);
+        const band = Math.max(0, plotW) / labels.length;
+        const groupW = stacked ? Math.min(band * 0.72, 34) : Math.min(band * 0.72, series.length * 26);
         const gap = 2;
-        const barW = Math.max(2, (groupW - gap * (series.length - 1)) / series.length);
+        const barW = stacked ? Math.max(2, groupW) : Math.max(2, (groupW - gap * (series.length - 1)) / series.length);
         const step = labelStep(labels.length, plotW);
 
         let marks = '';
         labels.forEach((label, i) => {
             const gx = pad.left + band * i + (band - groupW) / 2;
+            if (stacked) {
+                let up = 0, down = 0;
+                series.forEach((s, k) => {
+                    const v = Number(s.values[i] || 0);
+                    if (!v) return;
+                    const from = v > 0 ? up : down, to = from + v;
+                    if (v > 0) up = to; else down = to;
+                    marks += `<rect class="mark bar" data-i="${i}" x="${gx}" y="${Math.min(y(from), y(to))}" width="${barW}" height="${Math.max(0.5, Math.abs(y(to) - y(from)))}" style="fill:${s.color || seriesColor(k)};--i:${i}"/>`;
+                });
+                return;
+            }
             series.forEach((s, k) => {
                 const v = Number(s.values[i] || 0);
                 const color = s.color || seriesColor(k);

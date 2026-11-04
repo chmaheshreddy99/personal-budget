@@ -67,6 +67,8 @@ export function analysePlan(p, rate) {
 
 export async function emiReport(content, toolbar) {
     const prefs = getPref('emiReport', { rate: 6.5, closed: false, tab: 'nocost' });
+    if (readQuery().has('closed')) prefs.closed = readQuery().get('closed') === '1';   // #/reports/emi?closed=1&rate=7
+    if (Number(readQuery().get('rate')) > 0) prefs.rate = Number(readQuery().get('rate'));
     const asked = readQuery().get('tab');   // #/reports/emi?tab=mine; without it the tab last used
     const tab = asked === 'mine' || (!asked && prefs.tab === 'mine') ? 'mine' : 'nocost';
     setQuery({ tab: tab === 'mine' ? 'mine' : null, side: tab === 'mine' ? null : readQuery().get('side') });
@@ -90,6 +92,8 @@ export async function emiReport(content, toolbar) {
         redraw();
     }));
     toolbar.querySelector('.emi-controls').classList.toggle('muted-controls', false);
+    toolbar.querySelector('#emi-rate').addEventListener('change', e => { setQuery({ rate: Math.max(0, Number(e.target.value) || 0) || null }); setPref('emiReport', { ...prefs, rate: Math.max(0, Number(e.target.value) || 0) }); redraw(); });
+    toolbar.querySelector('#emi-closed').addEventListener('change', e => { setPref('emiReport', { ...prefs, closed: e.target.checked }); setQuery({ closed: e.target.checked ? '1' : '0' }); redraw(); });
     if (tab === 'nocost') {
         // the checker fills the window: the offer, the verdict, the month-by-month table and the charts, each scrolling in its own panel
         content.className = 'report-content nc-page';
@@ -103,8 +107,6 @@ export async function emiReport(content, toolbar) {
         return () => [];
     }
     content.className = 'report-content emi-mine';
-    toolbar.querySelector('#emi-rate').addEventListener('change', e => { setPref('emiReport', { ...prefs, rate: Math.max(0, Number(e.target.value) || 0) }); redraw(); });
-    toolbar.querySelector('#emi-closed').addEventListener('change', e => { setPref('emiReport', { ...prefs, closed: e.target.checked }); redraw(); });
 
     if (!plans.length) {
         content.innerHTML = `${tabbar}${emptyState('Nothing bought on EMI yet. Add a purchase on EMI in Expenses to see whether it pays.', 'calendar')}`;

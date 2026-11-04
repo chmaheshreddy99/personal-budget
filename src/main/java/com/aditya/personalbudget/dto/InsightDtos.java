@@ -70,10 +70,27 @@ public final class InsightDtos {
             BigDecimal transfersIn,
             BigDecimal netCashFlow,
             BigDecimal liquidClosing,
-            BigDecimal netWorth) {
+            BigDecimal netWorth,
+            /* the income: from recurring income items, and from the recorded income taken as the basis says */
+            BigDecimal incomeRecurring,
+            BigDecimal incomeRecorded,
+            /* the month's expenses by category, largest first (before the what-if) */
+            List<ExpenseLine> expenseLines) {
     }
 
-    public record CategoryForecast(Long accountId, String name, String basis, BigDecimal monthlyAmount) {
+    /**
+     * One category's expense in a month. basis: BUDGET (that month's own budget), BUDGET_AVG (the average of the months
+     * budgeted), HISTORY (the 3-month average), RECURRING (a larger recurring expense).
+     */
+    public record ExpenseLine(Long categoryId, String name, BigDecimal amount, String basis) {
+    }
+
+    /**
+     * budgetMonths: the months with a budget for the category (their average is the amount a month when a month has
+     * none of its own); historyAverage: what was spent a month over the last 3 months, for comparison.
+     */
+    public record CategoryForecast(Long accountId, String name, String basis, BigDecimal monthlyAmount, int budgetMonths,
+                                   BigDecimal historyAverage) {
     }
 
     public record ForecastEvent(LocalDate date, String kind, String title, BigDecimal amount) {
@@ -94,6 +111,18 @@ public final class InsightDtos {
             List<ForecastMonth> rows,
             List<CategoryForecast> categories,
             List<ForecastEvent> events,
-            List<String> assumptions) {
+            List<String> assumptions,
+            /* which recorded income is projected: REGULAR, UNMARKED (and income not marked), ALL (and one-time), NONE */
+            String incomeBasis,
+            /* recorded income a month (last 3 months, sources without a recurring item; not chit gains or interest) */
+            BigDecimal regularIncome,
+            BigDecimal unmarkedIncome,
+            BigDecimal oneTimeIncome,
+            /* recurring income items in a full month */
+            BigDecimal recurringIncome,
+            /* how expenses are projected: BUDGET (budgets only) or BUDGET_HISTORY (and the 3-month average of the rest) */
+            String expenseBasis,
+            /* spent a month (3-month average) in categories without a budget: left out under BUDGET */
+            BigDecimal unbudgetedSpend) {
     }
 }

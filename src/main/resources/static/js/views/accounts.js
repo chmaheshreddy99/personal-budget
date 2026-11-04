@@ -3,11 +3,12 @@
  * with its largest parts), beside it the money signals as cards with a small meter each (safety net, this
  * month, debt load, interest, card usage, invested, owed, maturing, idle money); the account list on the left
  * (search, ↑ / ↓ to move; each row with its 6-month trend), and for the selected account a branded banner,
- * metrics and its statement (named for the kind of account) shown as a plain list or as a timeline.
+ * metrics and its statement (named for the kind of account) shown as a plain list or as a timeline; a bank account
+ * also has its average balances and interest (bank-interest.js).
  */
 import { api } from '../core/api.js';
 import { loadAccounts, can, state, hasFeature } from '../core/store.js';
-import { panel, esc, field, readForm, openModal, toast, confirmDialog, accountChip, emptyState, loading, table, listTotalRow, totalsToggle } from '../core/ui.js';
+import { panel, esc, field, readForm, openModal, routeNextDialog, dialogOpen, toast, confirmDialog, accountChip, emptyState, loading, table, listTotalRow, totalsToggle } from '../core/ui.js';
 import { kindChip, entryKind, projectTag } from '../core/entry-kind.js';
 import { exportButton, bindExport } from '../core/export.js';
 import { icon, accountTypeIcon } from '../core/icons.js';
@@ -15,7 +16,7 @@ import { money, moneyShort, date, shortDate, shortDateYear, percent, firstOfMont
 import { chitStatus, chitTrailHtml, hasChitStatus, shortNarration, shortAccount, chitCodeOf } from '../core/chit-trail.js';
 import { openQuickEntry } from '../components/transaction-forms.js';
 import { toggleEntryRow, focusEntryRow } from '../components/entry-inline.js';
-import { showRoute, routeHash, fromAddress } from '../core/route.js';
+import { showRoute, routeHash, fromAddress, readQuery } from '../core/route.js';
 import { claimContextHtml, claimBadge, reminderText } from '../components/claim-panel.js';
 import { openExpenseDialog } from '../components/expense-dialog.js';
 import { openDebtDialog } from '../components/debt-dialog.js';
@@ -24,6 +25,8 @@ import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { sparkline } from '../core/charts.js';
 import { accountIcon, bankLogo } from '../core/bank-logos.js';
+import { mountBankInterest } from './bank-interest.js';
+import { mountCardBills } from './card-bills.js';
 
 const CLASS_TABS = [
     { value: 'ASSET', label: 'Assets' },
@@ -68,8 +71,15 @@ const toneOf = a => BUCKET_TONE[a.bucket] || (a.accountClass === 'INCOME' ? 'gre
 /** The address of what the page shows: the account, the class chip (or EMIs) and its pane. */
 function accountsRoute(push = false) {
     if (!view.selectedId) return;
+    const statement = view.pane === 'ledger';
     showRoute(routeHash(`accounts/${view.selectedId}`, { show: view.emi ? 'EMI' : view.tab === 'ALL' ? null : view.tab,
-        pane: view.pane === 'people' && view.paneAccount === view.selectedId ? 'people' : null }), { push });
+        pane: ['people', 'interest', 'bills'].includes(view.pane) && view.paneAccount === view.selectedId ? view.pane : null,
+        bill: view.pane === 'bills' ? readQuery().get('bill') : null,
+        closed: view.closed,
+        flow: statement && view.flow !== 'all' ? view.flow : null, from: statement && view.from !== firstOfMonth(-5) ? view.from : null, to: statement && view.to !== isoDate() ? view.to : null,
+        q: statement ? view.q : null, timeline: statement && prefs.grouped, by: statement && prefs.grouped && prefs.groupBy !== 'month' ? prefs.groupBy : null,
+        range: view.pane === 'interest' ? readQuery().get('range') : null, rfrom: view.pane === 'interest' ? readQuery().get('rfrom') : null, rto: view.pane === 'interest' ? readQuery().get('rto') : null,
+        dialog: readQuery().get('dialog') }), { push });
 }
 
 export async function render(container, params, isCurrent) {
@@ -80,12 +90,22 @@ export async function render(container, params, isCurrent) {
     if (focusAccount && focusAccount !== view.selectedId || focusEntry) {
         Object.assign(view, { selectedId: focusAccount, search: '', tab: 'ALL', emi: false, flow: 'all', pane: 'ledger', paneAccount: focusAccount, q: '' });
     }
-    // …?show=ASSET (the class chips, or EMI) &pane=people (a receivable's people instead of its statement)
+    // …?show=ASSET (the class chips, or EMI) &pane=people (a receivable's people instead of its statement) or interest (a bank's)
     if (fromAddress(params)) {
         const show = params.query?.get('show');
         view.emi = show === 'EMI';
         view.tab = show && show !== 'EMI' && /^[A-Z_]+$/.test(show) ? show : 'ALL';
-        view.pane = params.query?.get('pane') === 'people' ? 'people' : 'ledger';
+        view.pane = ['people', 'interest', 'bills'].includes(params.query?.get('pane')) ? params.query.get('pane') : 'ledger';
+        const q = params.query;
+        if (q?.toString()) {
+            view.closed = view.closed || q.get('closed') === '1';
+            view.flow = ['open', 'in', 'out'].includes(q.get('flow')) ? q.get('flow') : 'all';
+            view.from = q.get('from') || firstOfMonth(-5);
+            view.to = q.get('to') || isoDate();
+            view.q = q.get('q') || '';
+            if (q.has('timeline')) prefs.grouped = q.get('timeline') === '1';
+            if (q.get('by') === 'party' || q.get('by') === 'month') prefs.groupBy = q.get('by');
+        }
         view.paneAccount = view.selectedId;
     }
     if (focusEntry) {
@@ -352,6 +372,11 @@ function ago(iso) {
 function accountFacts(a) {
     const facts = [];
     const fact = (text, cls = '', title = '') => facts.push(`<span class="fact ${cls}" ${title ? `title="${esc(title)}"` : ''}>${text}</span>`);
+    if (a.cardBill && Number(a.cardBill.outstanding) > 0) {   // the bill to pay comes first
+        const late = a.cardBill.daysToDue < 0;
+        fact(`${moneyShort(a.cardBill.outstanding)} ${late ? 'was due' : 'due'} ${shortDate(a.cardBill.dueDate)}`, late ? 'bad' : a.cardBill.daysToDue <= 5 ? 'warn' : '',
+            `Bill of ${date(a.cardBill.statementDate)}: ${money(a.cardBill.outstanding)} still to pay by ${date(a.cardBill.dueDate)}`);
+    }
     if (a.accountType === 'CREDIT_CARD' && a.creditLimit) {
         const util = Number(a.utilizationPercent || 0);
         fact(`${percent(util, 0)} used`, util > 70 ? 'bad' : util > 30 ? 'warn' : 'good', 'Credit utilization');
@@ -508,11 +533,16 @@ async function drawDetail(target, account, reload, all = []) {
             role: r.writeOff ? (payable ? 'waived' : 'written off') : r.finalPayment ? 'final payment' : `payment ${c.repayments.filter(x => !x.writeOff).indexOf(r) + 1}` }));
         c.postings.forEach(x => entryClaims.set(x.journalEntryId, { claim: c, role: 'interest' }));
     });
-    if (!peopleAccount) view.pane = 'ledger';
+    const bankAccount = account.accountType === 'BANK';
+    const cardAccount = account.accountType === 'CREDIT_CARD';
+    // from one bank to the next it stays on interest, from one card to the next on bills
+    if (!peopleAccount) { if (!(bankAccount && view.pane === 'interest') && !(cardAccount && view.pane === 'bills')) view.pane = 'ledger'; }
     // a receivable / payable opens on its collections (dues) statement, on the items still open whatever their date
     else if (view.paneAccount !== account.id) { view.pane = 'ledger'; view.peopleFilter = 'open'; view.flow = claims.some(c => c.status === 'OPEN' || c.status === 'PARTIAL') ? 'open' : 'all'; }
     else if (view.pane !== 'ledger' && view.pane !== 'people') view.pane = 'people';
     view.paneAccount = account.id;
+    const interestPane = view.pane === 'interest';
+    const billsPane = view.pane === 'bills';
     if (!peopleAccount && view.flow === 'open') view.flow = 'all';
     const isOpen = c => c.status === 'OPEN' || c.status === 'PARTIAL';
     const openClaims = claims.filter(isOpen);
@@ -547,12 +577,16 @@ async function drawDetail(target, account, reload, all = []) {
             <div class="acct-key">${metrics(account, debt, all).join('')}</div>
         </section>
         ${panel({
-            title: view.pane === 'people' ? (oweAccount ? 'Who you owe' : 'Who owes you') : title,
-            iconName: view.pane === 'people' ? (oweAccount ? 'card' : 'hand') : 'list', cls: 'p-ledger', bodyClass: 'flush',
+            title: interestPane ? 'Balance & interest' : billsPane ? 'Bills' : view.pane === 'people' ? (oweAccount ? 'Who you owe' : 'Who owes you') : title,
+            iconName: interestPane ? 'percent' : billsPane ? 'receipt' : view.pane === 'people' ? (oweAccount ? 'card' : 'hand') : 'list', cls: interestPane ? 'p-bank-interest' : billsPane ? 'p-card-bills' : 'p-ledger', bodyClass: 'flush',
             actions: (peopleAccount ? `<div class="seg-chips sm" id="pane-tabs">
                         <button class="seg-chip ${view.pane === 'people' ? 'active' : ''}" data-pane="people">${icon(oweAccount ? 'card' : 'hand')}People<span class="count">${openClaims.length}</span></button>
-                        <button class="seg-chip ${view.pane === 'ledger' ? 'active' : ''}" data-pane="ledger">${icon('list')}${esc(title)}</button></div>` : '')
-                + (view.pane === 'people' ? (can('POST_TRANSACTIONS') ? `<button class="btn sm primary" id="new-claim">${icon('plus')}${oweAccount ? 'Borrowed / bill' : 'Lent / paid for'}</button>` : '') : `
+                        <button class="seg-chip ${view.pane === 'ledger' ? 'active' : ''}" data-pane="ledger">${icon('list')}${esc(title)}</button></div>` : bankAccount ? `<div class="seg-chips sm" id="pane-tabs">
+                        <button class="seg-chip ${view.pane === 'ledger' ? 'active' : ''}" data-pane="ledger">${icon('list')}${esc(title)}</button>
+                        <button class="seg-chip ${interestPane ? 'active' : ''}" data-pane="interest">${icon('percent')}Balance &amp; interest</button></div>` : cardAccount ? `<div class="seg-chips sm" id="pane-tabs">
+                        <button class="seg-chip ${view.pane === 'ledger' ? 'active' : ''}" data-pane="ledger">${icon('list')}${esc(title)}</button>
+                        <button class="seg-chip ${billsPane ? 'active' : ''}" data-pane="bills">${icon('receipt')}Bills</button></div>` : '')
+                + (interestPane || billsPane ? '' : view.pane === 'people' ? (can('POST_TRANSACTIONS') ? `<button class="btn sm primary" id="new-claim">${icon('plus')}${oweAccount ? 'Borrowed / bill' : 'Lent / paid for'}</button>` : '') : `
                       <label class="switch" title="Timeline groups the entries by month or by party, with totals per group">
                         <input type="checkbox" id="timeline-toggle" ${prefs.grouped ? 'checked' : ''}><span></span>Timeline</label>
                       <div class="seg-chips sm" id="group-by" ${prefs.grouped ? '' : 'hidden'}>
@@ -567,7 +601,7 @@ async function drawDetail(target, account, reload, all = []) {
                       <span class="search-box sm ledger-search">${icon('search')}<input id="ledger-q" placeholder="Search… entry no. or #id too" value="${esc(view.q || '')}" data-plain></span>
                       <button class="btn sm ghost icon" id="ledger-clear" title="Clear filters: all entries, last 6 months, no search" ${view.q || view.flow !== 'all' || view.from !== firstOfMonth(-5) || view.to !== isoDate() ? '' : 'hidden'}>${icon('x')}</button>
                       ${totalsToggle()}${exportButton({ label: '' })}`),
-            body: view.pane === 'people' ? `<div class="people-filter seg-chips sm" id="people-filter">${[['open', 'Open', openClaims.length], ['settled', 'Settled', claims.length - openClaims.length], ['all', 'All', claims.length]]
+            body: interestPane ? '<div id="bank-interest"></div>' : billsPane ? '<div id="card-bills"></div>' : view.pane === 'people' ? `<div class="people-filter seg-chips sm" id="people-filter">${[['open', 'Open', openClaims.length], ['settled', 'Settled', claims.length - openClaims.length], ['all', 'All', claims.length]]
                     .map(([k, l, n]) => `<button class="seg-chip ${(view.peopleFilter || 'open') === k ? 'active' : ''}" data-people="${k}">${l}<span class="count">${n}</span></button>`).join('')}
                     <span class="small muted">${(view.peopleFilter || 'open') === 'open' ? 'whatever their date' : ''}</span></div>
                 <div class="scroll" id="people-list">${peopleHtml(claims.filter(c => ({ open: isOpen(c), settled: !isOpen(c), all: true })[view.peopleFilter || 'open']), oweAccount, claims)}</div>`
@@ -575,7 +609,9 @@ async function drawDetail(target, account, reload, all = []) {
         })}`;
 
 
-    target.querySelector('[data-act="edit"]')?.addEventListener('click', () => openAccountForm(account, reload));
+    const openEdit = () => { routeNextDialog('edit-account'); openAccountForm(account, reload); };
+    target.querySelector('[data-act="edit"]')?.addEventListener('click', openEdit);
+    if (readQuery().get('dialog') === 'edit-account' && !dialogOpen() && can('MANAGE_ACCOUNTS')) openEdit();
     bindAccountDetails(target.querySelector('.ab-info'), account);
     target.querySelector('.ab-actions').addEventListener('click', e => {
         const b = e.target.closest('[data-act]');
@@ -598,6 +634,14 @@ async function drawDetail(target, account, reload, all = []) {
         const b = e.target.closest('[data-pane]');
         if (b && b.dataset.pane !== view.pane) { view.pane = b.dataset.pane; accountsRoute(true); drawDetail(target, account, reload, all); }
     });
+    if (interestPane) {
+        await mountBankInterest(target.querySelector('#bank-interest'), account, reload);
+        return;
+    }
+    if (billsPane) {
+        await mountCardBills(target.querySelector('#card-bills'), account, { onEdit: openEdit, onChanged: reload });
+        return;
+    }
     if (view.pane === 'people') {
         target.querySelector('#people-filter')?.addEventListener('click', e => {
             const b = e.target.closest('[data-people]');
@@ -686,6 +730,7 @@ async function drawDetail(target, account, reload, all = []) {
             <span>Closing <b>${money(ledger.closingBalance)}</b></span>
             ${biggest ? `<span class="muted" title="${esc(biggest.narration)}">Largest ${moneyShort(amountOf(biggest))} · ${shortDate(biggest.date)}</span>` : ''}
             <span class="muted">${ledger.rows.length} entries · ${date(ledger.from)} → ${date(ledger.to)}</span>`;
+        accountsRoute();
         if (!prefs.grouped) {
             // the total of the entries listed: what went in, what went out and the net of the two
             const dr = rows.reduce((s, r) => s + Number(r.debit || 0), 0), cr = rows.reduce((s, r) => s + Number(r.credit || 0), 0);
@@ -745,6 +790,7 @@ async function drawDetail(target, account, reload, all = []) {
     const periodHost = target.querySelector('#ledger-period');
     const onPeriod = (from, to) => {
         view.from = from; view.to = to;
+        accountsRoute(true);
         periodHost.innerHTML = periodChips(from, to);
         bindPeriodChips(periodHost, onPeriod);
         loadLedger();
@@ -860,7 +906,12 @@ function metrics(a, debt, all = []) {
     const share = peerTotal ? (Math.max(0, last) / peerTotal) * 100 : 0;
     const rank = [...peers].sort((x, y) => Number(y.balance) - Number(x.balance)).findIndex(x => x.id === a.id) + 1;
     const color = SPARK[toneOf(a)] || SPARK.slate;
+    const bill = a.cardBill;
+    const billTile = !bill ? [] : [tile('receipt', 'Bill payable', money(bill.outstanding, { decimals: 2 }),
+        Number(bill.outstanding) > 0 ? `by ${date(bill.dueDate)} · minimum ${money(bill.minimumDue)}` : `next statement ${date(bill.nextStatementDate)}`,
+        Number(bill.outstanding) > 0 && bill.daysToDue <= 5 ? 'alert' : '', '', 'See it under Bills')];
     const list = [
+        ...billTile,
         tile('arrow-in', debt ? 'Added this month' : 'In this month', money(monthIn),
             `${a.transactionCount} entries in total`, '', bar(monthIn + monthOut ? (monthIn / (monthIn + monthOut)) * 100 : 0), 'The bar: money in against all movement this month'),
         tile('arrow-out', debt ? 'Repaid this month' : 'Out this month', money(monthOut),
@@ -1025,6 +1076,11 @@ export function openAccountForm(account, onSaved, opts = {}) {
             ${field({ label: 'Opening date', name: 'openingDate', type: 'date', value: a.openingDate || isoDate(), attrs: account ? 'readonly tabindex="-1"' : '' })}
             ${field({ label: 'Interest rate % p.a.', name: 'interestRate', type: 'number', value: a.interestRate })}
             ${field({ label: 'Credit limit / sanctioned', name: 'creditLimit', type: 'number', value: a.creditLimit })}
+            ${field({ label: 'Statement date', name: 'billingDay', type: 'number', value: a.cardBill?.billingDay, span: 'acc-card', hint: 'Day of the month the bill is made, as on your statement',
+                      attrs: 'min="1" max="31" step="1" placeholder="e.g. 15"' })}
+            ${field({ label: 'Days to pay', name: 'paymentDueDays', type: 'number', value: a.cardBill?.paymentDueDays ?? 20, span: 'acc-card', hint: 'From the statement date to the due date (usually 18 to 20)',
+                      attrs: 'min="14" max="30" step="1"' })}
+            <p class="hc-note span-3 acc-card" data-card-preview></p>
             ${field({ label: 'Maturity / end date', name: 'maturityDate', type: 'date', value: a.maturityDate })}
             ${field({ label: 'Quantity (g / units)', name: 'quantity', type: 'number', value: a.quantity, hint: 'For gold, silver, shares…' })}
             ${field({ label: 'Description', name: 'description', value: a.description, span: 'span-2' })}
@@ -1041,9 +1097,23 @@ export function openAccountForm(account, onSaved, opts = {}) {
                 m.el.querySelectorAll('.acc-bank, [data-bank].acc-bank-head').forEach(x => {
                     x.hidden = !(t === 'BANK' || t === 'WALLET') || (x.classList.contains('acc-bank-only') && t !== 'BANK');
                 });
+                m.el.querySelectorAll('.acc-card').forEach(x => { x.hidden = t !== 'CREDIT_CARD'; });
             };
             type.addEventListener('change', sync);
             sync();
+            // what the two card fields mean, in dates
+            const preview = m.el.querySelector('[data-card-preview]');
+            const showCycle = () => {
+                const day = Number(m.el.querySelector('[name=billingDay]').value), days = Number(m.el.querySelector('[name=paymentDueDays]').value) || 20;
+                if (!(day >= 1 && day <= 31)) { preview.innerHTML = `${icon('info')}<span>Leave the statement date empty if you do not want this card's bills worked out.</span>`; return; }
+                const now = new Date(`${isoDate()}T00:00:00`);
+                const on = monthsAhead => { const last = new Date(now.getFullYear(), now.getMonth() + monthsAhead + 1, 0).getDate(); return new Date(now.getFullYear(), now.getMonth() + monthsAhead, Math.min(day, last)); };
+                const statement = on(0) >= now ? on(0) : on(1);
+                const due = new Date(statement); due.setDate(due.getDate() + days);
+                preview.innerHTML = `${icon('calendar')}<span>Next statement <b>${date(isoDate(statement))}</b>, payable by <b>${date(isoDate(due))}</b>.</span>`;
+            };
+            m.el.querySelectorAll('[name=billingDay], [name=paymentDueDays]').forEach(x => x.addEventListener('input', showCycle));
+            showCycle();
             if (opts.focusBank) setTimeout(() => m.el.querySelector(a.upiId ? '[name=ifsc]' : '[name=upiId]')?.focus(), 80);
         },
     });

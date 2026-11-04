@@ -19,6 +19,9 @@
     <link rel="stylesheet" href="css/host-chit.css">
     <link rel="stylesheet" href="css/bond.css">
     <link rel="stylesheet" href="css/construction.css">
+    <link rel="stylesheet" href="css/forecast-plus.css">
+    <link rel="stylesheet" href="css/bank-interest.css">
+    <link rel="stylesheet" href="css/card-bills.css">
     <!-- the light brand theme, then phone / tablet layouts (both only override, so desktop logic is untouched) -->
     <link rel="stylesheet" href="css/lite.css">
     <link rel="stylesheet" href="css/glacier.css">
@@ -29,15 +32,32 @@
     <link rel="stylesheet" href="css/polish.css" id="theme-ocean">
     <!-- the Breeze theme: Classic with bolder headers, thin colours in an open expense and live motion; overrides only -->
     <link rel="stylesheet" href="css/breeze.css" id="theme-breeze">
+    <!-- the Pearl theme: Breeze (its sheet stays on), compact and glossy; overrides only -->
+    <link rel="stylesheet" href="css/pearl.css" id="theme-pearl">
     <script>
-        // apply the chosen theme before the first paint (js/core/theme.js): Classic unless Ocean or Breeze was picked
+        // apply the chosen theme before the first paint (js/core/theme.js): Classic unless Ocean, Breeze or Pearl was picked,
+        // or a custom theme (js/core/custom-theme.js): its base theme, then its compiled sheet after every other one
         (function () {
-            var theme = 'classic';
-            try { theme = (JSON.parse(localStorage.getItem('pb.look') || '{}') || {}).theme; } catch (e) { /* storage blocked */ }
-            if (theme !== 'ocean' && theme !== 'breeze') theme = 'classic';
+            var theme = 'classic', custom = null;
+            try {
+                theme = (JSON.parse(localStorage.getItem('pb.look') || '{}') || {}).theme;
+                if (typeof theme === 'string' && theme.indexOf('custom:') === 0) {
+                    custom = JSON.parse(localStorage.getItem('pb.customCss') || 'null');
+                    if (custom && custom.id === theme.slice(7)) theme = custom.base;
+                    else { custom = null; theme = 'classic'; }
+                }
+            } catch (e) { /* storage blocked */ }
+            if (theme !== 'ocean' && theme !== 'breeze' && theme !== 'pearl') theme = 'classic';
+            if (custom && custom.css) {
+                var sheet = document.createElement('style');
+                sheet.id = 'custom-theme';
+                sheet.textContent = custom.css;
+                document.head.appendChild(sheet);
+            }
             document.documentElement.dataset.theme = theme;
             document.getElementById('theme-ocean').disabled = theme !== 'ocean';
-            document.getElementById('theme-breeze').disabled = theme !== 'breeze';
+            document.getElementById('theme-breeze').disabled = theme !== 'breeze' && theme !== 'pearl';   // Pearl is built on Breeze
+            document.getElementById('theme-pearl').disabled = theme !== 'pearl';
         })();
     </script>
 </head>

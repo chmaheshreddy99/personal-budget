@@ -96,7 +96,10 @@ async function renderBudgets(container, isCurrent) {
     const budgeted = summary.lines.filter(l => l.budgetId);
     const committed = budgeted.filter(l => l.committed);
     const ordinary = budgeted.filter(l => !l.committed);
-    const unbudgeted = summary.lines.filter(l => !l.budgetId);
+    // a category the user chose not to budget is no longer offered one; its spending stays in sight, apart
+    const unbudgeted = summary.lines.filter(l => !l.budgetId && !l.budgetIgnored);
+    const ignored = summary.lines.filter(l => !l.budgetId && l.budgetIgnored);
+    const outside = Number(summary.unbudgetedSpent) - Number(summary.ignoredSpent);
     const suggestions = unbudgeted.filter(l => Number(l.averageLast3Months) > 0 || Number(l.spent) > 0);
     const canCopy = manage && summary.previousMonthBudgets > 0 && budgeted.length < summary.previousMonthBudgets;
 
@@ -125,7 +128,7 @@ async function renderBudgets(container, isCurrent) {
                 : `<p>Set a limit per category, or mark payments that must be made (rent, fees, EMIs) as committed.</p>`}
             <div class="row">${manage && suggestions.length ? `<button class="btn" id="suggest-empty">${icon('sparkles')}Suggest from my spending</button>` : ''}
                 ${manage ? `<button class="btn" id="new-empty">${icon('plus')}Set a budget</button>` : ''}</div>
-            ${unbudgeted.length ? `<p class="small muted">${money(summary.unbudgetedSpent)} spent in ${monthName(month)} so far, across ${unbudgeted.length} categories.</p>` : ''}
+            ${unbudgeted.length ? `<p class="small muted">${money(outside)} spent in ${monthName(month)} so far, across ${unbudgeted.length} categories.</p>` : ''}
         </div>`;
         body.querySelector('#copy-empty')?.addEventListener('click', () => copyBudgets(prev, month, false, reload));
         body.querySelector('#suggest-empty')?.addEventListener('click', () => openSuggestions(suggestions, reload));
@@ -150,20 +153,20 @@ async function renderBudgets(container, isCurrent) {
     const ordinarySpent = ordinary.reduce((s, l) => s + Number(l.spent), 0);
     body.innerHTML = `
         ${monthStrip({ summary, committed, unbudgeted, totalLimit, totalSpent, projected, used, pace, isCurrentMonth, freeToSpend, health, committedPaid, ordinarySpent })}
-        ${panel({
-            title: 'Budgets', iconName: 'target', cls: 'p-budget-nav', bodyClass: 'flush',
-            sub: `${budgeted.length} · ${moneyShort(totalLimit)}`,
-            body: `<div class="bn-tools">
-                    <div class="search-box sm">${icon('search')}<input id="bn-q" placeholder="Find a budget…" value="${esc(budgetView.q)}" data-plain></div>
-                    <div class="bn-filters" id="bn-filters">${FILTERS.map(f => {
-                        const n = budgetFilterCount(f.key, summary.lines);
-                        return `<button class="bn-filter ${budgetView.filter === f.key ? 'active' : ''} ${f.key === 'attention' && n ? 'hot' : ''}" data-filter="${f.key}" ${n || f.key === 'all' ? '' : 'disabled'}>${f.label}<i>${n}</i></button>`;
-                    }).join('')}</div>
-                </div>
-                <div class="list bn-list scroll" id="budget-cards">${budgetCards(committed, ordinary, unbudgeted, isCurrentMonth)}</div>
-                <div class="bn-empty" id="bn-empty" hidden>${icon('search')}Nothing matches</div>
-                <div class="bn-foot"><span class="kbd">↑</span><span class="kbd">↓</span> move · <span class="kbd">Enter</span> edit · <span class="kbd">←</span><span class="kbd">→</span> month · <span class="kbd">/</span> find</div>`,
-        })}
+        <aside class="panel lh-list p-budget-nav">
+            <div class="lh-list-head">
+                <div class="lh-title">${icon('target')}<b>Your budgets</b><small>${budgeted.length} · ${moneyShort(totalSpent)} of ${moneyShort(totalLimit)}</small></div>
+                <div class="search-box sm">${icon('search')}<input id="bn-q" placeholder="Find a budget…" value="${esc(budgetView.q)}" data-plain></div>
+                <div class="lh-counts bn-filters" id="bn-filters">${FILTERS.map(f => {
+                    const n = budgetFilterCount(f.key, summary.lines);
+                    // a filter with nothing in it is not offered, unless it is the one in use
+                    return n || f.key === 'all' || budgetView.filter === f.key ? `<button type="button" class="lh-count bn-filter ${f.tone} ${budgetView.filter === f.key ? 'active' : ''}" data-filter="${f.key}"><b>${n}</b>${f.label}</button>` : '';
+                }).join('')}</div>
+            </div>
+            <div class="lh-items bn-list" id="budget-cards">${budgetCards(committed, ordinary, unbudgeted, ignored, isCurrentMonth)}</div>
+            <div class="bn-empty" id="bn-empty" hidden>${icon('search')}Nothing matches</div>
+            <p class="lh-help bn-foot">${icon('keyboard')}<span><span class="kbd">↑</span><span class="kbd">↓</span> move · <span class="kbd">Enter</span> edit · <span class="kbd">←</span><span class="kbd">→</span> month · <span class="kbd">/</span> find</span></p>
+        </aside>
         <div class="budget-main" id="budget-main"></div>
         <aside class="budget-side" id="budget-side"></aside>`;
 
@@ -176,6 +179,9 @@ async function renderBudgets(container, isCurrent) {
     cards.addEventListener('click', e => {
         const set = e.target.closest('[data-set]');
         if (set) { e.stopPropagation(); openBudgetForm(summary.lines.find(l => l.categoryId === Number(set.dataset.set)), reload); return; }
+        const choice = e.target.closest('[data-ignore], [data-unignore]');
+        if (choice) { e.stopPropagation(); setBudgetIgnored(lineOf(Number(choice.dataset.ignore || choice.dataset.unignore)), Boolean(choice.dataset.ignore), reload); return; }
+        if (e.target.closest('[data-show-ignored]')) { budgetView.showIgnored = !budgetView.showIgnored; applyFilter(); showFirstIfHidden(); return; }
         const card = e.target.closest('[data-account]');
         if (card) show(Number(card.dataset.account));
     });
@@ -188,13 +194,19 @@ async function renderBudgets(container, isCurrent) {
         let shown = 0;
         cards.querySelectorAll('[data-account]').forEach(el => {
             const l = lineOf(Number(el.dataset.account));
-            const ok = matchesFilter(budgetView.filter, l) && (!term || l.categoryName.toLowerCase().includes(term));
+            const ok = matchesFilter(budgetView.filter, l) && (!term || l.categoryName.toLowerCase().includes(term))
+                && (!l.budgetIgnored || budgetView.showIgnored || Boolean(term));   // folded unless asked for or searched
             el.hidden = !ok;
             if (ok) shown++;
         });
         cards.querySelectorAll('[data-group]').forEach(h => {
             h.hidden = !cards.querySelector(`[data-account][data-in="${h.dataset.group}"]:not([hidden])`);
         });
+        const foldHead = cards.querySelector('[data-show-ignored]');
+        if (foldHead) {
+            foldHead.hidden = budgetView.filter !== 'all';
+            foldHead.classList.toggle('open', budgetView.showIgnored);
+        }
         body.querySelector('#bn-empty').hidden = shown > 0;
         body.querySelectorAll('#bn-filters [data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === budgetView.filter));
     };
@@ -260,7 +272,7 @@ async function renderBudgets(container, isCurrent) {
 /** Order of urgency within a group. */
 const urgency = l => l.committed ? (PAYMENT[l.paymentStatus]?.rank ?? 9) : (PACE[l.pace]?.rank ?? 9);
 
-function budgetCards(committed, ordinary, unbudgeted, isCurrentMonth) {
+function budgetCards(committed, ordinary, unbudgeted, ignored, isCurrentMonth) {
     const byUrgency = list => [...list].sort((a, b) => urgency(a) - urgency(b) || Number(b.usedPercent) - Number(a.usedPercent));
     const head = (key, iconName, label, count, amount) => `<div class="section-title bn-sep" data-group="${key}">
         <span>${icon(iconName)}${label}<i>${count}</i></span><b>${amount}</b></div>`;
@@ -272,29 +284,35 @@ function budgetCards(committed, ordinary, unbudgeted, isCurrentMonth) {
             `${moneyShort(ordinary.reduce((s, l) => s + Number(l.spent), 0))} / ${moneyShort(ordinary.reduce((s, l) => s + Number(l.monthlyLimit), 0))}`)
             + byUrgency(ordinary).map(l => spendingCard(l, isCurrentMonth)).join('') : ''}
         ${unbudgeted.length ? head('none', 'alert-circle', 'Without a budget', unbudgeted.length, moneyShort(unbudgeted.reduce((s, l) => s + Number(l.spent), 0)))
-            + unbudgeted.map(unbudgetedCard).join('') : ''}`;
+            + unbudgeted.map(unbudgetedCard).join('') : ''}
+        ${ignored.length ? `<button type="button" class="section-title bn-sep bn-fold" data-show-ignored title="Categories you chose not to budget: no budget is suggested for them. Their spending is still counted in your books.">
+            <span>${icon('chevron-right')}Not budgeted by choice<i>${ignored.length}</i></span><b>${moneyShort(ignored.reduce((s, l) => s + Number(l.spent), 0))}</b></button>`
+            + ignored.map(ignoredCard).join('') : ''}`;
 }
 
 /** Left-pane filters; "Attention" is everything over, heading over, ahead of pace, overdue or due soon. */
 const FILTERS = [
-    { key: 'all', label: 'All' },
-    { key: 'attention', label: 'Attention' },
-    { key: 'committed', label: 'Committed' },
-    { key: 'spending', label: 'Spending' },
-    { key: 'none', label: 'No budget' },
+    { key: 'all', label: 'All', tone: 'all' },
+    { key: 'attention', label: 'Attention', tone: 'warn' },
+    { key: 'committed', label: 'Committed', tone: 'info' },
+    { key: 'spending', label: 'Spending', tone: 'good' },
+    { key: 'none', label: 'No budget', tone: 'all' },
 ];
 const needsAttention = l => !!l.budgetId && (l.committed ? ['OVERDUE', 'DUE_SOON'].includes(l.paymentStatus) : ['OVER', 'HEADING_OVER', 'AHEAD_OF_PACE'].includes(l.pace));
 function matchesFilter(key, l) {
     if (!l) return false;
     return key === 'attention' ? needsAttention(l) : key === 'committed' ? !!(l.budgetId && l.committed)
-        : key === 'spending' ? !!(l.budgetId && !l.committed) : key === 'none' ? !l.budgetId : true;
+        : key === 'spending' ? !!(l.budgetId && !l.committed) : key === 'none' ? !l.budgetId && !l.budgetIgnored : true;
 }
 const budgetFilterCount = (key, lines) => lines.filter(l => matchesFilter(key, l)).length;
 
 /** Tone of a row: the left accent, the status colour and the bar. */
 const TONE_CLASS = { over: 'bad', warning: 'warn', ahead: 'info', good: 'good', gray: 'idle' };
 
-/** One budget as a compact row (like the Reports list): icon, name and amount, status and what is left, a slim bar. */
+/** Its status as a pill, in the tone of the card. */
+const statusPill = (tone, iconName, label) => `<span class="lh-verdict ${TONE_CLASS[tone] || 'idle'}">${icon(iconName)}${label}</span>`;
+
+/** One budget as a card (as in Lift or hold, a little shorter): icon, name and status, the amounts and what is left, a bar. */
 function spendingCard(l, isCurrentMonth) {
     const { name: iconName, tone } = categoryIcon(l.categoryName);
     const p = PACE[l.pace] || PACE.ON_TRACK;
@@ -306,18 +324,18 @@ function spendingCard(l, isCurrentMonth) {
     const avg = Number(l.averageLast3Months);
     const vsAvg = avg ? ((Number(l.spent) - avg) / avg) * 100 : null;
     return `
-    <div class="list-item clickable bn-item t-${TONE_CLASS[p.tone] || 'idle'} ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" data-account="${l.categoryId}" data-in="spending"
+    <div class="lh-item bn-card t-${TONE_CLASS[p.tone] || 'idle'} ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" role="button" tabindex="-1" data-account="${l.categoryId}" data-in="spending"
         title="${esc(l.insight || '')}">
         <span class="chip-icon sm ${tone}">${icon(iconName)}</span>
-        <div class="grow">
-            <div class="bn-row"><span class="title">${esc(l.categoryName)}</span><b class="bn-amt ${over ? 'neg' : ''}">${moneyShort(l.spent)}<small> / ${moneyShort(limit)}</small></b></div>
-            <div class="bn-row meta"><span class="bn-status">${icon(p.iconName)}${p.label}</span>
+        <span class="lh-item-main">
+            <span class="lh-item-top"><b>${esc(l.categoryName)}</b>${statusPill(p.tone, p.iconName, p.label)}</span>
+            <span class="bn-figures"><b class="bn-amt ${over ? 'neg' : ''}">${moneyShort(l.spent)}<small> / ${moneyShort(limit)}</small></b>
                 ${vsAvg !== null && Math.abs(vsAvg) >= 15 ? `<span class="bn-delta ${vsAvg > 0 ? 'up' : 'down'}" title="Against the 3-month average (${money(Math.round(avg))})">${vsAvg > 0 ? '▲' : '▼'}${percent(Math.abs(vsAvg), 0)}</span>` : ''}
-                <span class="bn-left ${over ? 'neg' : ''}">${over ? `${moneyShort(-l.remaining)} over` : `${moneyShort(l.remaining)} left`}</span></div>
+                <span class="bn-left ${over ? 'neg' : ''}">${over ? `${moneyShort(-l.remaining)} over` : `${moneyShort(l.remaining)} left`}</span></span>
             <i class="bn-bar"><em style="width:${Math.min(used, 100)}%"></em>${isCurrentMonth && proj > Number(l.spent)
                 ? `<s style="left:${Math.min(used, 100)}%;width:${Math.max(0, Math.min(proj / limit * 100, 100) - Math.min(used, 100))}%" title="Projected ${money(proj)}"></s>` : ''}${isCurrentMonth
                 ? `<u style="left:${Math.min(expected, 100)}%" title="Where the plan says you should be today"></u>` : ''}</i>
-        </div>
+        </span>
     </div>`;
 }
 
@@ -329,14 +347,14 @@ function committedCard(l) {
     const when = l.paymentStatus === 'PAID' ? `paid ${shortDate(l.paidOn)}`
         : l.dueDate ? `due ${shortDate(l.dueDate)}${due !== null && due >= 0 ? ` · ${due === 0 ? 'today' : `in ${due}d`}` : ''}` : 'by month end';
     return `
-    <div class="list-item clickable bn-item committed t-${TONE_CLASS[s.tone] || 'idle'} ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" data-account="${l.categoryId}" data-in="committed"
+    <div class="lh-item bn-card committed t-${TONE_CLASS[s.tone] || 'idle'} ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" role="button" tabindex="-1" data-account="${l.categoryId}" data-in="committed"
         title="${esc(l.insight || '')}">
         <span class="chip-icon sm ${tone}">${icon(iconName)}</span>
-        <div class="grow">
-            <div class="bn-row"><span class="title">${esc(l.categoryName)}<span class="lock" title="Committed payment">${icon('lock')}</span></span><b class="bn-amt">${moneyShort(l.monthlyLimit)}</b></div>
-            <div class="bn-row meta"><span class="bn-status">${icon(s.iconName)}${s.label}</span><span class="bn-left">${when}</span></div>
+        <span class="lh-item-main">
+            <span class="lh-item-top"><b>${esc(l.categoryName)}</b><span class="lock" title="Committed payment">${icon('lock')}</span>${statusPill(s.tone, s.iconName, s.label)}</span>
+            <span class="bn-figures"><b class="bn-amt">${moneyShort(l.monthlyLimit)}</b><span class="bn-left">${when}</span></span>
             <i class="bn-bar"><em style="width:${paid}%"></em></i>
-        </div>
+        </span>
     </div>`;
 }
 
@@ -344,14 +362,36 @@ function unbudgetedCard(l) {
     const { name: iconName, tone } = categoryIcon(l.categoryName);
     const avg = Number(l.averageLast3Months);
     return `
-    <div class="list-item clickable bn-item unbudgeted t-idle ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" data-account="${l.categoryId}" data-in="none">
+    <div class="lh-item bn-card unbudgeted t-idle ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" role="button" tabindex="-1" data-account="${l.categoryId}" data-in="none">
         <span class="chip-icon sm ${tone}">${icon(iconName)}</span>
-        <div class="grow">
-            <div class="bn-row"><span class="title">${esc(l.categoryName)}</span><b class="bn-amt">${moneyShort(l.spent)}</b></div>
-            <div class="bn-row meta"><span class="bn-left">no budget${avg ? ` · avg ${moneyShort(avg)}/mo` : ''}</span>
-                ${can('MANAGE_BUDGETS') ? `<button class="bn-set" data-set="${l.categoryId}" title="Set a budget of ${money(suggestedLimit(l))}">${icon('plus')}${moneyShort(suggestedLimit(l))}</button>` : ''}</div>
-        </div>
+        <span class="lh-item-main">
+            <span class="lh-item-top"><b>${esc(l.categoryName)}</b>${can('MANAGE_BUDGETS') ? `<button class="bn-set" data-set="${l.categoryId}" title="Set a budget of ${money(suggestedLimit(l))}">${icon('plus')}${moneyShort(suggestedLimit(l))}</button>
+                <button class="bn-skip" data-ignore="${l.categoryId}" title="Don't suggest a budget for ${esc(l.categoryName)} again">${icon('x')}</button>` : ''}</span>
+            <span class="bn-figures"><b class="bn-amt">${moneyShort(l.spent)}</b><span class="bn-left">no budget${avg ? ` · avg ${moneyShort(avg)}/mo` : ''}</span></span>
+        </span>
     </div>`;
+}
+
+/** A category the user chose not to budget: what it cost, and the way back. */
+function ignoredCard(l) {
+    const { name: iconName, tone } = categoryIcon(l.categoryName);
+    return `
+    <div class="lh-item bn-card unbudgeted ignored t-idle ${l.categoryId === budgetView.selectedId ? 'selected' : ''}" role="button" tabindex="-1" data-account="${l.categoryId}" data-in="ignored">
+        <span class="chip-icon sm ${tone}">${icon(iconName)}</span>
+        <span class="lh-item-main">
+            <span class="lh-item-top"><b>${esc(l.categoryName)}</b>${can('MANAGE_BUDGETS') ? `<button class="bn-set" data-unignore="${l.categoryId}" title="Start suggesting a budget for ${esc(l.categoryName)} again">${icon('undo')}Suggest again</button>` : ''}</span>
+            <span class="bn-figures"><b class="bn-amt">${moneyShort(l.spent)}</b><span class="bn-left">no budget, by choice</span></span>
+        </span>
+    </div>`;
+}
+
+/** Stops or starts suggesting a budget for a category: for every month, until asked otherwise. */
+async function setBudgetIgnored(line, ignored, reload) {
+    try {
+        await api.put(`/budgets/ignored/${line.categoryId}?ignored=${ignored}`, {});
+        toast(ignored ? `No budget will be suggested for ${line.categoryName}. Find it under "Not budgeted by choice".` : `A budget will be suggested for ${line.categoryName} again.`);
+        reload();
+    } catch (error) { toast(error.message, 'error'); }
 }
 
 /**
@@ -401,7 +441,7 @@ function monthStrip({ summary, committed, unbudgeted, totalLimit, totalSpent, pr
             ${committed.length ? stat('Committed due', moneyShort(summary.committedOutstanding), `${committed.filter(l => l.paymentStatus !== 'PAID').length} of ${committed.length} to pay`, Number(summary.committedOutstanding) ? 'attn' : '') : ''}
             ${stat('Free to spend', `<span class="${freeToSpend < 0 ? 'neg' : 'pos'}">${moneyShort(freeToSpend)}</span>`, 'after committed')}
             ${isCurrentMonth && summary.daysLeft ? stat('Safe per day', moneyShort(Math.max(0, freeToSpend) / summary.daysLeft), `for ${summary.daysLeft} days`) : ''}
-            ${stat('No budget', moneyShort(summary.unbudgetedSpent), `${unbudgeted.length} categor${unbudgeted.length === 1 ? 'y' : 'ies'}`, '', 'Spending in categories without a budget')}
+            ${stat('No budget', moneyShort(Number(summary.unbudgetedSpent) - Number(summary.ignoredSpent)), `${unbudgeted.length} categor${unbudgeted.length === 1 ? 'y' : 'ies'}`, '', 'Spending in categories without a budget')}
         </div>
         <div class="bs-score ${scoreTone}" title="Budgets on course (40) · the month against the total budget (30) · months kept within budget (30)">
             ${score !== null ? `<span class="bs-ring" style="--p:${score}"><b>${score}</b></span>` : ''}
@@ -458,8 +498,9 @@ async function drawBudgetDetail(body, line, summary, reload, show, chitPaymentsI
     const expectedPct = limit && line.expectedByToday != null ? Math.min(Number(line.expectedByToday) / limit * 100, 100) : null;
     main.innerHTML = panel({
         title: line.categoryName, iconName: line.committed ? 'lock' : 'receipt', cls: 'p-budget-tx', bodyClass: 'flush',
-        sub: status ? `<span class="pace-chip ${status.tone}">${icon(status.iconName)}${status.label}</span>` : '<span class="muted">no budget</span>',
-        actions: `${manage ? `<button class="btn sm" data-budget-act="edit">${icon(line.budgetId ? 'edit' : 'plus')}${line.budgetId ? 'Edit' : 'Set budget'}</button>` : ''}
+        sub: status ? `<span class="pace-chip ${status.tone}">${icon(status.iconName)}${status.label}</span>` : `<span class="muted">${line.budgetIgnored ? 'no budget, by choice' : 'no budget'}</span>`,
+        actions: `${manage && !line.budgetId ? `<button class="btn sm ghost" data-budget-act="${line.budgetIgnored ? 'unignore' : 'ignore'}" title="${line.budgetIgnored ? 'Start suggesting a budget again' : "This category does not need a budget: stop suggesting one, in every month"}">${icon(line.budgetIgnored ? 'undo' : 'x')}${line.budgetIgnored ? 'Suggest again' : "Don't suggest"}</button>` : ''}
+            ${manage ? `<button class="btn sm" data-budget-act="edit">${icon(line.budgetId ? 'edit' : 'plus')}${line.budgetId ? 'Edit' : 'Set budget'}</button>` : ''}
             ${manage && line.budgetId ? `<button class="btn sm ghost icon danger" data-budget-act="delete" title="Remove budget">${icon('trash')}</button>` : ''}`,
         body: `
             <div class="budget-progress ${status ? `pace-${status.tone}` : ''}">
@@ -508,6 +549,7 @@ async function drawBudgetDetail(body, line, summary, reload, show, chitPaymentsI
     const onClick = async e => {
         const act = e.target.closest('[data-budget-act]');
         if (act?.dataset.budgetAct === 'edit') openBudgetForm(line, reload);
+        if (act?.dataset.budgetAct === 'ignore' || act?.dataset.budgetAct === 'unignore') setBudgetIgnored(line, act.dataset.budgetAct === 'ignore', reload);
         if (act?.dataset.budgetAct === 'delete' && await confirmDialog(`Remove the ${monthName(month)} budget for ${line.categoryName}?`)) {
             await api.del(`/budgets/${line.budgetId}`);
             toast('Budget removed');
@@ -695,7 +737,7 @@ function acrossInsights(history) {
     }
     const leak = history.filter(h => h.month < isoDate().slice(0, 7) && Number(h.totalLimit) > 0);   // months that had budgets
     if (leak.length) {
-        const avgLeak = leak.reduce((s, h) => s + Number(h.unbudgetedSpent || 0), 0) / leak.length;
+        const avgLeak = leak.reduce((s, h) => s + Number(h.unbudgetedSpent || 0) - Number(h.ignoredSpent || 0), 0) / leak.length;
         const total = leak.reduce((s, h) => s + Number(h.totalSpent) + Number(h.unbudgetedSpent || 0), 0) / leak.length;
         if (avgLeak > 0 && total && avgLeak / total > 0.15) tip('warn', 'alert-circle', `About <b>${money(Math.round(avgLeak))}</b> a month (${percent(avgLeak / total * 100, 0)} of spending) goes to categories without a budget.`);
     }
@@ -753,7 +795,7 @@ function budgetInsights(line, rows, byMonth, avgTicket) {
         if (line.paymentStatus === 'PAID' && line.dueDate && line.paidOn && line.paidOn > line.dueDate) tip('warn', 'clock', `Paid ${Math.round((new Date(line.paidOn) - new Date(line.dueDate)) / 86400000)} day(s) after the due date.`);
         if (line.paymentStatus === 'PAID' && line.paidOn && line.dueDate && line.paidOn <= line.dueDate) tip('good', 'check-circle', 'Paid on time this month.');
     } else {
-        if (limit === null && avg) tip('info', 'target', `No budget yet. Your 3-month average is <b>${money(avg)}</b>; a limit of <b>${money(suggestedLimit(line))}</b> would fit.`);
+        if (limit === null && avg && !line.budgetIgnored) tip('info', 'target', `No budget yet. Your 3-month average is <b>${money(avg)}</b>; a limit of <b>${money(suggestedLimit(line))}</b> would fit.`);
         if (avg && spent > avg * 1.2) tip('warn', 'arrow-up', `This month is <b>${percent(((spent - avg) / avg) * 100, 0)}</b> above your 3-month average.`);
         if (limit !== null && avg && avg < limit * 0.6) tip('info', 'piggy', `You usually spend well under this limit (avg ${money(avg)}). Lowering it to ${money(suggestedLimit({ ...line, spent: 0 }))} frees money for savings.`);
         if (line.limitReachedOn) tip('warn', 'calendar', `At the current pace the limit is reached around <b>${shortDate(line.limitReachedOn)}</b>.`);
@@ -780,16 +822,32 @@ function budgetInsights(line, rows, byMonth, avgTicket) {
 
 /** Create budgets for unbudgeted categories in one go, from their 3-month average. */
 function openSuggestions(lines, reload) {
+    let ignoredHere = false;
     openModal({
         title: `Suggested budgets · ${monthName(month)}`, iconName: 'sparkles', size: 'lg',
-        body: `<p class="hint" style="margin:0 0 8px">Based on your last three months, rounded up to the nearest 500. Untick or change any amount.</p>
-            <form><table class="grid compact"><thead><tr><th></th><th>Category</th><th class="r">3-mo avg</th><th class="r">This month</th><th class="r">Monthly limit</th></tr></thead>
+        body: `<p class="hint" style="margin:0 0 8px">Based on your last three months, rounded up to the nearest 500. Untick or change any amount, or ✕ if a category never needs a budget.</p>
+            <form><table class="grid compact"><thead><tr><th></th><th>Category</th><th class="r">3-mo avg</th><th class="r">This month</th><th class="r">Monthly limit</th><th></th></tr></thead>
             <tbody>${lines.map(l => `<tr>
                 <td><input type="checkbox" name="pick-${l.categoryId}" checked></td>
                 <td><b>${esc(l.categoryName)}</b></td>
                 <td class="r">${money(l.averageLast3Months)}</td><td class="r">${money(l.spent)}</td>
                 <td class="r"><input type="number" step="any" class="num" name="limit-${l.categoryId}" value="${suggestedLimit(l)}" style="width:110px" data-plain></td>
+                <td class="r"><button type="button" class="btn sm ghost icon" data-never="${l.categoryId}" title="Don't suggest a budget for ${esc(l.categoryName)} again">${icon('x')}</button></td>
             </tr>`).join('')}</tbody></table></form>`,
+        onOpen: m => m.el.querySelector('form').addEventListener('click', async e => {
+            const never = e.target.closest('[data-never]');
+            if (!never) return;
+            const line = lines.find(l => l.categoryId === Number(never.dataset.never));
+            try {
+                await api.put(`/budgets/ignored/${line.categoryId}?ignored=true`, {});
+                ignoredHere = true;
+                lines = lines.filter(l => l !== line);
+                never.closest('tr').remove();
+                toast(`No budget will be suggested for ${line.categoryName}.`);
+                if (!lines.length) { m.close(); reload(); }
+            } catch (error) { toast(error.message, 'error'); }
+        }),
+        onClose: () => { if (ignoredHere) reload(); },
         actions: [{ label: 'Cancel' }, {
             label: 'Create budgets', kind: 'primary', iconName: 'check',
             onClick: async m => {

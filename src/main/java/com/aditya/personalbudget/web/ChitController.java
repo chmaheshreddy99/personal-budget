@@ -38,6 +38,20 @@ public class ChitController {
         return chits.list();
     }
 
+    /** What lifting each chit gets and costs (Forecast › Lift or hold). */
+    @GetMapping("/lift-terms")
+    @RequiresPermission(Permission.VIEW)
+    public List<com.aditya.personalbudget.dto.ChitDtos.LiftTerms> liftTerms() {
+        return chits.liftTerms();
+    }
+
+    @PutMapping("/{id}/lift-terms")
+    @RequiresPermission(Permission.MANAGE_CHITS)
+    public com.aditya.personalbudget.dto.ChitDtos.LiftTerms saveLiftTerms(@PathVariable Long id,
+                                                                           @Valid @RequestBody com.aditya.personalbudget.dto.ChitDtos.LiftTermsRequest request) {
+        return chits.saveLiftTerms(id, request);
+    }
+
     @GetMapping("/{id}")
     @RequiresPermission(Permission.VIEW)
     public ChitDetail detail(@PathVariable Long id) {

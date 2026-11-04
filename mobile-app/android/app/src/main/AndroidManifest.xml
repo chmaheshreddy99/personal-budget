@@ -4,13 +4,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- bank SMS: offered as expenses to record (only when turned on in the app's settings) -->
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!-- bank SMS (reading, receiving, the notification for a new one) is only in the "sms" edition: src/sms/AndroidManifest.xml -->
+    <!-- the camera: scanning a long bill like a video (asked for when that scan is first used); photos of evidence still go
+         through the camera app -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <!-- the camera app is asked through an intent: the app itself needs no camera permission -->
     <queries>
       <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
       <!-- chit instalments paid with Google Pay or PhonePe (a upi://pay link opened in that app) -->
@@ -49,13 +47,11 @@
         android:grantUriPermissions="true">
         <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
       </provider>
-      <receiver
-        android:name=".bridge.SmsReceiver"
-        android:exported="true"
-        android:permission="android.permission.BROADCAST_SMS">
-        <intent-filter>
-          <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-        </intent-filter>
-      </receiver>
+      <!-- scanning a long bill like a video: the camera reads it as it moves down (not reachable from other apps) -->
+      <activity
+        android:name=".bridge.LiveScanActivity"
+        android:exported="false"
+        android:screenOrientation="portrait"
+        android:theme="@style/AppTheme" />
     </application>
 </manifest>

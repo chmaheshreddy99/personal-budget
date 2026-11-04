@@ -4,6 +4,7 @@ import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.Chit;
 import com.aditya.personalbudget.domain.entity.ChitInstallment;
 import com.aditya.personalbudget.domain.entity.Claim;
+import com.aditya.personalbudget.domain.entity.BankInterestPosting;
 import com.aditya.personalbudget.domain.entity.ClaimInterestPosting;
 import com.aditya.personalbudget.domain.entity.ClaimRepayment;
 import com.aditya.personalbudget.domain.entity.ConstructionCapital;
@@ -74,6 +75,7 @@ public class LedgerIntegrityService {
             Map.entry(LedgerService.SOURCE_CLAIM, Claim.class),
             Map.entry(LedgerService.SOURCE_CLAIM_REPAYMENT, ClaimRepayment.class),
             Map.entry(LedgerService.SOURCE_CLAIM_INTEREST, ClaimInterestPosting.class),
+            Map.entry(LedgerService.SOURCE_BANK_INTEREST, BankInterestPosting.class),
             Map.entry(LedgerService.SOURCE_REFUND, JournalEntry.class),
             Map.entry(LedgerService.SOURCE_REVERSAL, JournalEntry.class),
             Map.entry(EmiService.SOURCE_PURCHASE, EmiPlan.class),

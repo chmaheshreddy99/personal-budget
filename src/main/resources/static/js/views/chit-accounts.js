@@ -22,7 +22,7 @@ import { setPageKeys, listNavigator } from '../core/keys.js';
 import { openEntryDetail } from '../components/transaction-forms.js';
 import { toggleEntryRow } from '../components/entry-inline.js';
 import { getPref, setPref } from '../core/prefs.js';
-import { showRoute, routeHash, readQuery } from '../core/route.js';
+import { showRoute, routeHash, readQuery, setQuery } from '../core/route.js';
 
 /** chit: the chit the page shows (its accounts and the shared ones holding its money), or null for all chits. */
 const view = { selected: null, tab: 'where', range: '3m', chitOnly: true, chit: getPref('chitAccounts', { chit: undefined }).chit };
@@ -79,6 +79,7 @@ export function bindStatsToggle(container) {
         if (!e.target.matches?.('[data-stats-toggle]')) return;
         setPref('hostChitStats', { show: e.target.checked });
         container.querySelector('.hc-page')?.classList.toggle('stats-hidden', !e.target.checked);
+        setQuery({ figures: e.target.checked ? '1' : '0' });
     });
 }
 
@@ -112,13 +113,15 @@ export function moneyAccountOptions(accounts, { chitId = null, chitName = 'This 
 
 /** The address: #/host-chits/accounts?chit=<id|all>&item=<acct:12|transfers>&tab=moves. */
 function caRoute(push = false) {
-    showRoute(routeHash('host-chits/accounts', { chit: view.chit === null ? 'all' : view.chit, item: view.selected, tab: view.tab === 'moves' ? 'moves' : null }), { push });
+    showRoute(routeHash('host-chits/accounts', { chit: view.chit === null ? 'all' : view.chit, item: view.selected, tab: view.tab === 'moves' ? 'moves' : null, range: view.range, figures: readQuery().get('figures') }), { push });
 }
 
 export async function render(container, _params, isCurrent) {
     const q = readQuery();
     if (q.has('chit')) view.chit = q.get('chit') === 'all' ? null : Number(q.get('chit')) || undefined;
     if (q.get('item')) view.selected = q.get('item');
+    if (q.get('range')) view.range = q.get('range');
+    if (q.has('figures')) setPref('hostChitStats', { show: q.get('figures') === '1' });
     if (q.has('chit') || q.has('item')) view.tab = q.get('tab') === 'moves' ? 'moves' : 'statement';
     // coming from Chits the page stays on screen until this one is drawn (no spinner in between)
     if (!container.querySelector('.hc-page')) container.innerHTML = loading();
@@ -466,7 +469,7 @@ async function act(el, { book, accounts, reload }) {
         reload();
     }
     else if (a === 'tab') { view.tab = el.dataset.tab; caRoute(true); reload(); }
-    else if (a === 'range') { view.range = el.dataset.range; reload(); }
+    else if (a === 'range') { view.range = el.dataset.range; caRoute(); reload(); }
     else if (a === 'chit-only') { view.chitOnly = !view.chitOnly; reload(); }
 }
 

@@ -82,8 +82,26 @@ android {
         applicationId "com.personalbudget.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 9
-        versionName "1.8"
+        versionCode 23
+        versionName "2.0.3"
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    // Two editions, the same app (same id and key, so one replaces the other):
+    //   standard  no SMS permission at all: what Google Play Protect looks for in an app installed from an APK
+    //   sms       reads bank SMS and offers them as expenses (Play Protect may warn about it, as it does for any APK that reads SMS)
+    flavorDimensions "edition"
+    productFlavors {
+        standard {
+            dimension "edition"
+            buildConfigField "boolean", "SMS", "false"
+        }
+        sms {
+            dimension "edition"
+            versionNameSuffix "-sms"
+            buildConfigField "boolean", "SMS", "true"
+        }
     }
     // the app's own release key (android/keystore.properties + app/release.keystore, both kept out of git): a release signed with the
     // public React Native debug key is what makes Play Protect call the app risky
@@ -130,6 +148,16 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // bills read on the phone: text recognition (bundled, works offline), the document scanner (Google Play services)
+    // and the camera for scanning a long bill like a video
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    def camerax = "1.4.2"
+    implementation("androidx.camera:camera-core:$camerax")
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

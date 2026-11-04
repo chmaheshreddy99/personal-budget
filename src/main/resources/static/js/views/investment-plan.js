@@ -28,6 +28,11 @@ const fv = (monthly, yearly, years) => { const i = yearly / 1200, n = years * 12
 
 export async function investmentPlan(content, toolbar) {
     const p = { age: 30, risk: 'balanced', horizon: 10, goal: '', alt: 7, ...getPref('investPlan', {}) };
+    // #/reports/investment-plan?risk=growth&age=35&horizon=15&goal=…&alt=7
+    const asked = readQuery();
+    if (asked.get('risk')) p.risk = asked.get('risk');
+    ['age', 'horizon', 'alt'].forEach(k => { if (Number(asked.get(k)) > 0) p[k] = Number(asked.get(k)); });
+    if (asked.has('goal')) p.goal = asked.get('goal');
     content.className = 'report-content da-page';
     const controls = `<div class="ip-controls">
         <label><span>Your age</span><input type="number" id="ip-age" min="18" max="80" value="${p.age}"></label>
@@ -37,8 +42,13 @@ export async function investmentPlan(content, toolbar) {
         <label><span>A goal ₹ <small>optional</small></span><input type="number" id="ip-goal" min="0" step="10000" value="${p.goal}" placeholder="e.g. 5000000"></label>
         <label><span>Deposit rate %</span><input type="number" id="ip-alt" min="0" max="15" step="0.1" value="${p.alt}"></label></div>`;
     const bind = () => {
-        const save = () => { setPref('investPlan', { age: Number(content.querySelector('#ip-age').value) || 30, risk: content.querySelector('#ip-risk').value,
-            horizon: Number(content.querySelector('#ip-horizon').value) || 10, goal: content.querySelector('#ip-goal').value, alt: Number(content.querySelector('#ip-alt').value) || 7 }); investmentPlan(content, toolbar); };
+        const save = () => {
+            const chosen = { age: Number(content.querySelector('#ip-age').value) || 30, risk: content.querySelector('#ip-risk').value,
+                horizon: Number(content.querySelector('#ip-horizon').value) || 10, goal: content.querySelector('#ip-goal').value, alt: Number(content.querySelector('#ip-alt').value) || 7 };
+            setPref('investPlan', chosen);
+            setQuery(chosen);
+            investmentPlan(content, toolbar);
+        };
         content.querySelectorAll('.ip-controls input, .ip-controls select').forEach(el => el.addEventListener('change', save));
     };
     let r;

@@ -38,10 +38,12 @@ import java.util.List;
 public class PlanningController {
 
     private final BudgetService budgets;
+    private final com.aditya.personalbudget.service.CategoryService categories;
     private final RecurringService recurring;
 
-    public PlanningController(BudgetService budgets, RecurringService recurring) {
+    public PlanningController(BudgetService budgets, com.aditya.personalbudget.service.CategoryService categories, RecurringService recurring) {
         this.budgets = budgets;
+        this.categories = categories;
         this.recurring = recurring;
     }
 
@@ -65,6 +67,14 @@ public class PlanningController {
     @RequiresPermission(Permission.MANAGE_BUDGETS)
     public Budget saveBudget(@Valid @RequestBody BudgetRequest request) {
         return budgets.save(request);
+    }
+
+    /** Stops (or starts again) suggesting a budget for an expense category. */
+    @PutMapping("/budgets/ignored/{categoryId}")
+    @RequiresPermission(Permission.MANAGE_BUDGETS)
+    public ResponseEntity<Void> ignoreBudget(@PathVariable Long categoryId, @RequestParam boolean ignored) {
+        categories.setBudgetIgnored(categoryId, ignored);
+        return ResponseEntity.noContent().build();
     }
 
     /** Carries one month's budgets into another (e.g. last month into this month). */

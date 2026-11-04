@@ -2,6 +2,7 @@
  * Small UI toolkit: HTML escaping, panels, tables, forms, modal dialogs, toasts and CSV export.
  * Views build markup with template strings and wire events with delegate().
  */
+import { readQuery, setQuery } from './route.js';
 import { icon, hydrateIcons, accountTypeIcon } from './icons.js';
 import { busyWhile } from './busy.js';
 import { getPref, setPref } from './prefs.js';
@@ -252,7 +253,23 @@ export function toast(message, kind = 'success') {
  * actions: [{ label, kind: 'primary'|'danger'|'', iconName, left, onClick: async (modal) => keepOpen? }]
  * Returns { el, close, setError }.
  */
-export function openModal({ title, sub = '', iconName = 'droplet', body, size = '', actions = [], onOpen }) {
+/**
+ * The next dialog opened has this address: ...?dialog=<name>, so it can be linked to, survives a reload and Back closes it.
+ * Set just before opening it; the page (or app.js, for the dialogs of the whole app) opens it again from the address.
+ */
+let nextDialogRoute = null;
+let nextDialogTimer;
+export function routeNextDialog(name) {
+    nextDialogRoute = name;
+    clearTimeout(nextDialogTimer);
+    nextDialogTimer = setTimeout(() => { nextDialogRoute = null; }, 8000);   // it never came (it could not load)
+}
+/** A dialog is open, or on its way: a page redrawn behind it does not open it again from the address. */
+export const dialogOpen = () => Boolean(nextDialogRoute || document.querySelector('.modal-backdrop'));
+
+export function openModal({ title, sub = '', iconName = 'droplet', body, size = '', actions = [], onOpen, onClose }) {
+    const dialogRoute = nextDialogRoute;
+    nextDialogRoute = null;
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
@@ -273,7 +290,13 @@ export function openModal({ title, sub = '', iconName = 'droplet', body, size = 
 
     const modal = {
         el: backdrop.querySelector('.modal'),
-        close() { backdrop.remove(); document.removeEventListener('keydown', onKey); },
+        close() {
+            backdrop.remove();
+            document.removeEventListener('keydown', onKey);
+            window.removeEventListener('hashchange', onAddress);
+            if (dialogRoute && readQuery().get('dialog') === dialogRoute) setQuery({ dialog: null });
+            onClose?.();
+        },
         setError(message) { backdrop.querySelector('[data-error]').textContent = message || ''; },
     };
 
@@ -294,6 +317,14 @@ export function openModal({ title, sub = '', iconName = 'droplet', body, size = 
         if (event.key === 'Escape' && isTop()) modal.close();
     }
     document.addEventListener('keydown', onKey);
+    // Back (or any other address) closes a dialog that has one
+    function onAddress() {
+        if (dialogRoute && readQuery().get('dialog') !== dialogRoute) modal.close();
+    }
+    if (dialogRoute) {
+        if (readQuery().get('dialog') !== dialogRoute) setQuery({ dialog: dialogRoute }, { push: true });
+        window.addEventListener('hashchange', onAddress);
+    }
     // only the dialog on top reacts to the keyboard (a confirmation can open over another dialog)
     const isTop = () => [...document.querySelectorAll('.modal-backdrop')].pop() === backdrop;
 

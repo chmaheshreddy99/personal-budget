@@ -166,7 +166,22 @@ public class ReportService {
                 liquid, Money.percent(liabilities.total(), assets.total()), Money.percent(liabilities.total(), netWorth),
                 ratio(liquid, shortTerm), ratio(liquid, avgExpense), avgExpense, Money.percent(investments, assets.total()),
                 shortTerm, longTerm, mix(assetRows, chitBook), mix(liabilityRows, chitBook), netWorthTrend(books, asOf),
-                counterparties.breakdown(books, asOf, compareDate, now, before));
+                counterparties.breakdown(books, asOf, compareDate, now, before),
+                assetRows.stream().filter(r -> "Liquid money".equals(bucket(r, chitBook))).map(r -> Money.nz(r.previous())).reduce(Money.ZERO, BigDecimal::add),
+                liquidTrend(books, asOf));
+    }
+
+    /** Liquid money at the last eleven month ends and on {@code asOf}. */
+    private static List<ValuePoint> liquidTrend(LedgerSnapshot books, LocalDate asOf) {
+        List<ValuePoint> points = new ArrayList<>();
+        YearMonth month = YearMonth.from(asOf);
+        for (int i = 11; i >= 0; i--) {
+            LocalDate end = i == 0 ? asOf : month.minusMonths(i).atEndOfMonth();
+            Map<Long, BigDecimal> balances = books.balancesAsOf(end);
+            points.add(new ValuePoint(end.toString(), books.accounts().values().stream().filter(Account::isLiquid)
+                    .map(a -> balances.getOrDefault(a.getId(), Money.ZERO)).reduce(Money.ZERO, BigDecimal::add)));
+        }
+        return points;
     }
 
     /**

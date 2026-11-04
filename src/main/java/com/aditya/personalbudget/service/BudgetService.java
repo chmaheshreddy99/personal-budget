@@ -113,6 +113,7 @@ public class BudgetService {
         BigDecimal totalLimit = sum(set, BudgetLine::monthlyLimit);
         BigDecimal totalSpent = sum(set, BudgetLine::spent);
         BigDecimal unbudgeted = sum(lines.stream().filter(l -> l.budgetId() == null).toList(), BudgetLine::spent);
+        BigDecimal ignored = sum(lines.stream().filter(BudgetLine::budgetIgnored).toList(), BudgetLine::spent);
         List<BudgetLine> committed = set.stream().filter(BudgetLine::committed).toList();
         BigDecimal committedTotal = sum(committed, BudgetLine::monthlyLimit);
         BigDecimal committedPaid = committed.stream().map(l -> l.spent().min(l.monthlyLimit())).reduce(Money.ZERO, BigDecimal::add);
@@ -124,7 +125,8 @@ public class BudgetService {
                 clock.days, clock.elapsed, clock.left, projectedTotal, committedTotal, committedPaid,
                 committedTotal.subtract(committedPaid).max(Money.ZERO), previous.size(),
                 previous.stream().map(Budget::getMonthlyLimit).reduce(Money.ZERO, BigDecimal::add),
-                alerts(lines, clock, totalLimit, projectedTotal, committedTotal.subtract(committedPaid).max(Money.ZERO), unbudgeted));
+                alerts(lines, clock, totalLimit, projectedTotal, committedTotal.subtract(committedPaid).max(Money.ZERO), unbudgeted.subtract(ignored)),
+                ignored);
     }
 
     /** Where we are in the month: days in it, days gone (today included) and days still to come. */
@@ -141,7 +143,7 @@ public class BudgetService {
     private static BudgetLine unbudgeted(Category c, BigDecimal actual, BigDecimal avg) {
         return new BudgetLine(null, c.getId(), c.getCode(), c.getName(), null, null, actual, null, null,
                 avg, BudgetHealth.UNBUDGETED, null, null, false, null, null, null, null, null, null, actual,
-                null, null, null, null);
+                null, null, null, null, Boolean.TRUE.equals(c.getBudgetIgnored()));
     }
 
     /**
@@ -191,7 +193,7 @@ public class BudgetService {
             };
             return new BudgetLine(b.getId(), c.getId(), c.getCode(), c.getName(), limit, b.getAlertPercent(), actual,
                     limit.subtract(actual), used, avg, health, b.getNotes(), b.getVersion(),
-                    true, b.getDueDay(), due, status, paidOn, null, null, actual.max(limit), null, null, null, insight);
+                    true, b.getDueDay(), due, status, paidOn, null, null, actual.max(limit), null, null, null, insight, false);
         }
 
         // ---- pace: the rest of the month is projected from what usually happens in it (history), and only
@@ -253,7 +255,7 @@ public class BudgetService {
         };
         return new BudgetLine(b.getId(), c.getId(), c.getCode(), c.getName(), limit, b.getAlertPercent(), actual,
                 limit.subtract(actual), used, avg, health, b.getNotes(), b.getVersion(),
-                false, null, null, null, null, pace, expected, projected, daily, safe, reached, insight);
+                false, null, null, null, null, pace, expected, projected, daily, safe, reached, insight, false);
     }
 
     // ================================================================== alerts
@@ -411,6 +413,9 @@ public class BudgetService {
         budget.setNotes(request.notes());
         budget.setCommitted(Boolean.TRUE.equals(request.committed()));
         budget.setDueDay(Boolean.TRUE.equals(request.committed()) ? request.dueDay() : null);
+        if (Boolean.TRUE.equals(category.getBudgetIgnored())) {   // a budget set by hand: the choice not to have one is over
+            categories.setBudgetIgnored(category.getId(), false);
+        }
         if (existing) {   // someone else changed it (or set it) meanwhile: refused
             budget.setVersion(ConcurrentUpdateException.required(request.version(), "budgets", budget.getId()));
         }
@@ -468,6 +473,11 @@ public class BudgetService {
     /** This month's budgets. */
     public List<Budget> all() {
         return forMonth(OrgClock.month());
+    }
+
+    /** The budgets of every month (the projection averages the months budgeted). */
+    public List<Budget> everyMonth() {
+        return budgets.findByTenantId(UserContext.tenantId());
     }
 
     // ================================================================== helpers

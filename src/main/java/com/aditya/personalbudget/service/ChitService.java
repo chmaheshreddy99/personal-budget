@@ -77,12 +77,15 @@ public class ChitService {
 
     /** Links to the chit (see ChitShareService), deleted with it. */
     private final com.aditya.personalbudget.repository.ChitShareRepository chitShares;
+    private final NotificationService notifications;
 
     public ChitService(ChitRepository chits, ChitInstallmentRepository installments,
                        AccountRepository accountRepository, JournalEntryRepository entries,
                        AccountService accountService, LedgerService ledger, CategoryService categories,
-                       ChitReceiptAckRepository receipts, com.aditya.personalbudget.repository.ChitShareRepository chitShares) {
+                       ChitReceiptAckRepository receipts, com.aditya.personalbudget.repository.ChitShareRepository chitShares,
+                       NotificationService notifications) {
         this.chitShares = chitShares;
+        this.notifications = notifications;
         this.categories = categories;
         this.receipts = receipts;
         this.chits = chits;
@@ -94,6 +97,41 @@ public class ChitService {
     }
 
     // ================================================================== queries
+
+    /** The lift terms of every chit (the Lift or hold analyzer). */
+    public List<com.aditya.personalbudget.dto.ChitDtos.LiftTerms> liftTerms() {
+        return chits.findByTenantId(UserContext.tenantId()).stream().map(ChitService::liftTermsOf).toList();
+    }
+
+    /** Sets what lifting this chit gets and costs; a chart's months must be within the chit. */
+    @Transactional
+    public com.aditya.personalbudget.dto.ChitDtos.LiftTerms saveLiftTerms(Long chitId, com.aditya.personalbudget.dto.ChitDtos.LiftTermsRequest r) {
+        Chit chit = require(chitId);
+        String chart = r.liftChart() == null || r.liftChart().isBlank() ? null : r.liftChart().replaceAll("\\s+", "").replaceAll(",$", "");
+        if (chart != null) {
+            for (String pair : chart.split(",")) {
+                int month = Integer.parseInt(pair.split("=")[0]);
+                if (month < 1 || month > chit.getNumberOfInstallments()) {
+                    throw new BusinessException("The chart's month " + month + " is not within the chit's " + chit.getNumberOfInstallments() + " months");
+                }
+            }
+        }
+        if (r.liftFromMonth() != null && r.liftFromMonth() > chit.getNumberOfInstallments()) {
+            throw new BusinessException("Lifting from month " + r.liftFromMonth() + ": the chit has " + chit.getNumberOfInstallments() + " months");
+        }
+        chit.setAfterLiftInstallment(r.afterLiftInstallment());
+        chit.setLiftDiscountFirst(r.liftDiscountFirst());
+        chit.setLiftDiscountLast(r.liftDiscountLast());
+        chit.setLiftFeePercent(r.liftFeePercent());
+        chit.setLiftFromMonth(r.liftFromMonth());
+        chit.setLiftChart(chart);
+        return liftTermsOf(chits.save(chit));
+    }
+
+    private static com.aditya.personalbudget.dto.ChitDtos.LiftTerms liftTermsOf(Chit c) {
+        return new com.aditya.personalbudget.dto.ChitDtos.LiftTerms(c.getId(), c.getAfterLiftInstallment(), c.getLiftDiscountFirst(), c.getLiftDiscountLast(),
+                c.getLiftFeePercent(), c.getLiftFromMonth(), c.getLiftChart());
+    }
 
     public List<ChitView> list() {
         LedgerSnapshot books = ledger.snapshot();
@@ -175,6 +213,7 @@ public class ChitService {
 
         generateSchedule(chit);
         markAlreadyPaid(chit, request.alreadyPaidInstallments());
+        notifications.chitCreated(chit, installments.findByChitIdOrderByInstallmentNo(chit.getId()));
         return detail(chit.getId());
     }
 
@@ -260,6 +299,7 @@ public class ChitService {
                 .credit(from.getId(), cash)
                 .credit(income.getId(), dividend, "Chit dividend").category(chitGains)
                 .party(chit.getOrganizer())
+                .reference(request.reference() == null || request.reference().isBlank() ? null : request.reference().trim())
                 .source(LedgerService.SOURCE_CHIT_INSTALLMENT, installment.getId()));
 
         installment.setDividend(dividend);
@@ -270,6 +310,7 @@ public class ChitService {
         installment.setStatus(InstallmentStatus.PAID);
         installments.save(installment);
         refreshStatus(chit);
+        notifications.chitPaid(chit, installment, installments.findByChitIdOrderByInstallmentNo(chitId), entry, from.getName());
         return detail(chitId);
     }
 
@@ -614,7 +655,7 @@ public class ChitService {
                 compoundEarned, simpleEarned, compoundProjected, simpleProjected,
                 Money.round(currentValue), realizedGain, c.getVersion(),
                 c.getPayoutAmount() == null ? null : payoutEntries(c).stream().findFirst().map(JournalEntry::getId).orElse(null),
-                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today));
+                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today), c.getOrganizerEmail());
     }
 
     /**
@@ -656,6 +697,7 @@ public class ChitService {
         chit.setUpiNote(blankToNull(r.upiNote()));
         // null: the caller does not know the number (keep it); empty clears it
         if (r.organizerPhone() != null) chit.setOrganizerPhone(ChitReceiptService.phoneOrNull(r.organizerPhone()));
+        if (r.organizerEmail() != null) chit.setOrganizerEmail(blankToNull(r.organizerEmail().trim()));
         if (r.defaultPaymentAccountId() != null) {
             Account payFrom = accountService.require(r.defaultPaymentAccountId());
             if (payFrom.getAccountClass() != AccountClass.ASSET && payFrom.getAccountClass() != AccountClass.LIABILITY

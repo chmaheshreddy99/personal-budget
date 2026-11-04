@@ -24,6 +24,11 @@ type Bridge = {
   smsPermissions(): Promise<SmsPermissions>;
   openAppSettings(): Promise<boolean>;
   openUpi(link: string, pkg: string): Promise<'APP' | 'STORE'>;
+  scanBill?(mode: 'document' | 'live'): Promise<{ rows: string; images?: PickedFile[] } | null>;
+  ocrImages?(pathsJson: string): Promise<{ rows: string }>;
+  ocrImagesEnhanced?(pathsJson: string, pass: string): Promise<{ rows: string }>;
+  /** false in the standard edition (no SMS permission in it) */
+  SMS_BUILD?: boolean;
 };
 
 /** A photo or a file kept in the app's own files until it is uploaded. */
@@ -33,7 +38,10 @@ export type SmsPermissions = { receive: boolean; read: boolean; notify: boolean;
 const native: Bridge | undefined = NativeModules.BudgetBridge;
 const memory = new Map<string, string>();
 
-export const smsSupported = Platform.OS === 'android' && !!native;
+/** Bank SMS: Android, and only the "sms" edition of the app (the standard one asks for no SMS permission). */
+export const smsSupported = Platform.OS === 'android' && !!native && native.SMS_BUILD !== false;
+/** Which edition this is, for Settings: "sms" or "standard". */
+export const edition: 'sms' | 'standard' = native?.SMS_BUILD === false ? 'standard' : 'sms';
 
 export const nativeStore = {
   async get(key: string): Promise<string | null> {
@@ -92,6 +100,29 @@ export const nativeSettings = {
     return native ? native.smsPermissions() : { receive: false, read: false, notify: false, enabled: false };
   },
   async openApp() { if (native) await native.openAppSettings(); },
+};
+
+/** A bill read on the phone: its rows top to bottom, and its photos (kept as the expense's evidence). */
+export type ScannedBill = { rows: string[]; images: PickedFile[] };
+
+export const nativeScan = {
+  available: Platform.OS === 'android' && !!native?.scanBill,
+  /** "document": the document scanner (pages, edges found); "live": a long bill read like a video. null when cancelled. */
+  async scan(mode: 'document' | 'live'): Promise<ScannedBill | null> {
+    if (!native?.scanBill) throw new Error('Scanning bills needs the Android app');
+    const r = await native.scanBill(mode);
+    return r ? { rows: JSON.parse(r.rows || '[]'), images: r.images || [] } : null;
+  },
+  /** Photos already kept by the app (paths), read as the pages of one bill. */
+  async read(paths: string[]): Promise<string[]> {
+    if (!native?.ocrImages) throw new Error('Reading bills needs the Android app');
+    return JSON.parse((await native.ocrImages(JSON.stringify(paths))).rows || '[]');
+  },
+  /** The same photos read again, cleaned up: for a read that does not match the bill. Empty when the phone cannot. */
+  async readEnhanced(paths: string[], pass: 'contrast' | 'large'): Promise<string[]> {
+    if (!native?.ocrImagesEnhanced) return [];
+    return JSON.parse((await native.ocrImagesEnhanced(JSON.stringify(paths), pass)).rows || '[]');
+  },
 };
 
 export const nativeUpi = {

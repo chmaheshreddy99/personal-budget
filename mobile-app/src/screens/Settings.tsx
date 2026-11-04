@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
 import { ago, bytes } from '../format';
-import { smsSupported } from '../native';
+import { edition, smsSupported } from '../native';
 import { Account, GROUP_LABELS, Group, normalizeUrl } from '../data';
 import { AccountBubble, Button, Card, Chip, IconBubble, SectionTitle, Sheet } from '../ui';
 import { colors, space } from '../theme';
@@ -124,7 +124,7 @@ export function SettingsScreen({ onBack }: { onBack?: () => void }) {
       <SectionTitle title="Bank SMS" Icon={MessageSquareText} />
       <Card>
         <Row Icon={MessageSquareText} fg={colors.violet} bg={colors.violetSoft} title="Detect bank SMS"
-          sub={smsSupported ? 'Be asked to record an expense when your bank sends a debit SMS (amount, account, shop and reference filled in).' : 'Android only.'}
+          sub={smsSupported ? 'Be asked to record an expense when your bank sends a debit SMS (amount, account, shop and reference filled in).' : edition === 'standard' ? 'Not in this edition: it asks for no SMS permission. Install the SMS edition of the app to have bank SMS offered as expenses.' : 'Android only.'}
           right={<Switch value={s.smsEnabled} disabled={!smsSupported} onValueChange={v => { app.enableSms(v); }} trackColor={{ true: colors.violet, false: colors.line }} />} />
       </Card>
 

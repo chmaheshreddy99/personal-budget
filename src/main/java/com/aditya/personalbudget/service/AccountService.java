@@ -8,6 +8,7 @@ import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.domain.type.VoucherType;
 import com.aditya.personalbudget.dto.AccountDtos.AccountRequest;
 import com.aditya.personalbudget.dto.AccountDtos.AccountView;
+import com.aditya.personalbudget.dto.AccountDtos.CardBillSummary;
 import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.ForbiddenException;
 import com.aditya.personalbudget.exception.NotFoundException;
@@ -43,9 +44,11 @@ public class AccountService {
     private final JournalEntryRepository entries;
     private final BudgetRepository budgets;
     private final LedgerService ledger;
+    private final com.aditya.personalbudget.repository.BankInterestPostingRepository interestPostings;
 
     public AccountService(AccountRepository accounts, JournalEntryRepository entries, BudgetRepository budgets,
-                          LedgerService ledger) {
+                          LedgerService ledger, com.aditya.personalbudget.repository.BankInterestPostingRepository interestPostings) {
+        this.interestPostings = interestPostings;
         this.accounts = accounts;
         this.entries = entries;
         this.budgets = budgets;
@@ -95,7 +98,7 @@ public class AccountService {
                     return toView(a, balance, monthMoves.getOrDefault(a.getId(), Money.ZERO),
                             monthIn.getOrDefault(a.getId(), Money.ZERO), monthOut.getOrDefault(a.getId(), Money.ZERO),
                             balance.subtract(thirtyDaysAgo.getOrDefault(a.getId(), Money.ZERO)),
-                            lastActivity.get(a.getId()), counts.getOrDefault(a.getId(), 0L), trend, today);
+                            lastActivity.get(a.getId()), counts.getOrDefault(a.getId(), 0L), trend, today, cardBill(a, books, today));
                 })
                 .toList();
     }
@@ -209,6 +212,7 @@ public class AccountService {
                     + "' has transactions. Deactivate it instead, or delete its transactions first");
         }
         openingEntry(account).ifPresent(e -> ledger.delete(e.getId()));
+        interestPostings.deleteAll(interestPostings.findByAccountId(id));   // undone periods: nothing of them is in the books
         accounts.deleteById(id);
     }
 
@@ -262,6 +266,9 @@ public class AccountService {
         account.setQuantity(r.quantity());
         account.setDescription(r.description());
         applyBankDetails(account, r);
+        boolean card = type == AccountType.CREDIT_CARD && r.billingDay() != null;
+        account.setBillingDay(card ? r.billingDay() : null);
+        account.setPaymentDueDays(card ? (r.paymentDueDays() != null ? r.paymentDueDays() : Integer.valueOf(CardBilling.DEFAULT_DAYS_TO_PAY)) : null);
         account.setActive(r.active() == null || r.active());
 
         boolean balanceSheet = type.getAccountClass() == AccountClass.ASSET
@@ -316,6 +323,40 @@ public class AccountService {
         account.setVersion(ConcurrentUpdateException.required(r.version(), "accounts", id));   // a stale form is refused
         accounts.save(account);
         return get(id);
+    }
+
+    /** A credit card's billing cycles: the one still open and up to {@code count} statements, latest first. */
+    public CardBilling.Bills cardBills(Long id, int count) {
+        Account account = require(id);
+        if (account.getAccountType() != AccountType.CREDIT_CARD) {
+            throw new BusinessException(account.getName() + " is not a credit card");
+        }
+        LocalDate today = OrgClock.today();
+        if (account.getBillingDay() == null) {
+            return CardBilling.Bills.notConfigured(today);
+        }
+        return bills(account, ledger.snapshot(), today, Math.max(1, Math.min(count, 36)));
+    }
+
+    private static CardBilling.Bills bills(Account account, LedgerSnapshot books, LocalDate today, int count) {
+        List<CardBilling.Line> lines = books.lines().stream().filter(l -> account.getId().equals(l.accountId()))
+                .map(l -> new CardBilling.Line(l.date(), l.credit(), l.debit())).toList();
+        return CardBilling.bills(account.getBillingDay(), account.getPaymentDueDays(), lines, today, count);
+    }
+
+    private static CardBillSummary cardBill(Account a, LedgerSnapshot books, LocalDate today) {
+        if (a.getAccountType() != AccountType.CREDIT_CARD || a.getBillingDay() == null) {
+            return null;
+        }
+        CardBilling.Bills bills = bills(a, books, today, 1);
+        CardBilling.Statement open = bills.running();
+        if (bills.statements().isEmpty()) {
+            return new CardBillSummary(bills.billingDay(), bills.daysToPay(), null, null, Money.ZERO, Money.ZERO, Money.ZERO, "NO_DUES", null,
+                    open.statementDate(), open.dueDate(), open.totalDue());
+        }
+        CardBilling.Statement latest = bills.statements().get(0);
+        return new CardBillSummary(bills.billingDay(), bills.daysToPay(), latest.statementDate(), latest.dueDate(), latest.totalDue(), latest.minimumDue(),
+                latest.outstanding(), latest.status(), latest.daysToDue(), open.statementDate(), open.dueDate(), open.totalDue());
     }
 
     private static String clean(String s) {
@@ -384,7 +425,7 @@ public class AccountService {
     }
 
     private AccountView toView(Account a, BigDecimal balance, BigDecimal monthMove, BigDecimal in, BigDecimal out,
-                               BigDecimal change30, LocalDate last, long count, List<BigDecimal> trend, LocalDate today) {
+                               BigDecimal change30, LocalDate last, long count, List<BigDecimal> trend, LocalDate today, CardBillSummary cardBill) {
         boolean details = canSeeBankDetails();   // sensitive: admins only
         BigDecimal utilization = null;
         BigDecimal available = null;
@@ -399,6 +440,6 @@ public class AccountService {
                 a.getDescription(), Boolean.TRUE.equals(a.getSystemAccount()), Boolean.TRUE.equals(a.getActive()),
                 balance, monthMove, in, out, change30, utilization, available, daysToMaturity,
                 ReportService.bucket(a), last, count, trend, a.getVersion(), a.isChitBook(), a.getHostedChitId(), a.getChitRole(),
-                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount());
+                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount(), cardBill);
     }
 }

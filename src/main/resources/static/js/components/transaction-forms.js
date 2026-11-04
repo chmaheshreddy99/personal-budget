@@ -8,10 +8,11 @@
  */
 import { api, newRequestKey } from '../core/api.js';
 import { loadAccounts, invalidateAccounts, can, categoriesOf, loadCategories } from '../core/store.js';
-import { openModal, field, readForm, accountOptions, categoryOptions, esc, toast, confirmDialog, table, narrativeHtml } from '../core/ui.js';
+import { openModal, routeNextDialog, field, readForm, accountOptions, categoryOptions, esc, toast, confirmDialog, table, narrativeHtml } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, isoDate, date } from '../core/format.js';
 import { evidenceFieldHtml, bindEvidenceField } from './evidence.js';
+import { attachNotify } from './notify-toggle.js';
 
 const isMoneyAccount = a => (a.accountClass === 'ASSET' || a.accountClass === 'LIABILITY') && a.accountType !== 'CHIT_FUND';
 
@@ -47,7 +48,37 @@ const SHORTCUTS = [
     { label: 'Bill to pay later', kind: 'EXPENSE', from: 'PAYABLE', hint: 'Expense on credit (Payables)' },
 ];
 
+// ===================================================================== regular or one-time income
+
+/** Sources that usually come every month: a new income from one of them starts as Regular. */
+const REGULAR_SOURCE = /salary|wage|pension|rent|stipend|allowance|retainer/i;
+
+/** Regular (comes every month: the forecast projects it) or one-time (not projected): two chips over a hidden field. */
+function natureFieldHtml(value) {
+    return `<div class="field span-2 nature-field"><span>This income is</span><input type="hidden" name="incomeNature" value="${value || ''}">
+        <div class="nature-chips">${[['REGULAR', 'Regular', 'repeat', 'comes every month · the forecast counts it'], ['ONE_TIME', 'One-time', 'gift', 'a bonus, gift, refund or sale · not projected']]
+            .map(([k, l, i, h]) => `<button type="button" class="nature-chip ${value === k ? 'active' : ''}" data-nature="${k}">${icon(i)}<span><b>${l}</b><small>${h}</small></span></button>`).join('')}</div></div>`;
+}
+
+/** Wires the chips; until one is picked by hand, the source decides (a salary is Regular, anything else One-time). */
+function bindNature(form, touched = false) {
+    const box = form.querySelector('.nature-field');
+    if (!box) return;
+    const hidden = box.querySelector('[name=incomeNature]');
+    const set = v => { hidden.value = v; box.querySelectorAll('[data-nature]').forEach(b => b.classList.toggle('active', b.dataset.nature === v)); };
+    const guess = () => {
+        if (touched) return;
+        const sel = form.querySelector('[name=categoryId]');
+        if (!sel?.value) return;   // nothing picked yet: not said
+        set(REGULAR_SOURCE.test(sel.selectedOptions[0]?.textContent || '') ? 'REGULAR' : 'ONE_TIME');
+    };
+    box.addEventListener('click', e => { const b = e.target.closest('[data-nature]'); if (b) { touched = true; set(b.dataset.nature); } });
+    form.querySelector('[name=categoryId]')?.addEventListener('change', guess);
+    if (!hidden.value) guess();
+}
+
 export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } = {}) {
+    if (!Object.keys(preset).length) routeNextDialog({ INCOME: 'income', TRANSFER: 'transfer' }[kind] || 'quick');
     const saveKey = newRequestKey();   // one key per dialog: a retry or a second click saves once
     const accounts = await loadAccounts();
     const categories = { EXPENSE: await categoriesOf('EXPENSE'), INCOME: await categoriesOf('INCOME') };
@@ -66,6 +97,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
             ${field({ label: 'Amount', name: 'amount', type: 'number', value: values.amount || '', required: true, attrs: 'min="0.01"' })}
             ${cfg.category === 'INCOME' ? field({ label: 'Income category', name: 'categoryId', type: 'select', required: true,
                       options: categoryOptions(categories.INCOME, values.categoryId) }) : ''}
+            ${cfg.category === 'INCOME' ? natureFieldHtml(values.incomeNature) : ''}
             ${cfg.from ? field({ label: cfg.fromLabel, name: 'fromAccountId', type: 'select', required: true,
                       options: accountOptions(accounts, cfg.from, values.fromAccountId) }) : ''}
             ${cfg.to ? field({ label: cfg.toLabel, name: 'toAccountId', type: 'select', required: true,
@@ -97,7 +129,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
                     const form = m.el.querySelector('[data-quick-form]');
                     if (!form.reportValidity()) return true;
                     const data = readForm(form);
-                    const saved = await api.post('/transactions/quick', { ...data, kind: current }, { key: saveKey });
+                    const saved = await api.post('/transactions/quick', { ...data, kind: current }, { key: saveKey, notify: mail.value() });
                     await evidence?.uploadTo(saved.id);
                     invalidateAccounts();
                     toast(`${KINDS[current].label} of ${money(saved.amount)} posted as ${saved.entryNo}`);
@@ -108,6 +140,9 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
     });
 
     const root = modal.el.querySelector('[data-quick-root]');
+    // an alert by e-mail for a transfer, or an expense large enough (income has none)
+    const mail = attachNotify(modal, { event: () => ({ EXPENSE: 'LARGE_EXPENSE', TRANSFER: 'TRANSFER' })[current],
+        amount: () => Number(root.querySelector('[name=amount]')?.value || 0) });
     let evidence = bindEvidenceField(root);
     const rerender = (k, values) => {
         current = k;
@@ -120,6 +155,7 @@ export async function openQuickEntry({ kind = 'EXPENSE', onSaved, preset = {} } 
 
     /** rerendered: the dialog only wires Enter-to-submit on its first form, so later forms wire it here. */
     function bindForm(rerendered = false) {
+        bindNature(root.querySelector('form'));
         root.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
             const values = readForm(root.querySelector('form'));
             rerender(b.dataset.kind, { entryDate: values.entryDate, amount: values.amount, narration: values.narration,
@@ -316,6 +352,7 @@ export async function openIncomeEditor({ entry, onSaved } = {}) {
                 ${field({ label: 'Reference', name: 'reference', value: original.reference, placeholder: 'Payslip / UPI ref' })}
                 ${field({ label: 'Description', name: 'narration', value: original.narration, span: 'span-2', placeholder: 'Empty: the source' })}
                 ${field({ label: 'Paid by', name: 'party', value: original.party, placeholder: 'Employer, tenant, bank…' })}
+                <div class="span-3">${natureFieldHtml(entry.incomeNature)}</div>
             </div>
             <div class="tf-changes" data-changes></div>
             <div data-ev-entry="${entry.id}" data-ev-count="${entry.attachmentCount || 0}"></div>
@@ -347,6 +384,7 @@ export async function openIncomeEditor({ entry, onSaved } = {}) {
     });
 
     const form = modal.el.querySelector('[data-income-form]');
+    bindNature(form, !!entry.incomeNature);
     const draw = () => {
         const d = readForm(form);
         const amount = Number(d.amount || 0);
@@ -378,6 +416,7 @@ export async function openIncomeEditor({ entry, onSaved } = {}) {
 
 /** Create (entry = null), edit, or duplicate (copy = true) a multi-line journal. */
 export async function openJournalEditor({ entry: source = null, copy = false, onSaved } = {}) {
+    if (!source) routeNextDialog('voucher');
     const saveKey = newRequestKey();   // one key per dialog: a retry or a second click saves once
     const accounts = await loadAccounts(false, { all: true });   // the pickers still hide chit-book accounts unless a line uses one
     const allCategories = await loadCategories();
