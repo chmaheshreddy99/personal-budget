@@ -47,7 +47,9 @@ public class AppSyncService {
     }
 
     public record AppExpense(Long entryId, String entryNo, LocalDate date, String narration, String party, String reference,
-                             Long categoryId, String categoryName, BigDecimal amount, Long paidFromId, String paidFrom, String status) {
+                             Long categoryId, String categoryName, BigDecimal amount, Long paidFromId, String paidFrom, String status,
+                             /* one row per line of the bill: the line, what was bought on it, and whether the entry is an itemized bill */
+                             Long lineId, String memo, boolean itemized) {
     }
 
     public record AppInstallment(Long id, int no, LocalDate dueDate, BigDecimal dueAmount, BigDecimal dividend, BigDecimal paidAmount,
@@ -76,7 +78,9 @@ public class AppSyncService {
                            /* gifts given and received */
                            List<AppGift> gifts,
                            /* what this household allows the app to do and show (Settings > Mobile app on the web) */
-                           AppSettingsService.MobileConfig mobile) {
+                           AppSettingsService.MobileConfig mobile,
+                           /* the order the household arranged its lists in; the accounts and chits above already follow it */
+                           Map<String, List<Long>> listOrder) {
     }
 
     /** Money coming back on a claim (or written off). */
@@ -201,6 +205,7 @@ public class AppSyncService {
     private final AccountService accounts;
     private final CategoryService categories;
     private final ExpenseService expenses;
+    private final ListOrderService listOrder;
     private final ReportService reports;
     private final ConstructionProjectRepository projects;
     private final HostedChitRepository chits;
@@ -214,7 +219,8 @@ public class AppSyncService {
 
     public AppSyncService(AccountService accounts, CategoryService categories, ExpenseService expenses, ReportService reports,
                           ConstructionProjectRepository projects, HostedChitRepository chits, AppSyncWriter writer, ChitService myChits,
-                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions, AppSettingsService settings) {
+                          ClaimService claims, EmiService emis, GiftService gifts, TransactionService transactions, AppSettingsService settings, ListOrderService listOrder) {
+        this.listOrder = listOrder;
         this.settings = settings;
         this.claims = claims;
         this.emis = emis;
@@ -257,10 +263,10 @@ public class AppSyncService {
         LocalDate from = OrgClock.today().minusDays(Math.max(1, Math.min(days, 730)));
         List<AppExpense> recent = expenses.list(from, OrgClock.today().plusDays(1)).stream()
                 .map(r -> new AppExpense(r.entryId(), r.entryNo(), r.date(), r.narration(), r.party(), r.reference(), r.categoryId(), r.categoryName(),
-                        r.netAmount() != null ? r.netAmount() : r.amount(), r.paidFromId(), r.paidFrom(), r.status())).toList();
+                        r.netAmount() != null ? r.netAmount() : r.amount(), r.paidFromId(), r.paidFrom(), r.status(), r.lineId(), r.memo(), r.itemized())).toList();
         var me = UserContext.get();
         boolean seesChits = me.features().contains(com.aditya.personalbudget.domain.type.Feature.CHITS);
-        List<AppChit> chitList = !seesChits ? List.of() : myChits.list().stream().filter(c -> c.closedAt() == null).map(c -> {
+        List<AppChit> chitList = !seesChits ? List.of() : listOrder.arrange("chits", myChits.list(), c -> c.id()).stream().filter(c -> c.closedAt() == null).map(c -> {
             var d = myChits.detail(c.id());
             return new AppChit(c.id(), c.name(), c.organizer(), c.ticketNo(), c.status().name(), c.monthlyInstallment(), c.numberOfInstallments(),
                     c.installmentsPaid(), c.installmentsPending(), c.overdueCount(), c.overdueAmount(), c.nextDueDate(), c.nextDueAmount(),
@@ -294,9 +300,9 @@ public class AppSyncService {
                 .map(g -> new AppGift(g.id(), g.direction(), g.giftDate(), g.person(), g.relation(), g.occasion(), g.kind(), g.description(),
                         g.value(), g.quantity(), g.unit(), g.mode(), g.donation(), g.notes(), g.accountName(), g.entryNo()))
                 .toList();
-        return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), list, cats, recent, from, chitList, canPay,
+        return new Snapshot(OrgClock.now(), me.fullName(), me.tenantName(), me.currency(), listOrder.arrange("accounts", list, AppAccount::id), cats, recent, from, chitList, canPay,
                 f.stream().map(Enum::name).collect(Collectors.toSet()), canRecord && !settings.mobileConfig(tenant).readOnlyRoles().contains(me.role().name()), claimList, emiList, incomeList, giftList,
-                settings.mobileConfigFor(tenant, me.role().name()));
+                settings.mobileConfigFor(tenant, me.role().name()), listOrder.orders());
     }
 
     /** The income received since {@code from}: entries that credit an income category, into the account they debit. */

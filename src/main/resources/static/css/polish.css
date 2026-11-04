@@ -562,9 +562,11 @@ tr.detail-row .payable-strip .pos { color: var(--w-mint-ink); }
 .ed2-story > svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--ed2-teal); }
 .ed2-story b { color: var(--ed2-ink); font-weight: 650; }
 
-.ed2-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); }
+.ed2-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(min-content, 1fr); }
 .ed2-main { display: grid; gap: 0; align-content: start; min-width: 0; padding: 6px 12px 6px 14px; }
-.ed2-aside { display: grid; gap: 0; align-content: start; padding: 6px 12px; border-left: 1px solid var(--ed2-line); background: #f6fafd; min-width: 0; }
+.ed2-aside { display: grid; gap: 0; align-content: start; padding: 6px 12px; border-left: 1px solid var(--ed2-line); background: #f6fafd; min-width: 260px; }
+/* a balance stays on one line: a long chit name widens the side instead */
+.ed2-balances .ed2-row-main :is(b, small) { white-space: nowrap; }
 .ed2-aside:empty { display: none; }
 .ed2-grid:not(:has(.ed2-aside > *)) { grid-template-columns: minmax(0, 1fr); }
 

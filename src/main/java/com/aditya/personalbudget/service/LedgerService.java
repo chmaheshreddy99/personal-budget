@@ -2,6 +2,7 @@ package com.aditya.personalbudget.service;
 
 import com.aditya.personalbudget.repository.ChitRepository;
 import com.aditya.personalbudget.repository.CategoryRepository;
+import com.aditya.personalbudget.domain.type.AccountClass;
 import com.aditya.personalbudget.domain.type.CategoryKind;
 import com.aditya.personalbudget.domain.type.AccountType;
 import com.aditya.personalbudget.domain.entity.Chit;
@@ -254,7 +255,9 @@ public class LedgerService {
         Map<Long, Integer> evidence = attachments.countsByEntry(UserContext.tenantId());
         Map<Long, ChitTrailService.Trail> chitTrails = trails.forEntries(list);
         Map<Long, ConstructionTagService.ProjectTag> projects = projectTags.forEntries(list);
-        Map<Long, BigDecimal[]> chitBalances = chitBalances(linesByEntry.values().stream().flatMap(List::stream).toList(), all);
+        List<JournalLine> shownLines = linesByEntry.values().stream().flatMap(List::stream).toList();
+        Map<Long, BigDecimal[]> chitBalances = chitBalances(shownLines, all);
+        Map<Long, BigDecimal[]> categoryBalances = categoryBalances(shownLines, all, accountById);
 
         return list.stream().map(e -> {
             List<LineView> lineViews = linesByEntry.getOrDefault(e.getId(), List.of()).stream()
@@ -264,10 +267,12 @@ public class LedgerService {
                         String shown = l.getCategoryId() != null ? categoryName.getOrDefault(l.getCategoryId(), a.getName())
                                 : l.getChitId() != null ? chitName.getOrDefault(l.getChitId(), a.getName()) : a.getName();
                         BigDecimal[] chit = chitBalances.get(l.getId());
+                        BigDecimal[] category = categoryBalances.get(l.getId());
                         return new LineView(l.getId(), l.getLineNo(), l.getAccountId(), a.getCode(), shown,
                                 a.getAccountClass(), l.getDebit(), l.getCredit(), l.getMemo(),
                                 l.getCategoryId(), l.getChitId(), a.getName(), l.getHostedChitId(),
-                                l.getBalanceBefore(), l.getBalanceAfter(), chit == null ? null : chit[0], chit == null ? null : chit[1]);
+                                l.getBalanceBefore(), l.getBalanceAfter(), chit == null ? null : chit[0], chit == null ? null : chit[1],
+                                category == null ? null : category[0], category == null ? null : category[1]);
                     })
                     .toList();
             Lock lock = lockOf(e, reversals, numbers);
@@ -298,6 +303,35 @@ public class LedgerService {
             BigDecimal before = running.getOrDefault(l.getChitId(), Money.ZERO);
             BigDecimal after = before.add(Money.nz(l.getDebit())).subtract(Money.nz(l.getCredit()));
             running.put(l.getChitId(), after);
+            balances.put(l.getId(), new BigDecimal[]{before, after});
+        }
+        return balances;
+    }
+
+    /**
+     * By line: what its category stands at just before and after it, for the categories of the lines shown, in the same
+     * ledger order and natural sign as the account's snapshots (an expense category grows with debits, an income one with credits).
+     */
+    private Map<Long, BigDecimal[]> categoryBalances(List<JournalLine> shown, List<JournalEntry> all, Map<Long, Account> accountById) {
+        Set<Long> categoryIds = shown.stream().map(JournalLine::getCategoryId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        if (categoryIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, LocalDate> dates = all.stream().collect(Collectors.toMap(JournalEntry::getId, JournalEntry::getEntryDate));
+        List<JournalLine> ofCategories = lines.findByTenantId(UserContext.tenantId()).stream()
+                .filter(l -> categoryIds.contains(l.getCategoryId()) && dates.containsKey(l.getJournalEntryId()))
+                .sorted(Comparator.comparing((JournalLine l) -> dates.get(l.getJournalEntryId()))
+                        .thenComparing(JournalLine::getJournalEntryId).thenComparing(JournalLine::getLineNo))
+                .toList();
+        Map<Long, BigDecimal> running = new HashMap<>();
+        Map<Long, BigDecimal[]> balances = new HashMap<>();
+        for (JournalLine l : ofCategories) {
+            Account account = accountById.get(l.getAccountId());
+            boolean creditSide = account != null && account.getAccountClass() == AccountClass.INCOME;
+            BigDecimal move = Money.nz(l.getDebit()).subtract(Money.nz(l.getCredit()));
+            BigDecimal before = running.getOrDefault(l.getCategoryId(), Money.ZERO);
+            BigDecimal after = creditSide ? before.subtract(move) : before.add(move);
+            running.put(l.getCategoryId(), after);
             balances.put(l.getId(), new BigDecimal[]{before, after});
         }
         return balances;

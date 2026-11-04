@@ -11,6 +11,7 @@ import com.aditya.personalbudget.service.DocumentService.PublicDocument;
 import com.aditya.personalbudget.service.DocumentService.ShareRequest;
 import com.aditya.personalbudget.service.DocumentService.ShareView;
 import com.aditya.personalbudget.service.GiftService;
+import com.aditya.personalbudget.service.InsuranceService;
 import com.aditya.personalbudget.service.GiftService.GiftRequest;
 import com.aditya.personalbudget.service.GiftService.GiftView;
 import jakarta.validation.Valid;
@@ -40,8 +41,10 @@ public class GiftDocumentController {
 
     private final GiftService gifts;
     private final DocumentService documents;
+    private final InsuranceService insurance;
 
-    public GiftDocumentController(GiftService gifts, DocumentService documents) {
+    public GiftDocumentController(GiftService gifts, DocumentService documents, InsuranceService insurance) {
+        this.insurance = insurance;
         this.gifts = gifts;
         this.documents = documents;
     }
@@ -111,6 +114,34 @@ public class GiftDocumentController {
     public ResponseEntity<Void> deleteDocument(@PathVariable Long id) {
         documents.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    // ---------------------------------------------------------------- insurance policies
+
+    /** Premiums due soon or overdue: the alerts. */
+    @GetMapping("/api/documents/premiums/due")
+    @RequiresPermission(Permission.VIEW)
+    public List<InsuranceService.DuePremium> duePremiums() {
+        return insurance.due();
+    }
+
+    @PostMapping("/api/documents/{id}/policy/pay")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public InsuranceService.Paid payPremium(@PathVariable Long id, @Valid @RequestBody InsuranceService.PayRequest request) {
+        return insurance.pay(id, request);
+    }
+
+    @DeleteMapping("/api/documents/{id}/policy/payments/{paymentId}")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public ResponseEntity<Void> undoPremium(@PathVariable Long id, @PathVariable Long paymentId) {
+        insurance.undoPayment(id, paymentId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/documents/{id}/policy/remind")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public InsuranceService.RemindResult remindPremium(@PathVariable Long id) {
+        return insurance.remindNow(id);
     }
 
     @GetMapping("/api/documents/{id}/shares")

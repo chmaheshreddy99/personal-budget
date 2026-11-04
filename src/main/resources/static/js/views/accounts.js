@@ -25,6 +25,7 @@ import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
 import { periodChips, bindPeriodChips } from '../components/period-chips.js';
 import { sparkline } from '../core/charts.js';
 import { accountIcon, bankLogo } from '../core/bank-logos.js';
+import { loadOrders, ranked, arrangeLockHtml, bindArrange } from '../core/arrange.js';
 import { mountBankInterest } from './bank-interest.js';
 import { mountCardBills } from './card-bills.js';
 
@@ -112,7 +113,7 @@ export async function render(container, params, isCurrent) {
         const entry = await api.get(`/transactions/${focusEntry}`).catch(() => null);
         if (entry && entry.entryDate < view.from) view.from = `${entry.entryDate.slice(0, 7)}-01`;
     }
-    const everything = await loadAccounts(true, { all: true });
+    const [everything] = await Promise.all([loadAccounts(true, { all: true }), loadOrders()]);
     if (!isCurrent()) return;
     if (focusAccount && everything.some(a => a.id === focusAccount && !a.active)) view.closed = true;   // a closed account still opens
     // the hosted-chit book (members' money, Host a Chit) has its own page: only its net counts here, in net worth
@@ -225,7 +226,8 @@ export async function render(container, params, isCurrent) {
                         `<button class="cf-chip ${view.tab === t.value && !view.emi ? 'active' : ''}" data-tab="${t.value}">${t.value === 'ALL' ? 'All' : t.label}<i>${t.value === 'ALL' ? accounts.filter(a => LISTED.has(a.accountClass) && !a.emiAccount && (view.closed || a.active)).length : of(t.value).filter(a => !a.emiAccount && (view.closed || a.active)).length}</i></button>`).join('')}
                         ${accounts.some(a => a.emiAccount) ? `<button class="cf-chip ${view.emi ? 'active' : ''}" data-emi-accounts title="What is still owed on things bought on a loan EMI (managed in Expenses › EMIs); kept out of the list otherwise">${icon('calendar')}EMI<i>${accounts.filter(a => a.emiAccount && (view.closed || a.active)).length}</i></button>` : ''}
                         ${accounts.some(a => !a.active && LISTED.has(a.accountClass)) ? `<button class="cf-chip ${view.closed ? 'active' : ''}" data-closed-accounts title="Closed (inactive) accounts are left out of the list; show them too">${icon('lock')}Closed<i>${accounts.filter(a => !a.active && LISTED.has(a.accountClass)).length}</i></button>` : ''}
-                        <label class="micro-toggle" title="Group the list by assets / liabilities and account type"><input type="checkbox" id="acct-grouped" ${listPrefs.grouped ? 'checked' : ''}>${icon('layers')}</label></div>
+                        <label class="micro-toggle" title="Group the list by assets / liabilities and account type"><input type="checkbox" id="acct-grouped" ${listPrefs.grouped ? 'checked' : ''}>${icon('layers')}</label>
+                        <span id="acct-arrange">${arrangeLockHtml()}</span></div>
                 </div>
                 <div class="scroll account-list" id="account-list" tabindex="0" aria-label="Accounts, use the arrow keys to move"></div>
                 ${chitBook.length && hasFeature('HOST_CHITS') ? chitBookLink(chitBook) : ''}
@@ -242,19 +244,20 @@ export async function render(container, params, isCurrent) {
         listEl.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
     });
     const ORDER = ['ASSET', 'LIABILITY', 'EQUITY'];
+    // the plain list: assets, liabilities, equity, each by name, until it is arranged: then any account can stand anywhere
+    const plainOrder = list => ranked('accounts', [...list].sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass) || a.name.localeCompare(b.name)));
+    const groupedOrder = list => ranked('accounts', list).sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass));
     const visible = () => {
         const term = view.search.toLowerCase();
-        return accounts.filter(a => LISTED.has(a.accountClass) && (view.closed || a.active) && (view.emi ? a.emiAccount : !a.emiAccount && (view.tab === 'ALL' || a.accountClass === view.tab))
-            && (!term || [a.name, a.institution, a.code, a.typeLabel, a.accountNumber].some(v => v && v.toLowerCase().includes(term))))
-            .sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass));
+        return (listPrefs.grouped ? groupedOrder : plainOrder)(accounts.filter(a => LISTED.has(a.accountClass) && (view.closed || a.active) && (view.emi ? a.emiAccount : !a.emiAccount && (view.tab === 'ALL' || a.accountClass === view.tab))
+            && (!term || [a.name, a.institution, a.code, a.typeLabel, a.accountNumber].some(v => v && v.toLowerCase().includes(term)))));
     };
     const drawList = () => {
         const list = visible();
         container.querySelector('#acct-count').textContent = `${list.length}`;
         if (!list.length) { listEl.innerHTML = emptyState('No accounts match', 'wallet'); return; }
-        if (!listPrefs.grouped) {   // one plain list: assets, liabilities, equity, each by name
-            listEl.innerHTML = [...list].sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass)
-                || a.name.localeCompare(b.name)).map(accountItem).join('');
+        if (!listPrefs.grouped) {
+            listEl.innerHTML = list.map(accountItem).join('');
             return;
         }
         let html = '';
@@ -271,6 +274,13 @@ export async function render(container, params, isCurrent) {
         });
         listEl.innerHTML = html;
     };
+
+    const classOf = el => accounts.find(a => a.id === Number(el.dataset.id))?.accountClass;
+    bindArrange({ list: 'accounts', tools: container.querySelector('#acct-arrange'), root: listEl, selector: '.acct-item[data-id]',
+        // grouped: a row passing the heading of another type carries its whole type there, within assets or liabilities
+        allIds: () => (listPrefs.grouped ? groupedOrder : plainOrder)(accounts.filter(a => LISTED.has(a.accountClass))).map(a => a.id),
+        sameGroup: (a, b) => !listPrefs.grouped || classOf(a) === classOf(b), crossHeadings: true,
+        onDrop: () => { if (listPrefs.grouped) drawList(); }, onReset: () => drawList() });
 
     let detailTimer;
     const select = (id, { soon = false, push = false } = {}) => {

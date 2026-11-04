@@ -1714,13 +1714,20 @@ tr.detail-row td { white-space: normal; }
 .account-list { outline: none; }
 
 /* ===================================================================== journal: balances before / after the entry */
-.ed-balances { display: inline-grid; grid-template-columns: auto auto auto auto auto; align-items: baseline; column-gap: 6px; row-gap: 0;
+.ed-balances { display: inline-grid; grid-template-columns: auto auto auto auto auto auto; align-items: baseline; column-gap: 6px; row-gap: 0;
     width: max-content; align-self: flex-start; justify-self: start;
     margin: 4px 0 0; padding: 3px 8px; border-radius: 7px; background: rgba(10, 79, 128, 0.035); border: 1px solid var(--hairline);
     font-size: 11px; line-height: 1.55; max-width: 100%; }
 .edb-head { grid-column: 1 / -1; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .edb-row { display: contents; }
-.edb-name { max-width: 200px; color: var(--text-secondary); padding-right: 6px; }
+.edb-name { color: var(--text-secondary); padding-right: 6px; white-space: nowrap; }
+.edb-row.sub .edb-name { padding-left: 12px; color: var(--text-muted); }
+.edb-row.sub :is(.edb-before, b, i, em, .edb-move) { opacity: 0.85; }
+.edb-row.sub b { font-weight: 550; }
+.edb-before, .edb-row b, .edb-move { white-space: nowrap; }
+.edb-move { font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.edb-move.up { color: var(--positive, #0b7a3b); }
+.edb-move.down { color: var(--negative, #b02a2a); }
 .edb-before, .edb-row b { text-align: right; font-variant-numeric: tabular-nums; }
 .edb-before { color: var(--text-muted); }
 .edb-row i { font-style: normal; color: var(--text-muted); font-size: 10px; }

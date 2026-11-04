@@ -2227,9 +2227,67 @@ td.c-ctst, th.c-ctst { width: 112px; white-space: nowrap; }
 .bs-graph .mix-rows { gap: 0; }
 .bs-graph .side-head { margin-bottom: 2px; }
 .bs-graph .mix-row { font-size: 11px; gap: 4px; line-height: 1.35; }
-.bs-liquid { flex: 1; min-height: 90px; }
+/* the drawing is taken out of the flow: it follows the card's height and never holds the card at the height it was last drawn */
+.bs-liquid { position: relative; flex: 1 1 0; min-height: 90px; }
+.bs-liquid > svg { position: absolute; inset: 0; }
 @media (max-width: 1280px) {
     .page-toolbar.bs-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
     .bs-tb-side.end { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; }
     .balance-page .bs-header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ===================================================================== a list arranged by hand (core/arrange.js) */
+.arrange-tools { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.micro-lock { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0.7; transition: background 0.12s, color 0.12s, opacity 0.12s; }
+.micro-lock svg { width: 11px; height: 11px; }
+.micro-lock:hover { background: var(--surface-hover); color: var(--ocean-700); opacity: 1; }
+.micro-lock.open { background: var(--ocean-600); color: #ffffff; opacity: 1; }
+.micro-lock[hidden] { display: none; }
+#acct-arrange, #chit-arrange, #bn-arrange { display: inline-flex; flex-shrink: 0; }
+.lh-title #bn-arrange { margin-left: 4px; }
+.arranging :is(.acct-item[data-id], [data-account]) { position: relative; cursor: grab; touch-action: none; user-select: none; }
+.arranging :is(.acct-item[data-id], [data-account])::after { content: ""; position: absolute; left: 2px; top: 50%; width: 5px; height: 14px; margin-top: -7px; opacity: 0.45;
+    background: radial-gradient(circle, var(--text-muted) 1px, transparent 1.2px) 0 0 / 5px 4.7px; }
+.arrange-active { cursor: grabbing; }
+.arrange-dragging { z-index: 5; cursor: grabbing !important; box-shadow: 0 6px 18px rgba(10, 46, 79, 0.28) !important; opacity: 0.96; }
+.toast.clickable { cursor: pointer; }
+
+/* ===================================================================== an insurance policy (Documents) */
+.ins-form { display: grid; gap: 8px; padding: 8px 10px 10px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-sunken); }
+.ins-form[hidden] { display: none; }
+.ins-form .ins-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ocean-800); }
+.ins-form .ins-head svg { width: 13px; height: 13px; color: var(--ocean-600); }
+.ins-form .form-grid { margin: 0; }
+.ins-form [data-ins-only][hidden] { display: none; }
+.ins-days { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.doc-premium { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11.5px; font-weight: 600; }
+.doc-premium svg { width: 12px; height: 12px; }
+.doc-premium.ok { color: var(--text-secondary); }
+.doc-premium.soon { color: #8a5b00; }
+.doc-premium.late { color: var(--negative); }
+.doc-premium.done { color: var(--positive); }
+.btn.doc-pay { color: #0b6b3a; }
+.dc-alerts { grid-column: 1 / -1; display: grid; gap: 4px; }
+.dc-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 5px 10px; border-radius: 9px; border: 1px solid #f0d9a4; background: #fff8e6; font-size: 12.5px; }
+.dc-alert.late { border-color: #f3c2bd; background: #fdeeec; }
+.dc-alert > svg { width: 14px; height: 14px; color: #8a5b00; flex-shrink: 0; }
+.dc-alert.late > svg { color: var(--negative); }
+.dc-alert .grow { min-width: 200px; }
+.ins-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 6px; }
+.ins-cards .xd-line { gap: 10px; }
+.ins-cards .xd-line > :last-child { text-align: right; overflow-wrap: anywhere; }
+.ins-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ins-result { display: block; margin-top: 3px; font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ins-history { margin-top: 6px; }
+.ins-pay-grid { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 12px; align-items: start; }
+.ins-pay-grid.single { grid-template-columns: minmax(0, 1fr); }
+.ins-pay-side { display: grid; justify-items: center; gap: 4px; padding: 8px; border: 1px solid var(--hairline); border-radius: 10px; text-align: center; font-size: 11.5px; }
+.ins-pay-facts { display: grid; gap: 2px; margin-bottom: 8px; padding: 6px 10px; border-radius: 9px; background: var(--surface-sunken); font-size: 12.5px; }
+.ins-pay-facts > div { display: flex; justify-content: space-between; gap: 12px; }
+.ins-pay-facts > div > span:first-child { color: var(--text-muted); }
+.ins-pay-facts > div > :last-child { text-align: right; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .ins-pay-grid { grid-template-columns: minmax(0, 1fr); } }
+.ts-sample-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 4px; font-size: 12px; }
+.ts-targets { flex-wrap: wrap; margin: 4px 0 2px; }
+.ts-target-hint { margin: 2px 0 2px; }

@@ -7,7 +7,7 @@
  */
 import { api, session, setUnauthorizedHandler, setConflictHandler, lastOwnMutation, mutationsInFlight } from './core/api.js';
 import { state, loadOptions, can, readOnly, invalidateAccounts, hasFeature } from './core/store.js';
-import { setCurrency, setTimeZone } from './core/format.js';
+import { setCurrency, setTimeZone, isoDate, money } from './core/format.js';
 import { icon, hydrateIcons } from './core/icons.js';
 import { esc, toast, dialogOpen } from './core/ui.js';
 import { readQuery } from './core/route.js';
@@ -354,8 +354,25 @@ async function enterApp() {
     startLiveUpdates();
     refreshApprovalBadge();
     refreshIntegrityBadge();
+    premiumAlert();
     if (!location.hash) location.hash = '#/' + allowedRoutes()[0].path;
     else route();
+}
+
+/** Once a day, on opening the app: insurance premiums due within a week or overdue; a click goes to Documents. */
+async function premiumAlert() {
+    if (!hasFeature('DOCUMENTS') || state.user.linkExpiresAt) return;
+    const today = isoDate();
+    try {
+        if (localStorage.getItem('pb.premiumAlert') === today) return;
+        const due = (await api.get('/documents/premiums/due')).filter(p => p.days <= 7);
+        if (!due.length) return;
+        localStorage.setItem('pb.premiumAlert', today);
+        const first = due[0];
+        const when = first.days < 0 ? `${-first.days} day${first.days === -1 ? '' : 's'} overdue` : first.days === 0 ? 'due today' : `due in ${first.days} day${first.days === 1 ? '' : 's'}`;
+        toast(`Insurance premium ${when}: ${first.title} (${first.owner}), ${money(first.premium)}${due.length > 1 ? ` and ${due.length - 1} more` : ''}. Click to see it.`,
+            'info', { ms: 12000, onClick: () => { location.hash = '#/documents'; } });
+    } catch { /* an alert is not worth an error */ }
 }
 
 function bindShell() {

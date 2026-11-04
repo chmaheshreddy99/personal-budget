@@ -36,6 +36,8 @@ import java.util.stream.Collectors;
 @Service
 public class DashboardService {
 
+    private final InsuranceService insurance;
+
     private static final int UPCOMING_DAYS = 45;
 
     private final LedgerService ledger;
@@ -46,7 +48,9 @@ public class DashboardService {
     private final JournalEntryRepository entries;
 
     public DashboardService(LedgerService ledger, ReportService reports, BudgetService budgets, ChitService chits,
-                            RecurringService recurring, JournalEntryRepository entries) {
+                            RecurringService recurring, JournalEntryRepository entries,
+                            InsuranceService insurance) {
+        this.insurance = insurance;
         this.ledger = ledger;
         this.reports = reports;
         this.budgets = budgets;
@@ -188,6 +192,9 @@ public class DashboardService {
                 items.add(new UpcomingItem(maturity, "MATURITY", a.getName() + " matures",
                         books.balanceAsOf(a.getId(), today), false));
             }
+        }
+        if (UserContext.get().features().contains(com.aditya.personalbudget.domain.type.Feature.DOCUMENTS)) {
+            insurance.dueBy(horizon).forEach(p -> items.add(new UpcomingItem(p.dueDate(), "INSURANCE", p.title() + " premium (" + p.owner() + ")", p.premium(), p.dueDate().isBefore(today))));
         }
         return items.stream().sorted(Comparator.comparing(UpcomingItem::date)).limit(12).toList();
     }

@@ -2,7 +2,8 @@
  * Custom themes: a look of your own, built in Settings → Appearance and kept in this browser.
  * A custom theme starts from one of the built-in themes (its base: Classic, Breeze, Pearl or Ocean, whose sheets and
  * markup it keeps) and overrides it with the options below (colours, type, sizes, panels, buttons, tables, open rows,
- * icons, menu, motion), compiled into one stylesheet that goes after every other one.
+ * icons, menu, motion, and the look of each kind of heading and text by itself: bold, italic, underlined, its case, size,
+ * colour, background and an accent edge), compiled into one stylesheet that goes after every other one.
  *
  * Stored as preferences (core/prefs.js):
  *   customThemes  { themes: [{ id, name, base, opts, updatedAt }] }
@@ -31,9 +32,34 @@ const FONTS = {
     mono: 'Consolas, "SF Mono", Menlo, monospace',
 };
 
+/** The kinds of heading and text that can be styled by themselves: what they are, and what they are on the page. */
+export const TEXT_TARGETS = [
+    { id: 'group', label: 'Group headers', hint: 'Bank accounts, Credit cards, Committed, Spending, Assets, the groups of the balance sheet',
+        selector: '.group-label, .class-head, .section-title.bn-sep, .bs-section-head > b, .bs-group-head .g-label' },
+    { id: 'day', label: 'Date & group rows', hint: 'The day and month rows inside tables', selector: '.day-head-inner, .grp-head, table.grouped tr.group-row td' },
+    { id: 'section', label: 'Section titles', hint: 'The small titles inside panels and dialogs', selector: '.section-title:not(.bn-sep)' },
+    { id: 'panel', label: 'Panel titles', hint: 'The title bar of each panel', selector: '.panel-head h3' },
+    { id: 'page', label: 'Page titles', hint: 'At the top of each page', selector: '.page-title' },
+    { id: 'side', label: 'Side card titles', hint: 'Suggestions, Needs attention, Asset mix', selector: '.side-head, .side-head b' },
+    { id: 'column', label: 'Column headers', hint: 'The header row of tables', selector: 'table.grid > thead > tr > th' },
+    { id: 'name', label: 'Names in lists', hint: 'Accounts, chits, budgets', selector: '.acct-name, .lh-item-top > b, .bn-row .title' },
+    { id: 'amount', label: 'Amounts in lists', hint: 'The balance beside each name', selector: '.acct-bal, .bn-amt, .group-label > b' },
+    { id: 'label', label: 'Form labels', hint: 'Above the boxes of a form, and on the figure tiles', selector: '.field > span, .metric .label' },
+];
+const textOptions = t => [
+    { key: `tx.${t.id}.weight`, target: t.id, label: 'Weight', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'Semi-bold'], ['700', 'Bold'], ['800', 'Extra bold']] },
+    { key: `tx.${t.id}.size`, target: t.id, label: 'Size', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['10', '10'], ['11', '11'], ['12', '12'], ['13', '13'], ['14', '14'], ['16', '16'], ['18', '18'], ['20', '20']] },
+    { key: `tx.${t.id}.case`, target: t.id, label: 'Letters', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['none', 'As written'], ['uppercase', 'UPPER CASE'], ['capitalize', 'Each Word']] },
+    { key: `tx.${t.id}.background`, target: t.id, label: 'Background', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['none', 'None'], ['tint', 'Tinted'], ['band', 'Dark band']] },
+    { key: `tx.${t.id}.color`, target: t.id, label: 'Own colour', type: 'colorAuto', default: '', hint: 'Off: the colour of the theme' },
+    { key: `tx.${t.id}.italic`, target: t.id, label: 'Italic', type: 'toggle', default: false },
+    { key: `tx.${t.id}.underline`, target: t.id, label: 'Underlined', type: 'toggle', default: false },
+    { key: `tx.${t.id}.edge`, target: t.id, label: 'Accent edge on the left', type: 'toggle', default: false },
+];
+
 /**
- * Every option, in the groups the editor shows: { key, label, type (color | range | choice | toggle), default, ... }.
- * choice: options [[value, label]]; range: min, max, step, unit.
+ * Every option, in the groups the editor shows: { key, label, type (color | colorAuto | range | choice | toggle), default, ... }.
+ * choice: options [[value, label]]; range: min, max, step, unit. A group with targets shows the options of one target at a time.
  */
 export const GROUPS = [
     { id: 'colors', label: 'Colours', iconName: 'droplet', hint: 'Brand, frame and text', options: [
@@ -57,6 +83,8 @@ export const GROUPS = [
         { key: 'numbers', label: 'Amounts', type: 'choice', default: 'tabular', options: [['tabular', 'Aligned digits'], ['mono', 'Monospace'], ['plain', 'As the text']] },
         { key: 'caps', label: 'Small labels', type: 'choice', default: 'upper', options: [['upper', 'UPPER CASE'], ['normal', 'Normal case']] },
     ] },
+    { id: 'headings', label: 'Headers & text styles', iconName: 'list', hint: 'Group headers and titles: bold, italic, case, size, colour, background',
+        targets: TEXT_TARGETS, options: TEXT_TARGETS.flatMap(textOptions) },
     { id: 'sizes', label: 'Sizes & spacing', iconName: 'ruler', hint: 'Rows, gaps, controls, corners', options: [
         { key: 'gap', label: 'Space between panels', type: 'range', default: 10, min: 4, max: 18, step: 1, unit: 'px' },
         { key: 'controlHeight', label: 'Buttons & inputs height', type: 'range', default: 29, min: 22, max: 36, step: 1, unit: 'px' },
@@ -402,6 +430,25 @@ export function compileTheme(theme) {
     if (o.contentWidth !== 'full') add(`#view.view { max-width: ${o.contentWidth}px; width: 100%; margin-left: auto; margin-right: auto; }`);
     if (o.scrollbar === 'thin') add('* { scrollbar-width: thin; }');
     if (o.scrollbar === 'hidden') add('* { scrollbar-width: none; }', '*:hover { scrollbar-width: thin; }');
+
+    // ---- headers and text styles, each by itself (after everything else, and past the theme's own !important rules)
+    TEXT_TARGETS.forEach(t => {
+        const v = name => o[`tx.${t.id}.${name}`];
+        const self = `:is(${t.selector})`;
+        const text = `${self}, ${self} :is(b, strong, span:not(.chip-icon))`;
+        const band = v('background') === 'band';
+        const ink = v('color') || (band ? headInk : '');
+        if (v('weight') !== 'auto') add(`${text} { font-weight: ${v('weight')} !important; }`);
+        if (v('size') !== 'auto') add(`${self} { font-size: ${v('size')}px !important; }`, `${self} :is(b, strong, span:not(.chip-icon)) { font-size: inherit !important; }`);
+        if (v('case') !== 'auto') add(`${text} { text-transform: ${v('case')} !important; letter-spacing: ${v('case') === 'uppercase' ? '0.04em' : '0'} !important; }`);
+        if (ink) add(`${text} { color: ${ink} !important; }`, `${self} svg { color: ${ink} !important; }`);
+        if (v('italic')) add(`${text} { font-style: italic !important; }`);
+        if (v('underline')) add(`${self} { text-decoration: underline !important; text-underline-offset: 2px; }`);
+        if (v('background') === 'none') add(`${self} { background: transparent !important; }`);
+        if (v('background') === 'tint') add(`${self} { background: ${rgba(P, 0.12)} !important; border-radius: ${px(Math.max(3, r - 6))}; }`);
+        if (band) add(`${self} { background: var(--grad-navy) !important; border-radius: ${px(Math.max(3, r - 6))}; }`);
+        if (v('edge')) add(`${self} { box-shadow: inset 3px 0 0 ${A} !important; padding-left: 8px !important; }`);
+    });
 
     // ---- motion
     if (!o.motion) add('*, *::before, *::after { animation: none !important; transition: none !important; }');

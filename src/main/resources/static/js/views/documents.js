@@ -12,12 +12,17 @@
  * Quick work: drop photos / PDFs on a row or card to add scans, sort by what expires first, "Renew" on an expired or
  * expiring document; the form offers the common types and the family as one-click chips, fills the relation,
  * and checks the number's format (Aadhaar, PAN, passport, voter ID, driving licence).
+ * Insurance (medical, vehicle, life): the document also holds the policy (see InsuranceService): the premium and its due
+ * date, everything needed to pay it, and e-mail reminders. What is due soon or overdue shows above the list and under
+ * Needs attention; Pay shows how to pay (link, UPI QR, details) and records the premium as an expense, moving the policy
+ * on to its next due date.
  */
 import { api } from '../core/api.js';
 import { can } from '../core/store.js';
 import { panel, esc, emptyState, toast, confirmDialog, openModal, field, readForm } from '../core/ui.js';
 import { icon } from '../core/icons.js';
-import { date, dateTime, daysFromToday } from '../core/format.js';
+import { date, dateTime, daysFromToday, isoDate, money, moneyShort } from '../core/format.js';
+import { upiLink } from '../components/upi-pay.js';
 import { evidenceFieldHtml, bindEvidenceField, openViewer, fileUrl } from '../components/evidence.js';
 import { qrSvg } from '../core/qr.js';
 import { setPageKeys, listNavigator, isTyping } from '../core/keys.js';
@@ -28,7 +33,8 @@ export const DOC_TYPES = {
     VOTER_ID: ['Voter ID', 'flag', 'coral'], DRIVING_LICENCE: ['Driving licence', 'car', 'gold'], RATION_CARD: ['Ration card', 'home', 'gray'],
     BIRTH_CERT: ['Birth certificate', 'heart', 'red'], MARRIAGE_CERT: ['Marriage certificate', 'heart', 'violet'],
     EDUCATION: ['Educational certificate', 'briefcase', 'ocean'], BANK_PASSBOOK: ['Bank passbook', 'bank', 'aqua'],
-    PROPERTY: ['Property papers', 'building', 'gold'], VEHICLE_RC: ['Vehicle RC', 'car', 'gray'], INSURANCE: ['Insurance policy', 'shield', 'aqua'],
+    PROPERTY: ['Property papers', 'building', 'gold'], VEHICLE_RC: ['Vehicle RC', 'car', 'gray'], INSURANCE_HEALTH: ['Medical insurance', 'heart', 'red'], INSURANCE_VEHICLE: ['Vehicle insurance', 'car', 'gold'],
+    INSURANCE_LIFE: ['Life insurance', 'shield', 'violet'], INSURANCE: ['Insurance policy', 'shield', 'aqua'],
     MEDICAL: ['Medical record', 'heart', 'red'], EMPLOYMENT: ['Employment / payslips', 'briefcase', 'gray'], OTHER: ['Other', 'file-text', 'gray'],
 };
 /** What every adult usually needs at hand. */
@@ -49,6 +55,16 @@ const NUMBER_FORMATS = {
 };
 const SORTS = { expiry: 'Expiring first', person: 'By person', recent: 'Recently added' };
 const revealed = new Set();
+const INSURANCE_TYPES = ['INSURANCE_HEALTH', 'INSURANCE_VEHICLE', 'INSURANCE_LIFE', 'INSURANCE'];
+const FREQUENCIES = [['YEARLY', 'Yearly'], ['HALF_YEARLY', 'Half-yearly'], ['QUARTERLY', 'Quarterly'], ['MONTHLY', 'Monthly'], ['SINGLE', 'One time']];
+const PAY_MODES = [['ONLINE', 'Online'], ['UPI', 'UPI'], ['AUTO_DEBIT', 'Auto debit'], ['NET_BANKING', 'Net banking'], ['AGENT', 'Through the agent'], ['CHEQUE', 'Cheque'], ['CASH', 'Cash']];
+const REMINDER_STEPS = [60, 30, 15, 7, 3, 1];
+/** A premium that needs attention now. */
+const premiumDue = d => d.policy?.nextDueDate && d.policy.status !== 'OK';
+const premiumLate = d => ['OVERDUE', 'LAPSED'].includes(d.policy?.status);
+/** The cover of a policy is carried on by paying the premium, so its end is not "to renew" by itself. */
+const toRenew = d => d.expiresOn && !d.policy && daysFromToday(d.expiresOn) <= 180;
+const inDays = n => (n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `due in ${n} day${n === 1 ? '' : 's'}`);
 
 export async function render(container, _params, isCurrent) {
     if (fromAddress(_params)) {   // #/documents?owner=<key>&sort=person&layout=cards&type=…
@@ -65,8 +81,11 @@ export async function render(container, _params, isCurrent) {
     const owners = members(docs);
     if (view.owner && !owners.some(o => o.key === view.owner)) view.owner = null;
     showRoute(routeHash('documents', { owner: view.owner, sort: view.sort, layout, type: view.type }));
-    const soon = docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) >= 0 && daysFromToday(d.expiresOn) <= 180);
-    const expired = docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) < 0);
+    const soon = docs.filter(d => !d.policy && d.expiresOn && daysFromToday(d.expiresOn) >= 0 && daysFromToday(d.expiresOn) <= 180);
+    const premiums = docs.filter(premiumDue).sort((a, b) => a.policy.nextDueDate.localeCompare(b.policy.nextDueDate));
+    const policies = docs.filter(d => d.policy);
+    // a policy whose premium is due says so once, as the premium
+    const expired = docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) < 0 && !premiumDue(d));
     const noScan = docs.filter(d => !d.fileCount);
 
     container.innerHTML = `
@@ -82,11 +101,13 @@ export async function render(container, _params, isCurrent) {
         </div>
         <section class="gift-overview doc-overview">
             ${tile('file-text', 'Documents', String(docs.length), `${docs.reduce((s, d) => s + d.fileCount, 0)} scans`)}
-            ${tile('users', 'People', String(owners.length), owners.map(o => o.name).slice(0, 3).join(', ') || '—')}
+            ${policies.length ? tile('shield', 'Premiums due', String(premiums.length), premiums[0] ? `${moneyShort(premiums.reduce((x, d) => x + Number(d.policy.premium), 0))} · next ${date(premiums[0].policy.nextDueDate)}` : `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'}, none due soon`, premiums.some(premiumLate) ? 'warn' : premiums.length ? 'attn' : '')
+                : tile('users', 'People', String(owners.length), owners.map(o => o.name).slice(0, 3).join(', ') || '—')}
             ${tile('clock', 'Expiring in 6 months', String(soon.length), soon[0] ? `${esc(soon[0].title)} · ${date(soon[0].expiresOn)}` : 'nothing soon', soon.length ? 'attn' : '')}
             ${tile('alert-circle', 'Expired', String(expired.length), expired[0] ? esc(expired[0].title) : 'none', expired.length ? 'warn' : '')}
             ${tile('link', 'Shared now', String(docs.reduce((s, d) => s + d.activeShares, 0)), 'links that still work')}
             ${tile('camera', 'Without a scan', String(noScan.length), noScan.length ? 'add a photo or PDF' : 'all scanned')}
+            ${premiumAlerts(premiums, manage)}
         </section>
         ${panel({ title: 'Family', iconName: 'users', cls: 'p-doc-people', bodyClass: 'flush', sub: `${owners.length}`,
             body: `${owners.length > 6 ? `<div class="gp-tools"><div class="search-box sm">${icon('search')}<input id="dc-pq" placeholder="Find a person…" data-plain></div></div>` : ''}
@@ -105,7 +126,7 @@ export async function render(container, _params, isCurrent) {
                     <button class="seg-chip ${layout === 'cards' ? 'active' : ''}" data-layout="cards" title="Cards with the scans">${icon('layers')}</button></div>`,
             body: `<div class="scroll" id="dc-grid"></div>` })}
         <aside class="gift-side">
-            <section class="side-card"><div class="side-head">${icon('alert')}<b>Needs attention</b></div>${attention(soon, expired, noScan)}</section>
+            <section class="side-card"><div class="side-head">${icon('alert')}<b>Needs attention</b></div>${attention(soon, expired, noScan, premiums)}</section>
             <section class="side-card"><div class="side-head">${icon('check-circle')}<b>Essentials</b></div>${checklist(owners)}</section>
         </aside>
     </div>`;
@@ -119,7 +140,7 @@ export async function render(container, _params, isCurrent) {
             && (!q || `${d.title} ${d.owner} ${typeLabel(d.docType)} ${d.issuer || ''} ${d.notes || ''} ${d.docNumber || ''}`.toLowerCase().includes(q)))
             .sort(view.sort === 'person' ? (a, b) => a.owner.localeCompare(b.owner) || typeLabel(a.docType).localeCompare(typeLabel(b.docType))
                 : view.sort === 'recent' ? (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || b.id - a.id
-                : (a, b) => (a.expiresOn || '9999').localeCompare(b.expiresOn || '9999') || a.owner.localeCompare(b.owner));
+                : (a, b) => (a.policy?.nextDueDate || a.expiresOn || '9999').localeCompare(b.policy?.nextDueDate || b.expiresOn || '9999') || a.owner.localeCompare(b.owner));
     };
     const drawList = () => {
         const list = listed();
@@ -218,8 +239,14 @@ export async function render(container, _params, isCurrent) {
     let t;
     on('#dc-q', 'input', e => { clearTimeout(t); t = setTimeout(() => { view.q = e.target.value.trim(); drawList(); }, 150); });
     on('#dc-add', 'click', () => openDocForm(null, docs, reload, view.owner ? owners.find(o => o.key === view.owner) : null));
+    container.querySelector('.dc-alerts')?.addEventListener('click', e => {
+        const b = e.target.closest('[data-pay-doc]');
+        if (b) openPremium(docs.find(x => x.id === Number(b.dataset.payDoc)), reload);
+    });
     peopleEl.addEventListener('click', e => { const o = e.target.closest('[data-owner]'); if (o) pickOwner(o.dataset.owner); });
     container.querySelector('.gift-side').addEventListener('click', e => {
+        const pay = e.target.closest('[data-pay-doc]');
+        if (pay) { openPremium(docs.find(x => x.id === Number(pay.dataset.payDoc)), reload); return; }
         const d = e.target.closest('[data-doc-open]');
         if (d) openDocument(docs.find(x => x.id === Number(d.dataset.docOpen)));
         const add = e.target.closest('[data-add-type]');
@@ -246,6 +273,20 @@ export async function render(container, _params, isCurrent) {
             if (act === 'share') openShare(d, reload);
             if (act === 'edit') openDocForm(d, docs, reload);
             if (act === 'renew') openDocForm(d, docs, reload, null, { renew: true });
+            if (act === 'pay') openPremium(d, reload);
+            if (act === 'remind') {
+                const sent = await api.post(`/documents/${d.id}/policy/remind`);
+                toast(sent.result, sent.ok ? 'success' : 'error');
+                reload();
+            }
+            if (act === 'undo-premium') {
+                const last = d.policy.payments[0];
+                if (await confirmDialog(`Undo the premium of ${money(last.amount)} paid on ${date(last.paidOn)}? ${last.entryGone ? 'Its expense is already gone.' : `Its expense ${last.entryNo} is deleted.`} The policy goes back to the due date ${last.dueDate ? date(last.dueDate) : 'it had'}.`, { confirmLabel: 'Undo' })) {
+                    await api.del(`/documents/${d.id}/policy/payments/${last.id}`);
+                    toast('Premium undone');
+                    reload();
+                }
+            }
             if (act === 'delete' && await confirmDialog(`Delete "${d.title}" of ${d.owner} with its ${d.fileCount} scan${d.fileCount === 1 ? '' : 's'}? Share links stop working.`)) {
                 await api.del(`/documents/${d.id}`); toast('Document deleted'); view.open = null; reload();
             }
@@ -324,7 +365,7 @@ function memberGroups(owners) {
 function memberItem(m, group = '') {
     const have = new Set(m.docs.map(d => d.docType));
     const missing = ESSENTIALS.filter(k => !have.has(k));
-    const alerts = m.docs.filter(d => d.expiresOn && daysFromToday(d.expiresOn) <= 180).length;
+    const alerts = m.docs.filter(d => toRenew(d) || premiumDue(d)).length;
     const done = (ESSENTIALS.length - missing.length) / ESSENTIALS.length * 100;
     return `<div class="list-item clickable gp-item ${alerts ? 't-gold' : ''} ${view.owner === m.key ? 'selected' : ''}" data-owner="${esc(m.key)}" data-in="${group}">
         <span class="avatar sm">${esc(m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</span>
@@ -350,7 +391,16 @@ function mask(n) {
     return s.length <= 4 ? '••••' : '•'.repeat(Math.min(8, s.length - 4)) + s.slice(-4);
 }
 
+/** A policy's validity is its next premium. */
+function premiumHtml(d) {
+    const p = d.policy;
+    if (!p.nextDueDate) return `<span class="doc-premium done" title="No more premiums are due">${icon('check-circle')}all premiums paid</span>`;
+    const tone = premiumLate(d) ? 'late' : p.status === 'OK' ? 'ok' : 'soon';
+    return `<span class="doc-premium ${tone}" title="${esc(p.frequencyLabel)} premium${p.status === 'LAPSED' ? ': past the grace period' : ''}">${icon(tone === 'ok' ? 'calendar' : 'clock')}${moneyShort(p.premium)} · ${tone === 'ok' ? date(p.nextDueDate) : inDays(p.daysToDue)}</span>`;
+}
+
 function validity(d) {
+    if (d.policy) return premiumHtml(d);
     if (!d.expiresOn) return d.issuedOn ? `<span class="doc-valid">issued ${date(d.issuedOn)}</span>` : '';
     const days = daysFromToday(d.expiresOn);
     if (days < 0) return `<span class="doc-valid bad">${icon('alert-circle')}expired ${date(d.expiresOn)}</span>`;
@@ -360,7 +410,7 @@ function validity(d) {
 
 function card(d, manage) {
     const [label, iconName, tone] = DOC_TYPES[d.docType] || DOC_TYPES.OTHER;
-    const renew = d.expiresOn && daysFromToday(d.expiresOn) <= 180;
+    const renew = toRenew(d);
     return `<div class="doc-card" data-doc="${d.id}" title="${manage ? 'Drop photos or PDFs here to add scans' : ''}">
         <button class="doc-cover" data-doc-act="view" data-id="${d.id}" title="Open the scans">
             ${d.coverId && d.coverIsImage ? `<img data-cover="${d.coverId}" alt="">` : `<span class="doc-cover-icon chip-icon ${tone}">${icon(d.fileCount ? 'file-text' : iconName)}</span>`}
@@ -377,6 +427,7 @@ function card(d, manage) {
         <div class="doc-actions">
             <button class="btn sm primary" data-doc-act="share" data-id="${d.id}" ${d.fileCount ? '' : 'disabled title="Add a scan first"'}>${icon('link')}Share</button>
             <button class="btn sm" data-doc-act="view" data-id="${d.id}">${icon('eye')}View</button>
+            ${manage && d.policy ? `<button class="btn sm doc-pay" data-doc-act="pay" data-id="${d.id}" title="See how to pay, and record the premium">${icon('wallet')}Premium</button>` : ''}
             ${manage && renew ? `<button class="btn sm ghost doc-renew" data-doc-act="renew" data-id="${d.id}" title="Renewed? Set the new validity and add the new scan">${icon('refresh')}Renew</button>` : ''}
             ${manage ? `<button class="btn sm ghost icon" data-doc-act="edit" data-id="${d.id}" title="Edit">${icon('edit')}</button>
                 <button class="btn sm ghost icon danger" data-doc-act="delete" data-id="${d.id}" title="Delete">${icon('trash')}</button>` : ''}
@@ -387,7 +438,7 @@ function card(d, manage) {
 /** One document on one line, like an expense: type, title and whose, the number, validity, scans. */
 function row(d, manage) {
     const [label, iconName, tone] = DOC_TYPES[d.docType] || DOC_TYPES.OTHER;
-    const renew = d.expiresOn && daysFromToday(d.expiresOn) <= 180;
+    const renew = toRenew(d);
     return `<tr class="clickable xp-tr doc-row ${view.open === d.id ? 'expanded' : ''}" data-doc="${d.id}" ${manage ? 'title="Drop photos or PDFs here to add scans"' : ''}>
         <td class="c-type"><div class="xd-cat"><span class="chip-icon xs ${tone}">${icon(iconName)}</span><span class="ellipsis">${esc(label)}</span></div></td>
         <td class="c-desc"><div class="xd-cell"><span class="xd-text"><b title="${esc(d.title)}">${esc(d.title)}</b>
@@ -399,6 +450,7 @@ function row(d, manage) {
         <td class="c-files"><button class="doc-scans ${d.fileCount ? '' : 'none'}" data-doc-act="view" data-id="${d.id}" title="${d.fileCount ? 'Open the scans' : 'No scan yet'}">${icon('paperclip')}${d.fileCount}</button></td>
         <td class="c-caret"><span class="gr-actions">
             ${d.fileCount ? `<button class="btn xs ghost" data-doc-act="share" data-id="${d.id}" title="Share">${icon('link')}</button>` : ''}
+            ${manage && d.policy ? `<button class="btn xs ghost doc-pay" data-doc-act="pay" data-id="${d.id}" title="See how to pay, and record the premium">${icon('wallet')}</button>` : ''}
             ${manage && renew ? `<button class="btn xs ghost doc-renew" data-doc-act="renew" data-id="${d.id}" title="Renewed? Set the new validity and add the new scan">${icon('refresh')}</button>` : ''}
             ${manage ? `<button class="btn xs ghost" data-doc-act="edit" data-id="${d.id}" title="Edit">${icon('edit')}</button>` : ''}</span>
             <span class="expand-caret">${icon('chevron-down')}</span></td>
@@ -408,7 +460,7 @@ function row(d, manage) {
 /** A document opened in place, kept short: one line of facts and actions, then its scans. */
 function detailHtml(d, manage) {
     const [label, iconName] = DOC_TYPES[d.docType] || DOC_TYPES.OTHER;
-    const renew = d.expiresOn && daysFromToday(d.expiresOn) <= 180;
+    const renew = toRenew(d);
     const fact = (ico, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ico)}${text}</span>`;
     return `<div class="xp-detail2 doc-detail2">
         <div class="xd-top">
@@ -421,7 +473,8 @@ function detailHtml(d, manage) {
             ${d.createdAt ? fact('history', dateTime(d.createdAt), 'Added') : ''}
             <span class="spacer"></span>
             <span class="xd-actions">
-                <button class="btn xs primary" data-doc-act="share" data-id="${d.id}" ${d.fileCount ? '' : 'disabled title="Add a scan first"'}>${icon('link')}Share</button>
+                ${manage && d.policy ? `<button class="btn xs primary doc-pay-main" data-doc-act="pay" data-id="${d.id}">${icon('wallet')}Pay premium</button>` : ''}
+                <button class="btn xs ${d.policy ? '' : 'primary'}" data-doc-act="share" data-id="${d.id}" ${d.fileCount ? '' : 'disabled title="Add a scan first"'}>${icon('link')}Share</button>
                 <button class="btn xs" data-doc-act="view" data-id="${d.id}" ${d.fileCount ? '' : 'disabled'}>${icon('eye')}View</button>
                 ${manage && renew ? `<button class="btn xs doc-renew" data-doc-act="renew" data-id="${d.id}">${icon('refresh')}Renew</button>` : ''}
                 ${manage ? `<button class="btn xs" data-doc-act="edit" data-id="${d.id}">${icon('edit')}Edit</button>
@@ -429,18 +482,124 @@ function detailHtml(d, manage) {
             </span>
         </div>
         ${d.notes ? `<div class="xd-note">${icon('info')}<span>${esc(d.notes)}</span></div>` : ''}
+        ${d.policy ? policyHtml(d, manage) : ''}
         <div class="xp-evidence" data-ev-doc="${d.id}" data-ev-count="${d.fileCount || 0}"></div>
     </div>`;
 }
 
-function attention(soon, expired, noScan) {
+/** The strip above the lists: each premium due soon or overdue, with Pay at hand. */
+function premiumAlerts(premiums, manage) {
+    if (!premiums.length) return '';
+    return `<div class="dc-alerts" role="status">${premiums.slice(0, 3).map(d => `<div class="dc-alert ${premiumLate(d) ? 'late' : ''}">${icon(premiumLate(d) ? 'alert-circle' : 'clock')}
+        <span class="grow"><b>${esc(d.title)}</b> · ${esc(d.owner)} · <b>${money(d.policy.premium)}</b> ${inDays(d.policy.daysToDue)} (${date(d.policy.nextDueDate)})${d.policy.status === 'LAPSED' ? ' · <b>past the grace period</b>' : ''}</span>
+        ${manage ? `<button class="btn xs primary" data-pay-doc="${d.id}">${icon('wallet')}Pay</button>` : ''}</div>`).join('')}
+        ${premiums.length > 3 ? `<span class="small muted">and ${premiums.length - 3} more under Needs attention</span>` : ''}</div>`;
+}
+
+/** The address of a payment link, only when it is a web address. */
+const safeUrl = u => (/^https?:\/\//i.test(u || '') ? u : null);
+
+/** A policy opened in place: the premium, the cover, how to pay it, the reminders, and what was paid. */
+function policyHtml(d, manage) {
+    const p = d.policy;
+    const line = (label, value) => (value == null || value === '' ? '' : `<div class="xd-line small"><span class="muted">${label}</span><span>${value}</span></div>`);
+    const url = safeUrl(p.paymentUrl);
+    const history = p.payments.length ? `<div class="xd-card ins-history"><div class="xd-card-head">${icon('history')}Premiums paid<span class="spacer"></span><b class="mono">${money(p.payments.reduce((s, x) => s + Number(x.amount), 0))}</b></div>
+        ${p.payments.slice(0, 12).map((x, i) => `<div class="xd-line small"><span>${date(x.paidOn)}${x.dueDate ? ` <span class="muted">for ${date(x.dueDate)}</span>` : ''} · ${esc(x.accountName || '')}</span>
+            <span>${x.entryGone ? '<span class="muted">expense deleted</span>' : `<a href="#/entry/${x.entryId}">${esc(x.entryNo)}</a>`} · <b class="mono">${money(x.amount)}</b>
+            ${i === 0 && manage ? `<button class="icon-mini" data-doc-act="undo-premium" data-id="${d.id}" title="Undo this premium">${icon('undo')}</button>` : ''}</span></div>`).join('')}</div>` : '';
+    return `<div class="ins-cards">
+        <div class="xd-card"><div class="xd-card-head">${icon('wallet')}Premium</div>
+            ${line('Amount', `<b class="mono">${money(p.premium)}</b>`)}
+            ${line('Paid', esc(p.frequencyLabel))}
+            ${line('Next due', p.nextDueDate ? `<b>${date(p.nextDueDate)}</b>` : 'nothing more')}
+            ${line('Grace', p.graceDays ? `${p.graceDays} days` : '')}
+            ${line('Last premium', p.lastPremiumDate ? date(p.lastPremiumDate) : '')}
+        </div>
+        <div class="xd-card"><div class="xd-card-head">${icon('shield')}Cover</div>
+            ${line('Plan', esc(p.planName || ''))}
+            ${line('Cover', p.sumInsured != null ? money(p.sumInsured) : '')}
+            ${line('Insured', esc(p.insuredPersons || ''))}
+            ${line('Vehicle', esc(p.vehicleNumber || ''))}
+            ${line('Nominee', esc(p.nominee || ''))}
+            ${line(d.docType === 'INSURANCE_LIFE' ? 'Matures' : 'Cover until', d.expiresOn ? date(d.expiresOn) : '')}
+        </div>
+        <div class="xd-card"><div class="xd-card-head">${icon('card')}How to pay</div>
+            ${[p.paymentMode, p.payeeName, p.upiId, p.paymentReference, p.agentName, p.agentPhone, p.supportPhone, p.paymentNotes, url].some(Boolean) ? '' : '<div class="xd-line small"><span class="muted">Not given yet: Edit adds the payment link, UPI ID, agent and customer care.</span></div>'}
+            ${line('Way', esc(PAY_MODES.find(([k]) => k === p.paymentMode)?.[1] || ''))}
+            ${line('Pay to', esc(p.payeeName || ''))}
+            ${line('UPI ID', p.upiId ? `<span class="mono">${esc(p.upiId)}</span>` : '')}
+            ${line('Customer / biller ID', esc(p.paymentReference || ''))}
+            ${line('Agent', esc([p.agentName, p.agentPhone].filter(Boolean).join(' · ')))}
+            ${line('Customer care', esc(p.supportPhone || ''))}
+            ${p.paymentNotes ? `<div class="xd-line small"><span class="muted">${esc(p.paymentNotes)}</span></div>` : ''}
+            ${url ? `<div class="ins-acts"><a class="btn xs" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('link')}Pay online</a></div>` : ''}
+        </div>
+        <div class="xd-card"><div class="xd-card-head">${icon('clock')}Reminders</div>
+            ${line('By e-mail', p.emailReminders ? `<span class="pos">on</span> · ${esc(p.reminderDays || '')} days before` : 'off')}
+            ${line('Sent to', p.emailReminders ? esc(p.emailTo || 'the addresses in Settings › Alerts') : '')}
+            ${p.lastReminderResult ? `<span class="ins-result">${dateTime(p.lastReminderAt)}: ${esc(p.lastReminderResult)}</span>` : ''}
+            ${manage && p.nextDueDate ? `<div class="ins-acts"><button class="btn xs" data-doc-act="remind" data-id="${d.id}" title="Send the reminder with the payment details now">${icon('upload')}Send now</button></div>` : ''}
+        </div>
+    </div>${history}`;
+}
+
+/** See how to pay a premium and record it: booked in Expenses, and the policy moves on to its next due date. */
+async function openPremium(d, reload) {
+    const p = d.policy;
+    const options = await api.get('/expenses/form-options').catch(() => null);
+    if (!options) { toast('Expenses are not shared with you, so a premium cannot be recorded here', 'error'); return; }
+    const url = safeUrl(p.paymentUrl);
+    const fact = (label, value) => (value ? `<div><span>${label}</span><b>${esc(value)}</b></div>` : '');
+    const premiumCategory = p.categoryId || options.categories.find(c => /insurance/i.test(c.name))?.id || '';
+    const qr = p.upiId ? `<div class="ins-pay-side">${qrSvg(upiLink({ vpa: p.upiId, payee: p.payeeName || d.issuer, amount: p.premium, note: `${d.title} ${d.docNumber || ''}`.trim().slice(0, 50) }), { size: 150 })}
+        <b>Scan to pay ${money(p.premium)}</b><span class="mono">${esc(p.upiId)}</span></div>` : '';
+    const modal = openModal({
+        title: `Premium · ${d.title} (${d.owner})`, iconName: 'wallet', size: 'lg',
+        body: `<div class="ins-pay-grid ${qr ? '' : 'single'}"><div>
+            <div class="ins-pay-facts">
+                ${fact('Premium', money(p.premium))}
+                ${fact('Due', p.nextDueDate ? `${date(p.nextDueDate)} (${inDays(p.daysToDue)})` : 'nothing more is due')}
+                ${fact('Insurer', d.issuer)}${fact('Policy number', d.docNumber)}${fact('Pay to', p.payeeName)}${fact('Customer / biller ID', p.paymentReference)}
+                ${fact('Agent', [p.agentName, p.agentPhone].filter(Boolean).join(' · '))}${fact('Customer care', p.supportPhone)}${fact('Note', p.paymentNotes)}
+            </div>
+            ${url ? `<p class="ins-acts"><a class="btn sm primary" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('link')}Pay online</a><span class="small muted">then record it below</span></p>` : ''}
+            <form class="form-grid two" autocomplete="off">
+                ${field({ label: 'Paid on', name: 'paidOn', type: 'date', value: isoDate(), required: true })}
+                ${field({ label: 'Amount', name: 'amount', type: 'number', value: p.premium, required: true })}
+                ${field({ label: 'Paid from', name: 'accountId', type: 'select', value: p.payAccountId || '', required: true, options: [{ value: '', label: 'Choose the account' }, ...options.payers.map(a => ({ value: a.id, label: a.name }))] })}
+                ${field({ label: 'Expense category', name: 'categoryId', type: 'select', value: premiumCategory, required: true, options: [{ value: '', label: 'Choose the category' }, ...options.categories.map(c => ({ value: c.id, label: c.name }))] })}
+                ${field({ label: 'Payment reference', name: 'reference', placeholder: 'UTR, receipt number', attrs: 'maxlength="60"' })}
+                ${field({ label: 'Notes', name: 'notes', attrs: 'maxlength="255"' })}
+                <div class="span-2">${evidenceFieldHtml({ label: 'Receipt', hint: 'Kept with the expense' })}</div>
+            </form>
+        </div>${qr}</div>`,
+        actions: [{ label: 'Close' }, {
+            label: 'Record in Expenses', kind: 'primary', iconName: 'check',
+            onClick: async m => {
+                const form = m.el.querySelector('form');
+                if (!form.reportValidity()) return true;
+                const v = readForm(form);
+                const paid = await api.post(`/documents/${d.id}/policy/pay`, { paidOn: v.paidOn, amount: v.amount, accountId: Number(v.accountId), categoryId: Number(v.categoryId),
+                    dueDate: p.nextDueDate, reference: v.reference, notes: v.notes });
+                await evidence.uploadTo(paid.entryId);
+                toast(`Recorded in Expenses as ${paid.entryNo}${paid.nextDueDate ? `. Next premium due ${date(paid.nextDueDate)}` : '. No more premiums are due'}`);
+                reload();
+            },
+        }],
+    });
+    const evidence = bindEvidenceField(modal.el);
+}
+
+function attention(soon, expired, noScan, premiums = []) {
+    const pay = premiums.map(d => `<div class="insight ${premiumLate(d) ? 'bad' : 'warn'} clickable" data-pay-doc="${d.id}">${icon('shield')}<div><b>${esc(d.title)}</b> · ${esc(d.owner)}<br><span class="small">premium ${money(d.policy.premium)} ${inDays(d.policy.daysToDue)}</span></div></div>`);
     const rows = [
         ...expired.map(d => ['bad', 'alert-circle', d, `expired ${date(d.expiresOn)}: renew it`]),
         ...soon.sort((a, b) => a.expiresOn.localeCompare(b.expiresOn)).map(d => ['warn', 'clock', d, `expires ${date(d.expiresOn)} (in ${daysFromToday(d.expiresOn)} days)`]),
         ...noScan.map(d => ['info', 'camera', d, 'no scan yet: add a photo or PDF']),
     ];
-    if (!rows.length) return '<p class="small muted" style="margin:4px 0">Everything is scanned and valid.</p>';
-    return `<div class="insights">${rows.slice(0, 8).map(([tone, ico, d, text]) => `<div class="insight ${tone} clickable" data-doc-open="${d.id}">${icon(ico)}<div><b>${esc(d.title)}</b> · ${esc(d.owner)}<br><span class="small">${text}</span></div></div>`).join('')}</div>`;
+    if (!rows.length && !pay.length) return '<p class="small muted" style="margin:4px 0">Everything is scanned and valid.</p>';
+    return `<div class="insights">${pay.join('')}${rows.slice(0, Math.max(0, 8 - pay.length)).map(([tone, ico, d, text]) => `<div class="insight ${tone} clickable" data-doc-open="${d.id}">${icon(ico)}<div><b>${esc(d.title)}</b> · ${esc(d.owner)}<br><span class="small">${text}</span></div></div>`).join('')}</div>`;
 }
 
 function checklist(owners) {
@@ -541,12 +700,67 @@ async function shareFiles(d, files) {
 
 // ===================================================================== form
 
-function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
+/** The policy's part of the form, shown for the insurance types. */
+function policyFormHtml(p, options) {
+    const days = new Set(String(p.reminderDays || '30,15,7,3,1').split(',').map(Number));
+    const category = p.categoryId || options.categories.find(c => /insurance/i.test(c.name))?.id || '';
+    return `<div class="span-3 ins-form" data-ins-form hidden>
+        <div class="ins-head">${icon('shield')}Cover</div>
+        <div class="form-grid three">
+            ${field({ label: 'Plan', name: 'p_planName', value: p.planName || '', attrs: 'maxlength="100"' })}
+            ${field({ label: 'Cover (sum insured)', name: 'p_sumInsured', type: 'number', value: p.sumInsured ?? '' })}
+            ${field({ label: 'Who is insured', name: 'p_insuredPersons', value: p.insuredPersons || '', attrs: 'maxlength="200"', placeholder: 'Self, Lakshmi, Arjun' })}
+            <div data-ins-only="INSURANCE_VEHICLE">${field({ label: 'Vehicle number', name: 'p_vehicleNumber', value: p.vehicleNumber || '', attrs: 'maxlength="30"', placeholder: 'TS09 AB 1234' })}</div>
+            <div data-ins-only="INSURANCE_LIFE INSURANCE_HEALTH INSURANCE">${field({ label: 'Nominee', name: 'p_nominee', value: p.nominee || '', attrs: 'maxlength="100"' })}</div>
+        </div>
+        <div class="ins-head">${icon('wallet')}Premium</div>
+        <div class="form-grid three">
+            ${field({ label: 'Premium *', name: 'p_premium', type: 'number', value: p.premium ?? '' })}
+            ${field({ label: 'Paid', name: 'p_frequency', type: 'select', value: p.frequency || 'YEARLY', options: FREQUENCIES.map(([value, label]) => ({ value, label })) })}
+            ${field({ label: 'Next due date *', name: 'p_nextDueDate', type: 'date', value: p.nextDueDate || '' })}
+            ${field({ label: 'Grace days', name: 'p_graceDays', type: 'number', value: p.graceDays ?? '', hint: 'Days the insurer allows after the due date' })}
+            <div data-ins-only="INSURANCE_LIFE">${field({ label: 'Last premium on', name: 'p_lastPremiumDate', type: 'date', value: p.lastPremiumDate || '', hint: 'When premiums stop, if before maturity' })}</div>
+        </div>
+        <div class="ins-head">${icon('card')}How it is paid</div>
+        <div class="form-grid three">
+            ${field({ label: 'Way', name: 'p_paymentMode', type: 'select', value: p.paymentMode || '', options: [{ value: '', label: 'Not said' }, ...PAY_MODES.map(([value, label]) => ({ value, label }))] })}
+            ${field({ label: 'Usually paid from', name: 'p_payAccountId', type: 'select', value: p.payAccountId || '', options: [{ value: '', label: 'Choose when paying' }, ...options.payers.map(a => ({ value: a.id, label: a.name }))] })}
+            ${field({ label: 'Expense category', name: 'p_categoryId', type: 'select', value: category, options: [{ value: '', label: 'Choose when paying' }, ...options.categories.map(c => ({ value: c.id, label: c.name }))] })}
+            ${field({ label: 'Payment link', name: 'p_paymentUrl', value: p.paymentUrl || '', placeholder: 'https://…', attrs: 'maxlength="300"' })}
+            ${field({ label: 'UPI ID', name: 'p_upiId', value: p.upiId || '', placeholder: 'name@bank', attrs: 'maxlength="100"' })}
+            ${field({ label: 'Pay to (name)', name: 'p_payeeName', value: p.payeeName || '', attrs: 'maxlength="100"' })}
+            ${field({ label: 'Customer / biller ID', name: 'p_paymentReference', value: p.paymentReference || '', attrs: 'maxlength="100"' })}
+            ${field({ label: 'Agent', name: 'p_agentName', value: p.agentName || '', attrs: 'maxlength="100"' })}
+            ${field({ label: 'Agent phone', name: 'p_agentPhone', value: p.agentPhone || '', attrs: 'maxlength="30"' })}
+            ${field({ label: 'Customer care', name: 'p_supportPhone', value: p.supportPhone || '', attrs: 'maxlength="40"' })}
+            ${field({ label: 'Payment notes', name: 'p_paymentNotes', value: p.paymentNotes || '', span: 'span-2', attrs: 'maxlength="255"', placeholder: 'Anything else needed to pay' })}
+        </div>
+        <div class="ins-head">${icon('clock')}Reminders</div>
+        <label class="check-line"><input type="checkbox" name="p_emailReminders" ${p.id ? (p.emailReminders ? 'checked' : '') : 'checked'}> Send e-mail reminders with the payment details</label>
+        <div class="ins-days" data-ins-days><span class="small muted">Days before the due date:</span>${REMINDER_STEPS.map(n => `<button type="button" class="date-chip ${days.has(n) ? 'selected' : ''}" data-day="${n}">${n}</button>`).join('')}<span class="small muted">also on the due date, then weekly while overdue</span></div>
+        ${field({ label: 'E-mail to', name: 'p_emailTo', value: p.emailTo || '', attrs: 'maxlength="300"', placeholder: 'Blank: the addresses in Settings › Alerts', hint: 'Sent through the account in Settings › E-mail' })}
+    </div>`;
+}
+
+/** What the policy part of the form holds, for the server. */
+function readPolicy(form, data) {
+    const value = k => data[`p_${k}`];
+    const id = k => (value(k) ? Number(value(k)) : null);
+    return { planName: value('planName'), insuredPersons: value('insuredPersons'), nominee: value('nominee'), vehicleNumber: value('vehicleNumber'), sumInsured: value('sumInsured'),
+        premium: value('premium'), frequency: value('frequency'), nextDueDate: value('nextDueDate'), lastPremiumDate: value('lastPremiumDate'), graceDays: value('graceDays'),
+        paymentMode: value('paymentMode'), payAccountId: id('payAccountId'), categoryId: id('categoryId'), payeeName: value('payeeName'), paymentUrl: value('paymentUrl'),
+        upiId: value('upiId'), paymentReference: value('paymentReference'), agentName: value('agentName'), agentPhone: value('agentPhone'), supportPhone: value('supportPhone'),
+        paymentNotes: value('paymentNotes'), emailReminders: value('emailReminders'), emailTo: value('emailTo'),
+        reminderDays: [...form.querySelectorAll('[data-day].selected')].map(b => b.dataset.day).join(',') };
+}
+
+async function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
+    const formOptions = await api.get('/expenses/form-options').catch(() => ({ categories: [], payers: [] }));
     const d = doc || { owner: member?.name || '', relation: member?.relation || '', docType: 'AADHAAR' };
     const editing = doc && doc.id;
     const owners = [...new Set(all.map(x => x.owner))];
     const relationOf = name => all.find(x => x.owner.toLowerCase() === name.trim().toLowerCase() && x.relation)?.relation;
-    const quickTypes = ['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENCE', 'VOTER_ID', 'INSURANCE', 'VEHICLE_RC', 'PROPERTY'];
+    const quickTypes = ['AADHAAR', 'PAN', 'PASSPORT', 'DRIVING_LICENCE', 'VOTER_ID', 'INSURANCE_HEALTH', 'INSURANCE_VEHICLE', 'INSURANCE_LIFE', 'VEHICLE_RC', 'PROPERTY'];
     const modal = openModal({
         title: renew ? `Renew · ${doc.title}` : editing ? `Edit · ${doc.title}` : 'Add document', iconName: renew ? 'refresh' : 'file-text', size: 'lg',
         body: `<form class="form-grid three" autocomplete="off">
@@ -566,6 +780,7 @@ function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
             ${field({ label: 'Issued by', name: 'issuer', value: d.issuer || '', placeholder: 'e.g. UIDAI, RTO Hyderabad, Osmania University' })}
             ${field({ label: 'Issued on', name: 'issuedOn', type: 'date', value: d.issuedOn || '' })}
             ${field({ label: 'Valid until', name: 'expiresOn', type: 'date', value: renew ? '' : d.expiresOn || '', hint: 'Passports, licences, policies: you are reminded 6 months before', attrs: 'data-dp-base="issuedOn"' })}
+            ${policyFormHtml(d.policy || {}, formOptions)}
             ${field({ label: 'Notes', name: 'notes', value: d.notes || '', span: 'span-3' })}
             <div class="span-3">${evidenceFieldHtml({ label: 'Scans', hint: 'Front and back, or a PDF' })}</div>
             ${editing ? `<div class="span-3" data-ev-doc="${doc.id}" data-ev-count="${doc.fileCount}"></div>` : ''}
@@ -581,10 +796,31 @@ function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
                 box.className = `doc-check ${ok ? 'ok' : 'warn'}`;
                 box.textContent = ok ? '✓ looks right' : `usually ${fmt[1]}`;
             };
+            const labelOf = name => form.elements[name].closest('.field')?.querySelector(':scope > span');
+            const plain = { docNumber: labelOf('docNumber')?.textContent, issuer: labelOf('issuer')?.textContent, expiresOn: labelOf('expiresOn')?.textContent };
+            /** An insurance type: the policy's part shows, and the document's own boxes say what they hold on a policy. */
+            const onInsurance = () => {
+                const type = form.docType.value;
+                const insured = INSURANCE_TYPES.includes(type);
+                form.querySelector('[data-ins-form]').hidden = !insured;
+                form.querySelectorAll('[data-ins-only]').forEach(el => { el.hidden = !el.dataset.insOnly.split(' ').includes(type); });
+                form.p_premium.required = insured;
+                form.p_nextDueDate.required = insured && form.p_frequency.value !== 'SINGLE' && !(d.policy && !d.policy.nextDueDate);
+                const label = (name, text) => { const el = labelOf(name); if (el) el.textContent = insured ? text : plain[name]; };
+                label('docNumber', 'Policy number');
+                label('issuer', 'Insurer');
+                label('expiresOn', type === 'INSURANCE_LIFE' ? 'Matures on' : 'Cover until');
+                form.issuer.placeholder = insured ? 'e.g. Star Health, ICICI Lombard, LIC' : 'e.g. UIDAI, RTO Hyderabad, Osmania University';
+                const validHint = form.expiresOn.closest('.field').querySelector(':scope > small');
+                if (validHint) validHint.hidden = insured;   // a policy is reminded by its premium
+            };
+            form.p_frequency.addEventListener('change', onInsurance);
+            form.querySelector('[data-ins-days]').addEventListener('click', e => e.target.closest('[data-day]')?.classList.toggle('selected'));
             const onType = () => {
                 if (!editing && (!form.title.value || Object.values(DOC_TYPES).some(([l]) => l === form.title.value))) form.title.value = typeLabel(form.docType.value);
                 form.querySelectorAll('[data-type]').forEach(c => c.classList.toggle('selected', c.dataset.type === form.docType.value));
                 check();
+                onInsurance();
             };
             form.docType.addEventListener('change', onType);
             form.docNumber.addEventListener('input', check);
@@ -600,6 +836,7 @@ function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
                 }
             });
             check();
+            onInsurance();
             if (renew) setTimeout(() => form.expiresOn.focus(), 60);
         },
         actions: [{ label: 'Cancel' }, {
@@ -608,7 +845,9 @@ function openDocForm(doc, all, reload, member = null, { renew = false } = {}) {
                 const form = m.el.querySelector('form');
                 if (!form.reportValidity()) return true;
                 const data = readForm(form);
-                const payload = { ...data, issuedOn: data.issuedOn || null, expiresOn: data.expiresOn || null, version: editing ? doc.version : null };
+                const own = Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith('p_')));
+                const payload = { ...own, issuedOn: data.issuedOn || null, expiresOn: data.expiresOn || null, version: editing ? doc.version : null,
+                    policy: INSURANCE_TYPES.includes(data.docType) ? readPolicy(form, data) : null };
                 const saved = editing ? await api.put(`/documents/${doc.id}`, payload) : await api.post('/documents', payload);
                 const n = await evidence.uploadTo(null, { documentId: saved.id });
                 toast(`${saved.title} of ${saved.owner} saved${n ? ` with ${n} scan${n === 1 ? '' : 's'}` : ''}`);

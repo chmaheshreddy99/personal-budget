@@ -33,7 +33,49 @@ export const isExpense = (c: Category) => (c.kind || 'EXPENSE') === 'EXPENSE';
 export type ServerExpense = {
   entryId: number; entryNo: string; date: string; narration: string; party: string | null; reference: string | null;
   categoryId: number | null; categoryName: string; amount: number; paidFromId: number | null; paidFrom: string; status: string | null;
+  /** one row per line of a bill: what was bought on it (missing from an older server) */
+  lineId?: number | null; memo?: string | null; itemized?: boolean;
 };
+
+/** What a bill's line was: nothing when no name was recorded for it, which is not the same as its category. */
+export const itemName = (name: string | null | undefined, category: string) => {
+  const n = (name || '').trim();
+  return n.toLowerCase() === category.trim().toLowerCase() ? '' : n;
+};
+
+/** One thing on a bill as the Expenses tab shows it; name is empty when none was recorded. */
+export type ExpenseItem = { key: string; name: string; category: string; amount: number };
+
+/** The items of a bill by category, largest first, each with its share of the bill. */
+export function itemsByCategory(items: ExpenseItem[]) {
+  const total = items.reduce((s, i) => s + i.amount, 0) || 1;
+  const m = new Map<string, ExpenseItem[]>();
+  items.forEach(i => m.set(i.category, [...(m.get(i.category) || []), i]));
+  return [...m.entries()]
+    .map(([category, list]) => { const amount = list.reduce((s, i) => s + i.amount, 0); return { category, items: list, amount, share: amount / total }; })
+    .sort((a, b) => b.amount - a.amount);
+}
+
+/**
+ * The server sends an expense as one row per line. They come together here as one expense per entry: its total, and the
+ * items when there are several. The order of first appearance is kept.
+ */
+export function joinExpenseLines(lines: ServerExpense[]) {
+  const entries = new Map<number, ServerExpense[]>();
+  lines.forEach(l => entries.set(l.entryId, [...(entries.get(l.entryId) || []), l]));
+  return [...entries.values()].map(list => {
+    const items: ExpenseItem[] = list.map((l, i) => ({ key: `${l.entryId}-${l.lineId ?? i}`, name: itemName(l.memo, l.categoryName), category: l.categoryName, amount: l.amount }));
+    return { first: list[0], amount: list.reduce((s, l) => s + l.amount, 0), items: list.length > 1 ? items : undefined };
+  });
+}
+
+/** Puts items in the order the household arranged a list in (on the web); what has no place yet follows, as it came. */
+export function arranged<T>(order: number[] | undefined, items: T[], idOf: (x: T) => number | null | undefined): T[] {
+  if (!order?.length) return items;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const at = (x: T) => { const id = idOf(x); return id == null ? Infinity : rank.get(id) ?? Infinity; };
+  return [...items].sort((a, b) => (at(a) === at(b) ? 0 : at(a) - at(b)));
+}
 
 export type Installment = {
   id: number; no: number; dueDate: string; dueAmount: number; dividend: number | null; paidAmount: number | null; paidDate: string | null;
@@ -91,6 +133,8 @@ export type Snapshot = {
   claims?: Claim[]; emis?: Emi[]; incomes?: ServerIncome[]; gifts?: Gift[];
   /** what the household allows the app to offer and show (Settings > Mobile app on the web); missing on an older server */
   mobile?: MobileConfig;
+  /** the order arranged on the web; accounts and chits already come in it, budgets are put in it here */
+  listOrder?: { accounts?: number[]; chits?: number[]; budgets?: number[] };
 };
 
 /** features: the sections on; hideBalances: balances show as dots until viewed; maskNetWorth: never show the total; hideAbove: a balance above this stays hidden until tapped. */

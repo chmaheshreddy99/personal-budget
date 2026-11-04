@@ -7,6 +7,7 @@ import com.aditya.personalbudget.domain.entity.ChitInstallment;
 import com.aditya.personalbudget.domain.entity.JournalEntry;
 import com.aditya.personalbudget.domain.type.ClaimKind;
 import com.aditya.personalbudget.domain.type.InstallmentStatus;
+import com.aditya.personalbudget.domain.type.UserRole;
 import com.aditya.personalbudget.dto.ClaimDtos.ClaimView;
 import com.aditya.personalbudget.dto.JournalDtos.EntryView;
 import com.aditya.personalbudget.dto.JournalDtos.LineView;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -84,7 +86,9 @@ public class NotificationService {
         MONEY_GIVEN("Money given", "Money lent to someone", "hand"),
         PAID_FOR("Paid for someone", "A bill paid on someone else's behalf", "receipt"),
         TRANSFER("Transfer between accounts", "Money moved from one account of yours to another", "transfer"),
-        LARGE_EXPENSE("Large expense", "An expense of at least the amount set", "wallet");
+        LARGE_EXPENSE("Large expense", "An expense of at least the amount set", "wallet"),
+        /** Switched per policy in Documents, so it is not among the choices of Settings › Alerts. */
+        INSURANCE_DUE("Insurance premium due", "A premium is due soon or overdue", "shield");
 
         private final String label;
         private final String description;
@@ -182,7 +186,7 @@ public class NotificationService {
         Long tenantId = UserContext.tenantId();
         var sender = mail.sender().orElse(null);
         Settings s = settingsOf(tenantId);
-        List<EventInfo> events = Arrays.stream(Event.values())
+        List<EventInfo> events = Arrays.stream(Event.values()).filter(e -> e != Event.INSURANCE_DUE)
                 .map(e -> new EventInfo(e.name(), e.label, e.description, e.iconName, s.events().getOrDefault(e.name(), false))).toList();
         List<Sent> log = new ArrayList<>(recent.getOrDefault(tenantId, new ArrayDeque<>()));
         int waiting = (int) queue.stream().filter(q -> q.tenantId().equals(tenantId)).count();
@@ -226,6 +230,39 @@ public class NotificationService {
                         new Fact("Reference", "UTR 4122 0981 7731")), null, "Alerts carry the photos and PDFs of the entry as attachments.");
         Pending p = new Pending(me.tenantId(), me, Event.TRANSFER, to, "Sample alert · Personal Budget", html, "This is a sample alert.", List.of(), false, Instant.now());
         return deliver(p);
+    }
+
+    /**
+     * A premium reminder, sent at once so the policy knows whether it went out. To: the policy's own addresses, else those
+     * of Settings › Alerts, else whoever is signed in, whoever enrolled the policy, then the household's admins.
+     */
+    Sent insuranceDue(String subject, String kicker, String tone, String title, String subtitle, String amount, List<Fact> facts, String button, String note,
+                      List<String> own, String enrolledBy) {
+        CurrentUser me = UserContext.get();
+        List<String> to = own.isEmpty() ? recipientsOfPolicy(me, enrolledBy) : own;
+        if (to.isEmpty()) {
+            return new Sent(OrgClock.now().withNano(0), Event.INSURANCE_DUE.label, subject, "", false,
+                    "Not sent: no address to send it to (give one on the policy, or in Settings › Alerts)", 0);
+        }
+        String html = page(me, kicker, tone, title, subtitle, amount, facts, button, note)
+                .replace("Change what you get in Settings › Alerts.", "Change these reminders on the policy in Documents.");
+        StringBuilder text = new StringBuilder(kicker).append(": ").append(title).append('\n').append(amount).append("\n\n");
+        facts.forEach(f -> text.append(f.label()).append(": ").append(f.value()).append('\n'));
+        text.append('\n').append(note).append('\n');
+        return deliver(new Pending(me.tenantId(), me, Event.INSURANCE_DUE, to, subject, html, text.toString(), List.of(), false, Instant.now()));
+    }
+
+    private List<String> recipientsOfPolicy(CurrentUser me, String enrolledBy) {
+        Settings s = settingsOf(me.tenantId());
+        if (!s.recipients().isEmpty()) return s.recipients();
+        String mine = myEmail(me);
+        if (mine != null) return List.of(mine);
+        List<AppUser> people = users.findByTenantId(me.tenantId());
+        Optional<String> enrolled = people.stream().filter(u -> u.getUsername().equals(enrolledBy)).map(AppUser::getEmail)
+                .filter(e -> e != null && EMAIL.matcher(e.trim()).matches()).map(String::trim).findFirst();
+        if (enrolled.isPresent()) return List.of(enrolled.get());
+        return people.stream().filter(u -> u.getRole() == UserRole.ADMIN).map(AppUser::getEmail)
+                .filter(e -> e != null && EMAIL.matcher(e.trim()).matches()).map(String::trim).distinct().toList();
     }
 
     // ================================================================== the events

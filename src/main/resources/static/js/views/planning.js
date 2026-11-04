@@ -14,6 +14,7 @@
  */
 import { api } from '../core/api.js';
 import { can, categoriesOf } from '../core/store.js';
+import { loadOrders, ranked, arrangeLockHtml, bindArrange } from '../core/arrange.js';
 import { panel, table, esc, field, readForm, openModal, toast, confirmDialog, emptyState, loading, categoryOptions } from '../core/ui.js';
 import { icon, categoryIcon } from '../core/icons.js';
 import { money, moneyShort, shortDate, monthLabel, percent, isoDate, daysFromToday } from '../core/format.js';
@@ -82,8 +83,8 @@ export async function render(container, params, isCurrent) {
 
 async function renderBudgets(container, isCurrent) {
     const pastMonths = Array.from({ length: 5 }, (_, i) => shiftMonth(month, i - 5));
-    const [summary, expenseCategories, ...past] = await Promise.all([api.get('/budgets', { month }),
-        categoriesOf('EXPENSE', null, { budget: true }).catch(() => []),
+    const [summary, expenseCategories, , ...past] = await Promise.all([api.get('/budgets', { month }),
+        categoriesOf('EXPENSE', null, { budget: true }).catch(() => []), loadOrders(),
         ...pastMonths.map(m => api.get('/budgets', { month: m }).catch(() => null))]);
     if (!isCurrent()) return;
     // Chit Payments fills itself from the chit installments (budget only)
@@ -155,7 +156,7 @@ async function renderBudgets(container, isCurrent) {
         ${monthStrip({ summary, committed, unbudgeted, totalLimit, totalSpent, projected, used, pace, isCurrentMonth, freeToSpend, health, committedPaid, ordinarySpent })}
         <aside class="panel lh-list p-budget-nav">
             <div class="lh-list-head">
-                <div class="lh-title">${icon('target')}<b>Your budgets</b><small>${budgeted.length} · ${moneyShort(totalSpent)} of ${moneyShort(totalLimit)}</small></div>
+                <div class="lh-title">${icon('target')}<b>Your budgets</b><small>${budgeted.length} · ${moneyShort(totalSpent)} of ${moneyShort(totalLimit)}</small><span id="bn-arrange">${arrangeLockHtml()}</span></div>
                 <div class="search-box sm">${icon('search')}<input id="bn-q" placeholder="Find a budget…" value="${esc(budgetView.q)}" data-plain></div>
                 <div class="lh-counts bn-filters" id="bn-filters">${FILTERS.map(f => {
                     const n = budgetFilterCount(f.key, summary.lines);
@@ -171,6 +172,8 @@ async function renderBudgets(container, isCurrent) {
         <aside class="budget-side" id="budget-side"></aside>`;
 
     const cards = body.querySelector('#budget-cards');
+    bindArrange({ list: 'budgets', tools: body.querySelector('#bn-arrange'), root: cards, selector: '[data-account]', idOf: el => Number(el.dataset.account),
+        allIds: () => summary.lines.map(l => l.categoryId), onReset: () => reload() });
     const show = categoryId => {
         budgetView.selectedId = categoryId;
         cards.querySelectorAll('[data-account]').forEach(el => el.classList.toggle('selected', Number(el.dataset.account) === categoryId));
@@ -273,7 +276,8 @@ async function renderBudgets(container, isCurrent) {
 const urgency = l => l.committed ? (PAYMENT[l.paymentStatus]?.rank ?? 9) : (PACE[l.pace]?.rank ?? 9);
 
 function budgetCards(committed, ordinary, unbudgeted, ignored, isCurrentMonth) {
-    const byUrgency = list => [...list].sort((a, b) => urgency(a) - urgency(b) || Number(b.usedPercent) - Number(a.usedPercent));
+    // the order arranged by hand; what has no place yet follows by urgency
+    const byUrgency = list => ranked('budgets', [...list].sort((a, b) => urgency(a) - urgency(b) || Number(b.usedPercent) - Number(a.usedPercent)), l => l.categoryId);
     const head = (key, iconName, label, count, amount) => `<div class="section-title bn-sep" data-group="${key}">
         <span>${icon(iconName)}${label}<i>${count}</i></span><b>${amount}</b></div>`;
     return `
@@ -284,10 +288,10 @@ function budgetCards(committed, ordinary, unbudgeted, ignored, isCurrentMonth) {
             `${moneyShort(ordinary.reduce((s, l) => s + Number(l.spent), 0))} / ${moneyShort(ordinary.reduce((s, l) => s + Number(l.monthlyLimit), 0))}`)
             + byUrgency(ordinary).map(l => spendingCard(l, isCurrentMonth)).join('') : ''}
         ${unbudgeted.length ? head('none', 'alert-circle', 'Without a budget', unbudgeted.length, moneyShort(unbudgeted.reduce((s, l) => s + Number(l.spent), 0)))
-            + unbudgeted.map(unbudgetedCard).join('') : ''}
+            + ranked('budgets', unbudgeted, l => l.categoryId).map(unbudgetedCard).join('') : ''}
         ${ignored.length ? `<button type="button" class="section-title bn-sep bn-fold" data-show-ignored title="Categories you chose not to budget: no budget is suggested for them. Their spending is still counted in your books.">
             <span>${icon('chevron-right')}Not budgeted by choice<i>${ignored.length}</i></span><b>${moneyShort(ignored.reduce((s, l) => s + Number(l.spent), 0))}</b></button>`
-            + ignored.map(ignoredCard).join('') : ''}`;
+            + ranked('budgets', ignored, l => l.categoryId).map(ignoredCard).join('') : ''}`;
 }
 
 /** Left-pane filters; "Attention" is everything over, heading over, ahead of pace, overdue or due soon. */

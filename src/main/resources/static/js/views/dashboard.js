@@ -395,7 +395,7 @@ function upcomingHtml(items) {
     if (!items.length) return emptyState('Nothing due soon', 'calendar');
     const meta = {
         CHIT: ['chit', 'gold', 'Chit installment'], INCOME: ['arrow-in', 'aqua', 'Income'], COMMITTED: ['lock', 'coral', 'Committed payment'],
-        EXPENSE: ['receipt', 'coral', 'Expense'], TRANSFER: ['transfer', '', 'Transfer'], MATURITY: ['lock', 'violet', 'Maturity'],
+        EXPENSE: ['receipt', 'coral', 'Expense'], TRANSFER: ['transfer', '', 'Transfer'], MATURITY: ['lock', 'violet', 'Maturity'], INSURANCE: ['shield', 'aqua', 'Insurance premium'],
     };
     return `<div class="list">${items.map(i => {
         const [iconName, tone, label] = meta[i.kind] || ['info', 'gray', i.kind];

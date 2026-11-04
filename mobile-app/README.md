@@ -14,7 +14,11 @@ accounts, statements and expenses on the phone, so it works without the server, 
   - **Expenses:** short rows by day, for this month, last month, everything kept on the phone or only what is on the
     phone. The panel compares this month with the same days of last month, and **Where it went** shows the top
     categories (tap one to see only its expenses). Tap a row to see every detail and its evidence, and to change or
-    delete it while it waits. Search by shop, category, account, reference or amount.
+    delete it while it waits. Search by shop, category, account, reference, amount or an item on a bill. A bill of several
+    items is **one row** with its total and how many items it has; opened, a bar shows how it splits between categories,
+    then a table of item, category and amount, ending with the item count and the total. An item saved without a name
+    shows as *Item 1*, *Item 2*. *Where it went* still counts each item in its own category; tapping a category
+    shows the bills with something in it, with what they spent there (of the bill's total).
   - **To collect:** money **paid for someone** and money **lent**, with what is still owed, how much came back and
     when it is due (overdue first); what you borrowed or owe shows under *I owe*. Tap one for every detail and the
     money received so far. **Received back** records money that came back (all, half or any amount, interest on money
@@ -88,6 +92,7 @@ accounts, statements and expenses on the phone, so it works without the server, 
   Open *Bank SMS → Open app settings*, tap ⋮ → *Allow restricted settings*, then go to *Permissions → SMS → Allow*
   and also allow *Notifications*. On Xiaomi, Realme, Oppo and Vivo phones, also allow *Autostart* and set battery
   to *No restrictions*.
+- **The order of lists:** accounts, chits and budgets follow the order arranged on the web (the small lock on each list there).
 - **Sync:** when the app opens, when it comes back to the front, every minute while something waits, and with
   **Sync** (or pull down). Expenses and chit payments go up first, then evidence, then fresh balances, chits, the
   balance sheet and statements come down.

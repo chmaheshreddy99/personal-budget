@@ -4,8 +4,8 @@
  *   list    a card per built-in theme, a card per theme of your own (its colours as swatches, Apply, Edit, Duplicate,
  *           Export, Delete), Create and Import
  *   studio  a name and the base theme, a row of ready-made presets, then every option in folding groups (colours,
- *           fonts, sizes, panels, buttons, tables, expanded rows, icons, menu & motion); a sample on the right (a panel,
- *           figures, buttons, a table with an opened row). Every change shows at once on the whole page; Cancel (or
+ *           fonts, headers & text styles, sizes, panels, buttons, tables, expanded rows, icons, menu & motion); a sample on
+ *           the right (a panel, group headers, figures, buttons, a table with an opened row). Every change shows at once on the whole page; Cancel (or
  *           leaving the page) puts the theme in use back. Save keeps it; Save & apply switches to it (the page reloads,
  *           as for any theme, so the base theme's own parts redraw).
  */
@@ -139,6 +139,9 @@ function controlHtml(o, value) {
     const hint = o.hint ? `<small>${esc(o.hint)}</small>` : '';
     if (o.type === 'color') return `<div class="ts-row"><span class="ts-label">${esc(o.label)}${hint}</span>
         <span class="ts-color"><input type="color" data-opt="${o.key}" value="${esc(value)}"><input class="ts-hex" data-hex="${o.key}" value="${esc(value)}" maxlength="7" spellcheck="false" data-plain></span></div>`;
+    if (o.type === 'colorAuto') return `<div class="ts-row"><span class="ts-label">${esc(o.label)}${hint}</span>
+        <span class="ts-color"><label class="switch"><input type="checkbox" data-auto="${esc(o.key)}" ${value ? 'checked' : ''}><span></span></label>
+            <input type="color" data-opt="${esc(o.key)}" value="${esc(value || '#0b6aa6')}" ${value ? '' : 'disabled'}></span></div>`;
     if (o.type === 'range') return `<div class="ts-row"><span class="ts-label">${esc(o.label)}${hint}</span>
         <span class="ts-range"><input type="range" data-opt="${o.key}" min="${o.min}" max="${o.max}" step="${o.step}" value="${value}"><output data-out="${o.key}">${value}${o.unit === '×' ? '×' : o.unit}</output></span></div>`;
     if (o.type === 'toggle') return `<div class="ts-row"><span class="ts-label">${esc(o.label)}${hint}</span>
@@ -158,6 +161,10 @@ const sampleHtml = () => `
                     <div class="metric"><div class="row"><span class="metric-icon">${icon('arrow-in')}</span><span class="label">Income</span></div><div class="value pos">₹1,20,000</div><div class="note">2 credits</div></div>
                     <div class="metric"><div class="row"><span class="metric-icon">${icon('piggy')}</span><span class="label">Saved</span></div><div class="value">₹77,820</div><div class="note">65% of income</div></div>
                 </div>
+                <div class="section-title">Section title</div>
+                <div class="group-label"><span>Bank accounts <i>3</i></span><b>₹2,40,000</b></div>
+                <div class="ts-sample-row"><span class="acct-name">HDFC Savings</span><b class="acct-bal">₹1,85,000</b></div>
+                <div class="group-label"><span>Credit cards <i>1</i></span><b>₹18,400</b></div>
                 <div class="ts-buttons"><button class="btn primary">${icon('check')}Primary</button><button class="btn">${icon('edit')}Button</button>
                     <button class="btn ghost icon danger" title="Delete">${icon('trash')}</button>
                     <span class="seg-chips sm"><span class="seg-chip active">Month</span><span class="seg-chip">Year</span></span>
@@ -204,11 +211,21 @@ function renderStudio(target, draft, { fresh = false } = {}) {
     const onLeave = () => leave();
     window.addEventListener('hashchange', onLeave);
 
+    let textTarget = GROUPS.find(g => g.targets)?.targets[0].id;
+    /** A group's rows; one with targets (the headers) offers them as chips and shows the options of the one chosen. */
+    const rowsHtml = g => {
+        if (!g.targets) return g.options.map(o => controlHtml(o, draft.opts[o.key])).join('');
+        const changed = t => g.options.some(o => o.target === t.id && draft.opts[o.key] !== o.default);
+        const hint = g.targets.find(t => t.id === textTarget).hint;
+        return `<div class="seg-chips sm ts-targets">${g.targets.map(t => `<button type="button" class="seg-chip ${t.id === textTarget ? 'active' : ''}" data-target="${t.id}" title="${esc(t.hint)}">${esc(t.label)}${changed(t) ? ' •' : ''}</button>`).join('')}</div>
+            <p class="small muted ts-target-hint">${esc(hint)}</p>
+            ${g.options.filter(o => o.target === textTarget).map(o => controlHtml(o, draft.opts[o.key])).join('')}`;
+    };
     const groupsHtml = () => GROUPS.map((g, i) => `
         <details class="ts-group" ${i === 0 ? 'open' : ''} data-group="${g.id}">
             <summary><span class="chip-icon sm">${icon(g.iconName)}</span><span class="min-0"><b>${esc(g.label)}</b><small>${esc(g.hint)}</small></span>
                 <button type="button" class="btn xs ghost ts-reset" data-reset="${g.id}" title="Put this group back to the defaults">${icon('undo')}Reset</button></summary>
-            <div class="ts-rows">${g.options.map(o => controlHtml(o, draft.opts[o.key])).join('')}</div>
+            <div class="ts-rows">${rowsHtml(g)}</div>
         </details>`).join('');
 
     const draw = () => {
@@ -257,14 +274,27 @@ function renderStudio(target, draft, { fresh = false } = {}) {
             }
             return;
         }
+        if (t.dataset.auto) {
+            const picker = body.querySelector(`input[type=color][data-opt="${t.dataset.auto}"]`);
+            picker.disabled = !t.checked;
+            setOpt(t.dataset.auto, t.checked ? picker.value : '');
+            return;
+        }
         const key = t.dataset.opt;
         if (!key) return;
-        if (t.type === 'color') { body.querySelector(`[data-hex="${key}"]`).value = t.value; setOpt(key, t.value); }
+        if (t.type === 'color') { const hex = body.querySelector(`[data-hex="${key}"]`); if (hex) hex.value = t.value; setOpt(key, t.value); }
         if (t.type === 'range') setOpt(key, Number(t.value));
         if (t.type === 'checkbox') setOpt(key, t.checked);
     });
 
     body.addEventListener('click', async e => {
+        const pickTarget = e.target.closest('[data-target]');
+        if (pickTarget) {
+            textTarget = pickTarget.dataset.target;
+            const rows = pickTarget.closest('.ts-rows');
+            rows.innerHTML = rowsHtml(GROUPS.find(g => g.id === pickTarget.closest('details').dataset.group));
+            return;
+        }
         const choice = e.target.closest('[data-choice] [data-value]');
         if (choice) {
             const key = choice.closest('[data-choice]').dataset.choice;
@@ -299,7 +329,7 @@ function renderStudio(target, draft, { fresh = false } = {}) {
             const g = GROUPS.find(x => x.id === reset.dataset.reset);
             g.options.forEach(o => { draft.opts[o.key] = o.default; });
             const details = reset.closest('details');
-            details.querySelector('.ts-rows').innerHTML = g.options.map(o => controlHtml(o, draft.opts[o.key])).join('');
+            details.querySelector('.ts-rows').innerHTML = rowsHtml(g);
             details.open = true;
             live();
             return;

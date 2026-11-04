@@ -4,14 +4,16 @@
  * Expenses: those recorded on the phone (waiting, not accepted, waiting for approval, synced) with the server's,
  * by day, this month, last month or all kept on the phone, with where the money went by category (tap one to see
  * only it). Each row is short; a tap opens it to every detail, its evidence (add a photo or a file) and, while it
- * waits to be synced, to change or delete it. Search finds an expense by what it was, the shop, category or account.
+ * waits to be synced, to change or delete it. Search finds an expense by what it was, the shop, category, account or an
+ * item on it. A bill of several items is one row with its total; opened, it shows how the bill splits between categories
+ * and a table of its items (item, category, amount) ending with the item count and the total. With a category picked, such a row shows what the bill spent in that category.
  */
 import React, { useMemo, useState } from 'react';
 import { LayoutAnimation, Platform, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, UIManager, View } from 'react-native';
 import { AlertTriangle, ArrowDownLeft, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock, HandCoins, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EvidenceTarget, useApp } from '../state';
-import { LocalExpense, hasFeature, mobileOn } from '../data';
+import { ExpenseItem, LocalExpense, hasFeature, itemName, itemsByCategory, joinExpenseLines, mobileOn } from '../data';
 import { date, dayLabel, isoDate, money, moneyShort } from '../format';
 import { Button, Card, Chip, Empty, GradientPanel, IconBubble, Pill, categoryLook } from '../ui';
 import { EvidenceStrip } from '../evidence';
@@ -28,6 +30,16 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 type Row = {
   key: string; date: string; title: string; party: string | null; paidFrom: string; category: string; amount: number; reference: string | null;
   notes?: string; entryNo?: string; entryId?: number; local?: LocalExpense; status?: string;
+  /** a bill of several items; category then names them together */
+  items?: ExpenseItem[];
+  /** with a category picked: what of this row is in it */
+  inCategory?: number;
+};
+
+/** "Groceries, Household +2" */
+const categoriesOf = (items: ExpenseItem[]) => {
+  const names = itemsByCategory(items).map(c => c.category);
+  return names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '');
 };
 
 const STATUS: Record<string, [string, string, string, any]> = {
@@ -79,12 +91,16 @@ function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: 
   const lastMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return isoDate(d).slice(0, 7); })();
 
   const base = useMemo<Row[]>(() => {
-    const local: Row[] = app.queue.map(e => ({ key: e.clientId, date: e.date, title: e.narration || e.categoryName, party: e.party || null, paidFrom: e.paidFromName,
-      category: e.categoryName, amount: e.amount, reference: e.reference || null, notes: e.notes, entryNo: e.entryNo, entryId: e.entryId, local: e, status: e.status }));
+    const local: Row[] = app.queue.map(e => {
+      const items: ExpenseItem[] | undefined = e.items && e.items.length > 1
+        ? e.items.map((i, n) => ({ key: `${e.clientId}-${n}`, name: itemName(i.name, i.categoryName), category: i.categoryName, amount: i.amount })) : undefined;
+      return { key: e.clientId, date: e.date, title: e.narration || e.party || e.categoryName, party: e.party || null, paidFrom: e.paidFromName,
+        category: items ? categoriesOf(items) : e.categoryName, amount: e.amount, reference: e.reference || null, notes: e.notes, entryNo: e.entryNo, entryId: e.entryId, local: e, status: e.status, items };
+    });
     const synced = new Set(app.queue.map(e => e.entryNo).filter(Boolean));
-    const server: Row[] = (app.snapshot?.expenses || []).filter(x => !synced.has(x.entryNo) && x.status !== 'REVERSED').map(x => ({
-      key: `s${x.entryId}-${x.categoryId}`, date: x.date, title: x.narration, party: x.party, paidFrom: x.paidFrom, category: x.categoryName, amount: x.amount,
-      reference: x.reference, entryNo: x.entryNo, entryId: x.entryId }));
+    const server: Row[] = joinExpenseLines((app.snapshot?.expenses || []).filter(x => !synced.has(x.entryNo) && x.status !== 'REVERSED')).map(({ first: x, amount, items }) => ({
+      key: `s${x.entryId}`, date: x.date, title: x.narration, party: x.party, paidFrom: x.paidFrom, category: items ? categoriesOf(items) : x.categoryName, amount,
+      reference: x.reference, entryNo: x.entryNo, entryId: x.entryId, items }));
     let all = [...local, ...server];
     if (filter === 'phone') all = local;
     if (filter === 'month') all = all.filter(r => r.date.startsWith(month));
@@ -95,21 +111,26 @@ function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: 
   // where the money went in what is shown, by category (before a category is picked)
   const byCategory = useMemo(() => {
     const m = new Map<string, number>();
-    base.forEach(r => m.set(r.category, (m.get(r.category) || 0) + r.amount));
+    base.forEach(r => {
+      if (r.items) r.items.forEach(i => m.set(i.category, (m.get(i.category) || 0) + i.amount));
+      else m.set(r.category, (m.get(r.category) || 0) + r.amount);
+    });
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [base]);
 
   const rows = useMemo<Row[]>(() => {
-    let all = category ? base.filter(r => r.category === category) : base;
+    let all = !category ? base : base.filter(r => (r.items ? r.items.some(i => i.category === category) : r.category === category)).map(r => (r.items
+      ? { ...r, inCategory: r.items.filter(i => i.category === category).reduce((s, i) => s + i.amount, 0) } : r));
     const q = query.trim().toLowerCase();
-    if (q) all = all.filter(r => [r.title, r.party, r.paidFrom, r.category, r.reference, r.entryNo, String(r.amount)].some(v => v && v.toLowerCase().includes(q)));
+    if (q) all = all.filter(r => [r.title, r.party, r.paidFrom, r.category, r.reference, r.entryNo, String(r.amount), ...(r.items || []).flatMap(i => [i.name, i.category])]
+      .some(v => v && v.toLowerCase().includes(q)));
     return [...all].sort((a, b) => b.date.localeCompare(a.date) || (b.local?.createdAt || 0) - (a.local?.createdAt || 0));
   }, [base, category, query]);
 
   const sections = useMemo(() => {
     const m = new Map<string, Row[]>();
     rows.forEach(r => m.set(r.date, [...(m.get(r.date) || []), r]));
-    return [...m.entries()].map(([d, data]) => ({ title: d, total: data.reduce((s, r) => s + r.amount, 0), data }));
+    return [...m.entries()].map(([d, data]) => ({ title: d, total: data.reduce((s, r) => s + (r.inCategory ?? r.amount), 0), data }));
   }, [rows]);
 
   const spentIn = (m: string) => [...app.queue.filter(e => e.status !== 'SYNCED'), ...(app.snapshot?.expenses || []).filter(x => x.status !== 'REVERSED')]
@@ -196,7 +217,7 @@ function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: 
 
 function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onToggle: () => void; onEdit: (e: LocalExpense) => void }) {
   const app = useApp();
-  const look = categoryLook(r.category);
+  const look = r.items ? { Icon: Receipt, fg: colors.ocean, bg: colors.sunken } : categoryLook(r.category);
   const stt = r.status ? STATUS[r.status] : null;
   const editable = !!r.local && (r.status === 'QUEUED' || r.status === 'FAILED');
   const target: EvidenceTarget = r.local && !r.local.entryId && !r.local.pendingId ? { clientId: r.local.clientId, label: r.title }
@@ -210,10 +231,11 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
         <IconBubble Icon={look.Icon} fg={look.fg} bg={look.bg} size={38} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={st.title} numberOfLines={open ? 3 : 1}>{r.title}</Text>
-          <Text style={st.sub} numberOfLines={1}>{[r.category, r.party].filter(Boolean).join(' · ')}</Text>
+          <Text style={st.sub} numberOfLines={1}>{[r.items ? `${r.items.length} items` : null, r.category, r.items && r.title === r.party ? null : r.party].filter(Boolean).join(' · ')}</Text>
         </View>
         <View style={{ alignItems: 'flex-end', gap: 3 }}>
-          <Text style={st.amount}>−{money(r.amount)}</Text>
+          <Text style={st.amount}>−{money(r.inCategory ?? r.amount)}</Text>
+          {r.inCategory != null ? <Text style={st.ofBill}>of {money(r.amount)}</Text> : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             {stt ? <View style={[st.dot, { backgroundColor: stt[1] }]} /> : null}
             {evidence.length ? <Paperclip color={colors.muted} size={12} /> : null}
@@ -224,9 +246,10 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
       {open ? (
         <View style={st.more}>
           {stt ? <Pill text={r.status === 'FAILED' && r.local?.message ? `Not accepted: ${r.local.message}` : stt[0]} fg={stt[1]} bg={stt[2]} Icon={stt[3]} /> : null}
+          {r.items ? <BillItems items={r.items} total={r.amount} /> : null}
           <View style={st.grid}>
             {detail('Date', date(r.date))}
-            {detail('Category', r.category)}
+            {r.items ? null : detail('Category', r.category)}
             {detail('Paid from', r.paidFrom)}
             {detail('Paid to', r.party)}
             {detail('Reference', r.reference)}
@@ -251,7 +274,56 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
   );
 }
 
+/** A bill opened: one bar split between its categories, then its items in three columns, then how many and the total. */
+function BillItems({ items, total }: { items: ExpenseItem[]; total: number }) {
+  const groups = itemsByCategory(items);
+  return (
+    <View style={st.bill}>
+      <View style={st.billBar}>
+        {groups.map(g => <View key={g.category} style={{ flex: g.share || 0.001, backgroundColor: categoryLook(g.category).fg }} />)}
+      </View>
+      <View style={st.billHeadRow}>
+        <Text style={[st.billHeadCell, st.colItem]}>Item</Text>
+        <Text style={[st.billHeadCell, st.colCat]}>Category</Text>
+        <Text style={[st.billHeadCell, st.colAmt]}>Amount</Text>
+      </View>
+      {items.map((i, n) => (
+        <View key={i.key} style={st.billRow}>
+          <Text style={[st.colItem, i.name ? st.billName : st.billNoName]} numberOfLines={2}>{i.name || `Item ${n + 1}`}</Text>
+          <View style={[st.colCat, st.billCat]}>
+            <View style={[st.billDot, { backgroundColor: categoryLook(i.category).fg }]} />
+            <Text style={st.billCatText} numberOfLines={2}>{i.category}</Text>
+          </View>
+          <Text style={[st.colAmt, st.billAmt]}>{money(i.amount)}</Text>
+        </View>
+      ))}
+      <View style={st.billFoot}>
+        <Text style={st.billCount}>{items.length} item{items.length === 1 ? '' : 's'}</Text>
+        <Text style={st.billTotal}>Total {money(total)}</Text>
+      </View>
+    </View>
+  );
+}
+
 const st = StyleSheet.create({
+  ofBill: { fontSize: 10.5, color: colors.muted, fontWeight: '600' },
+  bill: { padding: 10, borderRadius: radius.m, backgroundColor: colors.sunken },
+  billBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', gap: 2, marginBottom: 8 },
+  billHeadRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 5, borderBottomWidth: 1, borderColor: colors.line },
+  billHeadCell: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.5, color: colors.muted, textTransform: 'uppercase' },
+  colItem: { flex: 1.3, minWidth: 0 },
+  colCat: { flex: 1, minWidth: 0 },
+  colAmt: { minWidth: 72, textAlign: 'right' },
+  billRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
+  billName: { fontSize: 13, fontWeight: '600', color: colors.text },
+  billNoName: { fontSize: 13, fontStyle: 'italic', color: colors.muted },
+  billCat: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
+  billDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5 },
+  billCatText: { flex: 1, fontSize: 12, color: colors.text2 },
+  billAmt: { fontSize: 13, fontWeight: '700', color: colors.text },
+  billFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, marginTop: 2, borderTopWidth: 1, borderColor: colors.line },
+  billCount: { fontSize: 12.5, fontWeight: '800', color: colors.text2 },
+  billTotal: { fontSize: 14, fontWeight: '800', color: colors.text },
   parts: { flexDirection: 'row', gap: 4, backgroundColor: colors.card, borderRadius: radius.m, padding: 4, borderWidth: 1, borderColor: colors.line },
   part: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 36, borderRadius: 9, paddingHorizontal: 2 },
   partOn: { backgroundColor: colors.navy },

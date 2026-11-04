@@ -37,7 +37,9 @@ public final class JournalDtos {
                            /* the account's balance just before and just after this line (natural sign, ledger order) */
                            BigDecimal balanceBefore, BigDecimal balanceAfter,
                            /* a chit's line: that chit's own balance just before and after it (balanceBefore / After are all of Chit Funds) */
-                           BigDecimal chitBalanceBefore, BigDecimal chitBalanceAfter) {
+                           BigDecimal chitBalanceBefore, BigDecimal chitBalanceAfter,
+                           /* a category's line: what that category stands at just before and after it (balanceBefore / After are all of Expenses or Income) */
+                           BigDecimal categoryBalanceBefore, BigDecimal categoryBalanceAfter) {
     }
 
     /** A full journal entry with its lines. */

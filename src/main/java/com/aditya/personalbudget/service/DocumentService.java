@@ -48,13 +48,20 @@ public class DocumentService {
             LocalDate issuedOn,
             LocalDate expiresOn,
             @Size(max = 255) String notes,
-            Long version) {
+            Long version,
+            /* an insurance document's premium, payment and reminders; null leaves them as they are */
+            @jakarta.validation.Valid InsuranceService.PolicyRequest policy) {
+
+        public DocumentRequest(String title, String docType, String owner, String relation, String docNumber, String issuer, LocalDate issuedOn,
+                               LocalDate expiresOn, String notes, Long version) {
+            this(title, docType, owner, relation, docNumber, issuer, issuedOn, expiresOn, notes, version, null);
+        }
     }
 
     public record DocumentView(Long id, String title, String docType, String owner, String relation, String docNumber,
                                String issuer, LocalDate issuedOn, LocalDate expiresOn, String notes, int fileCount,
                                Long coverId, boolean coverIsImage, long activeShares, String createdBy, LocalDateTime createdAt,
-                               Long version) {
+                               Long version, InsuranceService.PolicyView policy) {
     }
 
     public record ShareRequest(@Size(max = 80) String sharedWith, @Min(1) @Max(MAX_SHARE_HOURS) int hours, boolean allowDownload) {
@@ -81,15 +88,17 @@ public class DocumentService {
     private final AttachmentRepository attachments;
     private final AttachmentService attachmentService;
     private final ActivityService activity;
+    private final InsuranceService insurance;
     private final SecureRandom random = new SecureRandom();
 
     public DocumentService(PersonalDocumentRepository documents, DocumentShareRepository shares, AttachmentRepository attachments,
-                           AttachmentService attachmentService, ActivityService activity) {
+                           AttachmentService attachmentService, ActivityService activity, InsuranceService insurance) {
         this.documents = documents;
         this.shares = shares;
         this.attachments = attachments;
         this.attachmentService = attachmentService;
         this.activity = activity;
+        this.insurance = insurance;
     }
 
     // ================================================================== documents
@@ -102,9 +111,11 @@ public class DocumentService {
         LocalDateTime now = OrgClock.now();
         Map<Long, Long> open = shares.findByTenantId(tenantId).stream().filter(s -> s.isActive(now))
                 .collect(Collectors.groupingBy(DocumentShare::getDocumentId, Collectors.counting()));
+        Map<Long, InsuranceService.PolicyView> policies = insurance.viewsByDocument();
         return documents.findByTenantId(tenantId).stream()
                 .sorted(Comparator.comparing(PersonalDocument::getOwner).thenComparing(PersonalDocument::getTitle))
-                .map(d -> view(d, files.getOrDefault(d.getId(), List.of()), open.getOrDefault(d.getId(), 0L)))
+                .map(d -> view(d, files.getOrDefault(d.getId(), List.of()), open.getOrDefault(d.getId(), 0L),
+                        InsuranceService.isInsurance(d.getDocType()) ? policies.get(d.getId()) : null))
                 .toList();
     }
 
@@ -116,7 +127,7 @@ public class DocumentService {
         d.setCreatedAt(OrgClock.now());
         apply(d, r);
         d = documents.save(d);
-        return view(d, List.of(), 0);
+        return savedView(d, r, List.of());
     }
 
     @Transactional
@@ -127,15 +138,23 @@ public class DocumentService {
         }
         apply(d, r);
         d = documents.save(d);
-        return view(d, attachments.findByOwner("document", id), 0);
+        return savedView(d, r, attachments.findByOwner("document", id));
     }
 
     @Transactional
     public void delete(Long id) {
         PersonalDocument d = require(id);
+        insurance.deleteFor(id);
         shares.deleteAll(shares.findByDocumentId(id));
         attachmentService.deleteForOwner("document", id);
         documents.delete(d);
+    }
+
+    /** Saves the policy that came with an insurance document; a document of another kind keeps any it had, unseen. */
+    private DocumentView savedView(PersonalDocument d, DocumentRequest r, List<com.aditya.personalbudget.domain.entity.Attachment> files) {
+        boolean insured = InsuranceService.isInsurance(d.getDocType());
+        if (insured && r.policy() != null) insurance.save(d, r.policy());
+        return view(d, files, 0, insured ? insurance.viewOf(d.getId()) : null);
     }
 
     private void apply(PersonalDocument d, DocumentRequest r) {
@@ -247,12 +266,12 @@ public class DocumentService {
         return documents.findByIdAndTenantId(id, UserContext.tenantId()).orElseThrow(() -> new NotFoundException("Document", id));
     }
 
-    private static DocumentView view(PersonalDocument d, List<com.aditya.personalbudget.domain.entity.Attachment> files, long openShares) {
+    private static DocumentView view(PersonalDocument d, List<com.aditya.personalbudget.domain.entity.Attachment> files, long openShares, InsuranceService.PolicyView policy) {
         var cover = files.stream().filter(a -> a.getContentType().startsWith("image/")).findFirst()
                 .or(() -> files.stream().findFirst()).orElse(null);
         return new DocumentView(d.getId(), d.getTitle(), d.getDocType(), d.getOwner(), d.getRelation(), d.getDocNumber(), d.getIssuer(),
                 d.getIssuedOn(), d.getExpiresOn(), d.getNotes(), files.size(), cover == null ? null : cover.getId(),
-                cover != null && cover.getContentType().startsWith("image/"), openShares, d.getCreatedBy(), d.getCreatedAt(), d.getVersion());
+                cover != null && cover.getContentType().startsWith("image/"), openShares, d.getCreatedBy(), d.getCreatedAt(), d.getVersion(), policy);
     }
 
     private static ShareView view(DocumentShare s) {

@@ -372,7 +372,7 @@ function storyHtml(e) {
 function balancesHtml(e) {
     const lines = e.lines.filter(l => isReal(l) && l.balanceAfter != null);
     const chits = e.lines.filter(l => l.chitId && l.chitBalanceAfter != null);
-    if (!lines.length && !chits.length) return '';
+    if (!lines.length && !chits.length && !e.lines.some(l => l.categoryId && l.categoryBalanceAfter != null)) return '';
     // a chit's line: the chit by itself, then the Chit Funds account that holds all the chits
     const chitRows = chits.map(l => {
         const row = (iconName, name, note, before, after) => {
@@ -384,7 +384,21 @@ function balancesHtml(e) {
         return row('chit', l.accountName, Number(l.chitBalanceAfter) < 0 ? 'this chit · dues' : 'this chit · paid in', Number(l.chitBalanceBefore), Number(l.chitBalanceAfter))
             + row('layers', l.ledgerAccountName, 'all chits · holds', Number(l.balanceBefore), Number(l.balanceAfter));
     }).join('');
-    return `<section class="ed2-sec"><div class="ed2-label"><span>Balances</span><small>after this entry</small></div>${chitRows}${lines.map(l => {
+    // each category the entry posts to, once: what it stands at now, and how much this entry added
+    const categories = e.lines.filter(l => l.categoryId && l.categoryBalanceAfter != null);
+    const seen = new Map();
+    categories.forEach(l => {
+        const c = seen.get(l.categoryId) || { name: l.accountName, income: l.accountClass === 'INCOME', before: Number(l.categoryBalanceBefore) };
+        c.after = Number(l.categoryBalanceAfter);
+        seen.set(l.categoryId, c);
+    });
+    const categoryRows = [...seen.values()].map(c => {
+        const change = c.after - c.before;
+        return `<div class="ed2-row">${icon('tag')}
+            <span class="ed2-row-main"><b>${esc(c.name)}</b><small>category · ${c.income ? 'received' : 'spent'} <span class="mono">${money(Math.abs(c.after), { decimals: 0 })}</span> · was ${money(Math.abs(c.before), { decimals: 0 })}</small></span>
+            <em class="ed2-delta ${(change > 0) === c.income ? 'pos' : 'neg'}">${change > 0 ? '+' : '−'}${money(Math.abs(change), { decimals: 0 })}</em></div>`;
+    }).join('');
+    return `<section class="ed2-sec ed2-balances"><div class="ed2-label"><span>Balances</span><small>after this entry</small></div>${chitRows}${lines.map(l => {
         const before = Number(l.balanceBefore), after = Number(l.balanceAfter), change = after - before;
         const owed = l.accountClass === 'LIABILITY';
         const what = owed ? (after > 0 ? 'owes' : 'clear') : after < 0 ? 'overdrawn' : 'holds';
@@ -394,7 +408,7 @@ function balancesHtml(e) {
             <span class="ed2-row-main"><b>${esc(l.accountName)}</b><small>${what} <span class="mono">${money(Math.abs(after), { decimals: 0 })}</span> · was ${money(Math.abs(before), { decimals: 0 })}</small></span>
             <em class="ed2-delta ${good ? 'pos' : 'neg'}">${change > 0 ? '+' : '−'}${money(Math.abs(change), { decimals: 0 })}</em>
         </div>`;
-    }).join('')}</section>`;
+    }).join('')}${categoryRows}</section>`;
 }
 
 /**
@@ -551,27 +565,50 @@ function classicFlowHtml(e) {
 }
 
 /**
+ * What an entry did to each thing it touched, once each: one thing can have several lines (the items of a bill all post
+ * to Expenses), so it stands at what it was before the first of them and what it is after the last.
+ */
+function balanceParts(lines) {
+    const ledgers = new Map();
+    const note = (map, key, name, before, after) => {
+        const part = map.get(key);
+        if (part) part.after = after;
+        else map.set(key, { name, before, after });
+    };
+    lines.filter(l => l.balanceAfter !== null && l.balanceAfter !== undefined).forEach(l => {
+        const name = l.categoryId || l.chitId ? l.ledgerAccountName || l.accountName : l.accountName;
+        const ledger = ledgers.get(l.accountId) || { name, before: l.balanceBefore, after: l.balanceAfter, chits: new Map(), categories: new Map() };
+        ledger.after = l.balanceAfter;
+        ledgers.set(l.accountId, ledger);
+        if (l.chitId && l.chitBalanceAfter != null) note(ledger.chits, l.chitId, l.accountName, l.chitBalanceBefore, l.chitBalanceAfter);
+        if (l.categoryId && l.categoryBalanceAfter != null) note(ledger.categories, l.categoryId, l.accountName, l.categoryBalanceBefore, l.categoryBalanceAfter);
+    });
+    return [...ledgers.values()];
+}
+
+/**
  * Classic: each account the entry touches, with its balance just before and just after this entry (the stored
- * snapshots, in ledger order): one slim line per account, the amounts being in the pills above.
+ * snapshots, in ledger order) and the change, one slim line each, the amounts being in the pills above. Under Expenses
+ * or Income, each category with what it stands at; a chit by itself above the account of all the chits.
  */
 function classicBalancesHtml(lines) {
-    const shown = lines.filter(l => l.balanceAfter !== null && l.balanceAfter !== undefined);
-    if (!shown.length) return '';
-    const row = (name, title, before, after) => {
+    const ledgers = balanceParts(lines);
+    if (!ledgers.length) return '';
+    const row = (name, title, before, after, cls = '') => {
         const move = Number(after) - Number(before);
-        return `<span class="edb-row"><span class="edb-name ellipsis" title="${esc(title)}">${name}</span>
+        const dir = move > 0 ? 'up' : move < 0 ? 'down' : '';
+        return `<span class="edb-row ${cls}"><span class="edb-name" title="${esc(title)}">${name}</span>
                 <span class="edb-before">${money(before, { decimals: 2 })}</span><i>→</i><b>${money(after, { decimals: 2 })}</b>
-                <em class="${move > 0 ? 'up' : move < 0 ? 'down' : ''}">${move > 0 ? '▲' : move < 0 ? '▼' : ''}</em></span>`;
+                <em class="${dir}">${move > 0 ? '▲' : move < 0 ? '▼' : ''}</em>
+                <small class="edb-move ${dir}">${move ? `${move > 0 ? '+' : '−'}${money(Math.abs(move), { decimals: 2 })}` : ''}</small></span>`;
     };
-    return `<div class="ed-balances" title="Each account's balance just before and just after this entry">
-        <span class="edb-head">Balance</span>${shown.map(l => {
-            const ledger = l.ledgerAccountName || l.accountName;
-            // a chit by itself, then the account of all the chits; a category's balance is that of its whole ledger account
-            if (l.chitId && l.chitBalanceAfter != null) {
-                return row(`${esc(l.accountName)} <small>this chit</small>`, `${l.accountName}: this chit only`, l.chitBalanceBefore, l.chitBalanceAfter)
-                    + row(`${esc(ledger)} <small>all chits</small>`, `${ledger}: every chit together`, l.balanceBefore, l.balanceAfter);
-            }
-            return row(esc(l.categoryId ? ledger : l.accountName), ledger, l.balanceBefore, l.balanceAfter);
+    return `<div class="ed-balances" title="Each balance just before and just after this entry">
+        <span class="edb-head">Balance</span>${ledgers.map(g => {
+            const chits = [...g.chits.values()];
+            const categories = [...g.categories.values()];
+            return chits.map(c => row(`${esc(c.name)} <small>this chit</small>`, `${c.name}: this chit only`, c.before, c.after)).join('')
+                + row(chits.length ? `${esc(g.name)} <small>all chits</small>` : esc(g.name), chits.length ? `${g.name}: every chit together` : g.name, g.before, g.after)
+                + categories.map(c => row(esc(c.name), `${c.name}: this category, within ${g.name}`, c.before, c.after, 'sub')).join('');
         }).join('')}</div>`;
 }
 

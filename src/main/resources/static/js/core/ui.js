@@ -235,14 +235,18 @@ export function delegate(root, type, selector, handler) {
 
 // ===================================================================== toasts
 
-export function toast(message, kind = 'success') {
+export function toast(message, kind = 'success', { onClick, ms } = {}) {
     const host = document.getElementById('toast-host');
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
     const iconName = kind === 'error' ? 'alert-circle' : kind === 'info' ? 'info' : 'check-circle';
     el.innerHTML = `${icon(iconName)}<div>${esc(message)}</div>`;
+    if (onClick) {
+        el.classList.add('clickable');
+        el.addEventListener('click', () => { el.remove(); onClick(); });
+    }
     host.appendChild(el);
-    setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3500);
+    setTimeout(() => el.remove(), ms || (kind === 'error' ? 6000 : 3500));
 }
 
 // ===================================================================== modal

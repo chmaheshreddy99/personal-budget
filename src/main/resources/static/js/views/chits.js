@@ -8,6 +8,7 @@
  */
 import { api } from '../core/api.js';
 import { loadAccounts, can } from '../core/store.js';
+import { loadOrders, ranked, arrangeLockHtml, bindArrange } from '../core/arrange.js';
 import { panel, esc, field, readForm, openModal, routeNextDialog, dialogOpen, toast, confirmDialog, emptyState, statusBadge, accountOptions, accountChip } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { money, moneyShort, date, shortDate, percent, isoDate, daysFromToday } from '../core/format.js';
@@ -47,8 +48,9 @@ export async function render(container, params, isCurrent) {
         if (params[1] === 'entry' && /^\d+$/.test(params[2] || '')) focusEntry = Number(params[2]);
         else if (CHIT_TABS.includes(params[1])) view.tab = params[1];
     }
-    const chits = await api.get('/chits');
+    const [listed] = await Promise.all([api.get('/chits'), loadOrders()]);
     if (!isCurrent()) return;
+    const chits = ranked('chits', listed);
     Object.assign(prefs, getPref('chits', { includeMatured: false }));
     // ...?matured=1&q=…&interest=earned: the address goes first
     const asked = params.query;
@@ -70,6 +72,7 @@ export async function render(container, params, isCurrent) {
                     <div class="lt-top">
                         <div class="search-box">${icon('search')}<input id="chit-search" name="q-chits" data-plain placeholder="Search chits…  ↑↓ to move" value="${esc(view.search)}">
                             <span class="lt-count" id="chit-count" title="Running chits">${chits.filter(isRunning).length} running</span></div>
+                        <span id="chit-arrange">${arrangeLockHtml()}</span>
                         <a class="btn ghost icon lt-micro" href="#/reports/chit-summary" title="Chit summary: the selected chits together, printable">${icon('printer')}</a>
                         <a class="btn ghost icon lt-micro" href="#/forecast/chit" title="Chit illustrator: bids, dividends and the best month to lift">${icon('calculator')}</a>
                         ${can('MANAGE_CHITS') ? `<button class="btn primary icon lt-add" id="new-chit" title="Add chit">${icon('plus')}</button>` : ''}
@@ -114,6 +117,8 @@ export async function render(container, params, isCurrent) {
             .some(v => v && String(v).toLowerCase().includes(term)));
         return prefs.includeMatured ? chits : chits.filter(c => isRunning(c) || Number(c.payoutPending) > 0 || c.id === view.pinnedId);
     };
+    bindArrange({ list: 'chits', tools: container.querySelector('#chit-arrange'), root: container.querySelector('#chit-list'), selector: '.chit-item[data-id]',
+        allIds: () => chits.map(c => c.id), onReset: () => reload() });
     const drawRows = () => {
         const list = matching();
         container.querySelector('#chit-list').innerHTML = list.length ? chitRows(list)

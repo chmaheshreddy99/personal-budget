@@ -8,7 +8,7 @@ import { ActivityIndicator, BackHandler, Pressable, RefreshControl, ScrollView, 
 import { AlertTriangle, ArrowLeft, CalendarCheck, ChevronLeft, ChevronRight, CircleCheck, CloudOff, Info, ChartPie, Target } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state';
-import { BudgetAlert, BudgetLine, Budgets, thisMonth } from '../data';
+import { BudgetAlert, BudgetLine, Budgets, arranged, thisMonth } from '../data';
 import { ago, money, moneyShort, shortDate } from '../format';
 import { Card, Empty, GradientPanel, IconBubble, Pill, SectionTitle, categoryLook } from '../ui';
 import { colors, space } from '../theme';
@@ -61,8 +61,9 @@ export function BudgetScreen({ onBack }: { onBack: () => void }) {
   }, [onBack]);
 
   const lines = b?.lines || [];
-  const committed = lines.filter(l => l.budgetId != null && l.committed);
-  const ordinary = lines.filter(l => l.budgetId != null && !l.committed);
+  const order = app.snapshot?.listOrder?.budgets;
+  const committed = arranged(order, lines.filter(l => l.budgetId != null && l.committed), l => l.categoryId);
+  const ordinary = arranged(order, lines.filter(l => l.budgetId != null && !l.committed), l => l.categoryId);
   const unbudgeted = lines.filter(l => l.budgetId == null).sort((x, y) => y.spent - x.spent);
   const used = Math.max(0, Math.min(100, Number(b?.usedPercent ?? (b && b.totalLimit ? (b.totalSpent / b.totalLimit) * 100 : 0))));
 
