@@ -140,7 +140,7 @@ export async function render(container, params, isCurrent) {
     const invested = bucket('Investments') + bucket('Chits') + bucket('Gold & silver');
     const cards = accounts.filter(a => a.accountType === 'CREDIT_CARD' && a.creditLimit);
     const cardLimit = cards.reduce((s, a) => s + Number(a.creditLimit), 0);
-    const cardUsed = cards.reduce((s, a) => s + Math.max(0, Number(a.balance)), 0);
+    const cardUsed = cards.reduce((s, a) => s + Math.max(0, Number(a.balance)) + Number(a.emiHeld || 0), 0);
     const maturing = accounts.filter(a => a.maturityDate && a.daysToMaturity >= 0 && a.daysToMaturity <= 90);
     const idle = of('ASSET').filter(a => a.active && Number(a.balance) > 0 && a.bucket !== 'Property & vehicles'
         && (!a.lastActivity || -daysFromToday(a.lastActivity) > 90));
@@ -390,7 +390,7 @@ function accountFacts(a) {
     if (a.accountType === 'CREDIT_CARD' && a.creditLimit) {
         const util = Number(a.utilizationPercent || 0);
         fact(`${percent(util, 0)} used`, util > 70 ? 'bad' : util > 30 ? 'warn' : 'good', 'Credit utilization');
-        fact(`avail ${money(a.availableCredit, { decimals: 2 })}`, '', 'Available credit');
+        fact(`avail ${money(a.availableCredit, { decimals: 2 })}`, '', Number(a.emiHeld) ? `Available credit, after ${money(a.emiHeld)} held by EMIs not billed yet` : 'Available credit');
     } else if (a.creditLimit && a.accountClass === 'LIABILITY') {
         fact(`${percent(100 - Number(a.utilizationPercent || 0), 0)} repaid`, 'good', `Sanctioned ${money(a.creditLimit)}`);
     }
@@ -941,7 +941,7 @@ function metrics(a, debt, all = []) {
         const util = Number(a.utilizationPercent || 0);
         list.push(tile('percent', debt && a.accountType !== 'CREDIT_CARD' ? 'Repaid of sanctioned' : 'Credit used',
             percent(a.accountType === 'CREDIT_CARD' ? util : 100 - util, 0),
-            `${a.accountType === 'CREDIT_CARD' ? 'Available' : 'Sanctioned'} ${a.accountType === 'CREDIT_CARD' ? money(a.availableCredit, { decimals: 2 }) : money(a.creditLimit)}`,
+            `${a.accountType === 'CREDIT_CARD' ? 'Available' : 'Sanctioned'} ${a.accountType === 'CREDIT_CARD' ? money(a.availableCredit, { decimals: 2 }) : money(a.creditLimit)}${Number(a.emiHeld) ? ` · ${moneyShort(a.emiHeld)} held by EMIs` : ''}`,
             util > 70 ? 'alert' : '', bar(util, util > 70 ? 'todo' : '')));
     }
     if (a.interestRate) list.push(tile('percent', 'Interest rate', percent(a.interestRate, 2) + ' p.a.',

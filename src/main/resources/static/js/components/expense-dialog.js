@@ -221,6 +221,10 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                         <label class="field"><span>Last EMI <small class="muted">worked out</small></span><input name="emiLast" type="date" value="${emi?.endDate || ''}" title="Change it to set the months" ${locked}></label>
                         <label class="field"><span>GST on interest <small class="muted">%</small></span><input name="emiGst" type="number" min="0" max="50" step="any" value="${emi ? (Number(emi.gstPercent) || '') : 18}" ${locked} data-plain></label>
                     </div>
+                    <div class="emi-fee-gst" data-emi-fee-gst>
+                        <label class="check-line"><input type="checkbox" name="emiFeeGstOn" ${emi ? (Number(emi.feeGstPercent) ? 'checked' : '') : 'checked'} ${locked}> Add GST on the processing fee</label>
+                        <label class="field"><span>GST on fee <small class="muted">%</small></span><input name="emiFeeGst" type="number" min="0" max="50" step="any" value="${emi && Number(emi.feeGstPercent) ? Number(emi.feeGstPercent) : 18}" ${locked} data-plain></label>
+                    </div>
                     <div class="form-grid two">
                         <label class="field emi-loan-only"><span>Lender</span><input name="emiLender" maxlength="100" value="${esc(emi?.lender || '')}" placeholder="e.g. Bajaj Finserv, HDB Financial" data-plain></label>
                         <label class="check-line emi-auto"><input type="checkbox" name="emiAuto" ${emi ? (emi.autoPost ? 'checked' : '') : 'checked'}> <span data-emi-auto-label>Bill each EMI on the card by itself on its due date</span></label>
@@ -255,12 +259,13 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                 kind, narration: data.narration || category.name, party: data.party || null, lender: kind === 'LOAN' ? form.emiLender.value.trim() || null : null,
                 reference: data.reference || null, notes: data.notes || null, categoryId: Number(data.categoryId), principal: total,
                 ratePercent: Number(form.emiRate.value) || 0, months, processingFee: Number(form.emiFee.value) || null, gstPercent: Number(form.emiGst.value) || null,
+                feeGstPercent: form.emiFeeGstOn.checked ? Number(form.emiFeeGst.value) || null : null,
                 purchaseDate: data.entryDate, firstDueDate: form.emiFirst.value || null, payAccountId: Number(data.paidFromId), autoPost: form.emiAuto.checked,
                 version: editingEmi ? emi.version : null,
             };
             if (editingEmi && !emi.editable) {   // the terms stay as they were
                 Object.assign(body, { kind: emi.kind, principal: emi.principal, ratePercent: emi.ratePercent, months: emi.months, processingFee: emi.processingFee,
-                    gstPercent: emi.gstPercent, purchaseDate: emi.purchaseDate, firstDueDate: emi.firstDueDate, payAccountId: emi.payAccountId });
+                    gstPercent: emi.gstPercent, feeGstPercent: emi.feeGstPercent, purchaseDate: emi.purchaseDate, firstDueDate: emi.firstDueDate, payAccountId: emi.payAccountId });
                 if (emi.kind === 'CARD') body.lender = emi.lender;
             }
             const plan = editingEmi ? await api.put(`/expenses/emis/${emi.id}`, body, { key: saveKey }) : await api.post('/expenses/emis', body, { key: saveKey });
@@ -621,8 +626,10 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
         form.classList.toggle('emi-loan', kind === 'LOAN');
         form.querySelector('[data-emi-auto-label]').textContent = kind === 'CARD' ? 'Bill each EMI on the card by itself on its due date' : 'Pay each EMI by itself on its due date';
         form.querySelectorAll('[data-emi-months]').forEach(c => c.classList.toggle('selected', c.dataset.emiMonths === form.emiMonths.value));
+        form.querySelector('[data-emi-fee-gst]').hidden = !(Number(form.emiFee.value) > 0);
+        form.emiFeeGst.disabled = !form.emiFeeGstOn.checked || form.emiFeeGstOn.disabled;
         form.querySelector('[data-emi-preview]').innerHTML = emiPreviewHtml({ principal: amountOf(), rate: Number(form.emiRate.value) || 0, months: Number(form.emiMonths.value) || 0,
-            gst: Number(form.emiGst.value) || 0, fee: Number(form.emiFee.value) || 0, first: form.emiFirst.value, kind });
+            gst: Number(form.emiGst.value) || 0, fee: Number(form.emiFee.value) || 0, feeGst: form.emiFeeGstOn.checked ? Number(form.emiFeeGst.value) || 0 : 0, first: form.emiFirst.value, kind });
     }
     if (!form.dataset.emiKind) form.dataset.emiKind = 'CARD';
     emiDefaults();
@@ -652,7 +659,7 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
         if (m >= 1) { form.emiMonths.value = m; emiLast(); }
         updateEmi();
     });
-    ['emiRate', 'emiGst', 'emiFee'].forEach(n => form[n].addEventListener('input', updateEmi));
+    ['emiRate', 'emiGst', 'emiFee', 'emiFeeGst', 'emiFeeGstOn'].forEach(n => form[n].addEventListener('input', updateEmi));
     form.addEventListener('expense-next', () => { firstTouched = false; emiDefaults(); updateEmi(); });
 
     // find a category: typing searches all of them, Enter picks the first match

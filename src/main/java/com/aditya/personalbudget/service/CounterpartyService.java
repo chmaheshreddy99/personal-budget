@@ -43,6 +43,9 @@ import java.util.stream.Collectors;
  * a transfer, a journal) are settled oldest first by the payments; what is still open of them is listed under the shop
  * or person named on the entry, or in one group without a name. What cannot be matched (paid ahead) is left over as
  * {@code unlinked}, so the parts always add up to the account.
+ * <p>
+ * Card EMIs sit in Payables too (see {@link EmiService}): their entries are told by their source, stay out of that oldest
+ * first settling, and are listed together as Credit Card EMI, a plan each.
  */
 @Service
 public class CounterpartyService {
@@ -52,9 +55,15 @@ public class CounterpartyService {
     private final ClaimRepository claims;
     private final ClaimRepaymentRepository repayments;
     private final ClaimInterestPostingRepository interest;
+    private final com.aditya.personalbudget.repository.EmiPlanRepository emiPlans;
+    private final com.aditya.personalbudget.repository.EmiInstallmentRepository emiInstallments;
 
     public CounterpartyService(JournalEntryRepository entries, JournalLineRepository lines, ClaimRepository claims,
-                               ClaimRepaymentRepository repayments, ClaimInterestPostingRepository interest) {
+                               ClaimRepaymentRepository repayments, ClaimInterestPostingRepository interest,
+                               com.aditya.personalbudget.repository.EmiPlanRepository emiPlans,
+                               com.aditya.personalbudget.repository.EmiInstallmentRepository emiInstallments) {
+        this.emiPlans = emiPlans;
+        this.emiInstallments = emiInstallments;
         this.entries = entries;
         this.lines = lines;
         this.claims = claims;
@@ -73,7 +82,7 @@ public class CounterpartyService {
         Map<Long, Claim> claimById = all.stream().collect(Collectors.toMap(Claim::getId, Function.identity()));
         Set<Long> holding = all.stream().map(Claim::getReceivableAccountId).filter(Objects::nonNull).collect(Collectors.toSet());
         List<Account> accounts = books.accounts().values().stream()
-                .filter(a -> !a.isChitBook() && !a.isProjectBook())
+                .filter(a -> !a.isChitBook() && !a.isProjectBook() && !a.isEmiAccount())
                 .filter(a -> a.getAccountType() == AccountType.RECEIVABLE || a.getAccountType() == AccountType.PAYABLE
                         || holding.contains(a.getId()))
                 .sorted(Comparator.comparing(Account::getCode))
@@ -104,9 +113,31 @@ public class CounterpartyService {
             }
         };
 
+        // the card EMI plan an entry was posted for
+        Map<Long, com.aditya.personalbudget.domain.entity.EmiPlan> planById = emiPlans.findByTenantId(tenantId).stream()
+                .filter(p -> p.getPayableAccountId() != null)
+                .collect(Collectors.toMap(com.aditya.personalbudget.domain.entity.EmiPlan::getId, Function.identity()));
+        Map<Long, com.aditya.personalbudget.domain.entity.EmiInstallment> installmentById = emiInstallments.findByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(com.aditya.personalbudget.domain.entity.EmiInstallment::getId, Function.identity()));
+        Function<JournalEntry, Long> planOf = e -> {
+            if (e == null || e.getSourceType() == null || e.getSourceId() == null) {
+                return null;
+            }
+            Long planId = switch (e.getSourceType()) {
+                case EmiService.SOURCE_CONVERT, EmiService.SOURCE_FORECLOSE -> e.getSourceId();
+                case EmiService.SOURCE_CARD_PAYMENT, EmiService.SOURCE_BILL -> {
+                    var i = installmentById.get(e.getSourceId());
+                    yield i == null ? null : i.getPlanId();
+                }
+                default -> null;
+            };
+            return planId != null && planById.containsKey(planId) ? planId : null;
+        };
+
         List<Counterparties> out = new ArrayList<>();
         for (Account account : accounts) {
             boolean payable = account.getAccountClass() == AccountClass.LIABILITY;
+            Map<Long, BigDecimal[]> byPlan = new LinkedHashMap<>();
             // natural-sign balance per item on both dates; the moves of the entries not made for an item
             Map<Long, BigDecimal[]> byClaim = new LinkedHashMap<>();
             List<Move> other = new ArrayList<>();
@@ -116,6 +147,17 @@ public class CounterpartyService {
                     continue;
                 }
                 BigDecimal value = books.natural(account.getId(), l.getDebit().subtract(l.getCredit()));
+                Long planId = planOf.apply(e);
+                if (planId != null) {
+                    BigDecimal[] v = byPlan.computeIfAbsent(planId, k -> new BigDecimal[] {Money.ZERO, Money.ZERO});
+                    if (!e.getEntryDate().isAfter(asOf)) {
+                        v[0] = v[0].add(value);
+                    }
+                    if (!e.getEntryDate().isAfter(compareDate)) {
+                        v[1] = v[1].add(value);
+                    }
+                    continue;
+                }
                 Long claimId = claimOf.apply(e);
                 if (claimId == null || !claimById.containsKey(claimId)) {
                     other.add(new Move(e, value));
@@ -144,6 +186,19 @@ public class CounterpartyService {
                 byParty.computeIfAbsent(key, k -> new ArrayList<>()).add(new ClaimBalance(c.getId(), c.getJournalEntryId(),
                         c.getKind().name(), c.getKind().getLabel(), c.getNarration(), c.getStartDate(), c.getDueDate(), amount, previous, overdue));
             });
+            byPlan.forEach((planId, v) -> {
+                BigDecimal amount = Money.round(v[0]), previous = Money.round(v[1]);
+                if (amount.signum() == 0 && previous.signum() == 0) {
+                    return;
+                }
+                var p = planById.get(planId);
+                LocalDate next = installmentById.values().stream()
+                        .filter(i -> planId.equals(i.getPlanId()) && ("DUE".equals(i.getStatus()) || "BILLED".equals(i.getStatus())))
+                        .map(com.aditya.personalbudget.domain.entity.EmiInstallment::getDueDate).min(LocalDate::compareTo).orElse(null);
+                partyName.putIfAbsent(CARD_EMI_KEY, CARD_EMI);
+                byParty.computeIfAbsent(CARD_EMI_KEY, k -> new ArrayList<>()).add(new ClaimBalance(null, p.getConversionEntryId(), "EMI", CARD_EMI, p.getNarration(),
+                        p.getPurchaseDate(), next, amount, previous, false));
+            });
             Map<Long, BigDecimal> openNow = open(other, asOf), openBefore = open(other, compareDate);
             Set<Long> openIds = new java.util.LinkedHashSet<>(openNow.keySet());
             openIds.addAll(openBefore.keySet());
@@ -170,7 +225,8 @@ public class CounterpartyService {
                 return new PartyBalance(named ? partyName.get(p.getKey()) : "Not linked to a person", named, amount, previous,
                         (int) items.stream().filter(i -> i.amount().signum() != 0).count(),
                         items.stream().anyMatch(ClaimBalance::overdue), oldest, items);
-            }).sorted(Comparator.comparing(PartyBalance::named).reversed()   // the group without a name last
+            }).sorted(Comparator.comparing((PartyBalance b) -> !CARD_EMI.equals(b.party()))   // the card EMIs first
+                    .thenComparing(Comparator.comparing(PartyBalance::named).reversed())   // the group without a name last
                     .thenComparing(PartyBalance::amount, Comparator.reverseOrder()).thenComparing(PartyBalance::party)).toList();
             BigDecimal listed = parties.stream().map(PartyBalance::amount).reduce(Money.ZERO, BigDecimal::add);
             BigDecimal listedBefore = parties.stream().map(PartyBalance::previous).reduce(Money.ZERO, BigDecimal::add);
@@ -180,6 +236,9 @@ public class CounterpartyService {
         }
         return out;
     }
+
+    private static final String CARD_EMI = "Credit Card EMI";
+    private static final String CARD_EMI_KEY = "\u0000card-emi";
 
     /** A move on the account by an entry not made for an item (natural sign: up is more owed). */
     private record Move(JournalEntry entry, BigDecimal value) {

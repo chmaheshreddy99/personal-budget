@@ -87,9 +87,14 @@ public class EmiPlan implements TenantOwned {
     @Column(nullable = false)
     private BigDecimal emiAmount;
 
-    /** Charged once with the purchase (processing fee, with its GST). */
+    /** Charged once with the purchase. */
     @PositiveOrZero
     private BigDecimal processingFee;
+
+    /** GST charged on the processing fee, %; none when empty. */
+    @PositiveOrZero
+    @DecimalMax("50")
+    private BigDecimal feeGstPercent;
 
     /** GST charged on each instalment's interest, % (18 on most card EMIs). */
     @PositiveOrZero
@@ -120,6 +125,17 @@ public class EmiPlan implements TenantOwned {
 
     @References(JournalEntry.class)
     private Long purchaseEntryId;
+
+    /**
+     * A card EMI converted the way the bank does it: where what is still owed sits, the household's Payables. Empty on
+     * card EMIs made before this: those stay charged on the card.
+     */
+    @References(Account.class)
+    private Long payableAccountId;
+
+    /** The conversion: the price taken off the card and put on the EMI payable. */
+    @References(JournalEntry.class)
+    private Long conversionEntryId;
 
     /** Each instalment is booked by itself on its due date (a card bills it anyway). */
     @Column(nullable = false)

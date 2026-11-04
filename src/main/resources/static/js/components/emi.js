@@ -2,9 +2,11 @@
  * Things bought on EMI (Expenses › EMIs): the schedule maths (the same as the server's), a plan opened in place
  * (where it stands, the money, every instalment) with what can be done, and the dialogs for paying.
  *
- * A card EMI is charged on the card at once (it blocks the limit); each month its EMI is billed on the card (the
- * interest and GST charged), and paying it into the card from the bank frees that part of the limit. A loan EMI owes
- * an account of its own and each EMI is paid from the bank.
+ * A card EMI is charged on the card and converted at once, as the bank does: the price moves from the card to Payables,
+ * and the limit stays held. Each month the whole EMI is billed on the card, with the statement's figures if they differ;
+ * when the card is paid (from here, or by any transfer into it) its principal comes off Payables, and the plan's share is
+ * nil once every EMI is paid. Plans made before this have no payable (p.payableAccountId empty): their price stays on the card. A loan EMI owes an account of its
+ * own and each EMI is paid from the bank.
  *
  *   emiSchedule(principal, rate, months, gstPercent, firstDue)   the rows, reducing balance
  *   addMonths(iso, n) / monthsBetween(a, b)                        Java's plusMonths (the day clamped to the month)
@@ -61,12 +63,13 @@ export function emiSchedule(principal, rate, months, gstPercent, firstDue) {
 }
 
 /** The dialog's preview: the EMI, what it all costs, how it is booked, and every instalment. */
-export function emiPreviewHtml({ principal, rate, months, gst, fee, first, kind }) {
+export function emiPreviewHtml({ principal, rate, months, gst, fee, feeGst = 0, first, kind }) {
     if (!(principal > 0) || !(months > 0)) return `<div class="emi-prev empty">${icon('calendar')}<span>Enter the price and the months: the EMI and its whole schedule show here.</span></div>`;
     const rows = emiSchedule(principal, rate, months, gst, first);
     const interest = rows.reduce((s, x) => s + x.interest, 0);
     const gstTotal = rows.reduce((s, x) => s + x.gst, 0);
-    const total = principal + interest + gstTotal + num(fee);
+    const gstOnFee = r2(num(fee) * num(feeGst) / 100);
+    const total = principal + interest + gstTotal + num(fee) + gstOnFee;
     const last = rows[rows.length - 1];
     const card = kind === 'CARD';
     return `<div class="emi-prev">
@@ -76,13 +79,13 @@ export function emiPreviewHtml({ principal, rate, months, gst, fee, first, kind 
             <span><small>Price</small><b>${money(principal)}</b></span>
             <span><small>Interest</small><b class="${interest ? 'neg' : ''}">${money(r2(interest))}</b></span>
             ${gstTotal ? `<span><small>GST</small><b class="neg">${money(r2(gstTotal))}</b></span>` : ''}
-            ${num(fee) ? `<span><small>Fee</small><b class="neg">${money(fee)}</b></span>` : ''}
+            ${num(fee) ? `<span title="${gstOnFee ? `${money(fee)} + GST ${money(gstOnFee)}` : 'Processing fee'}"><small>Fee${gstOnFee ? ' + GST' : ''}</small><b class="neg">${money(r2(num(fee) + gstOnFee))}</b></span>` : ''}
             <span class="total"><small>You pay</small><b>${money(r2(total))}</b></span>
         </div>
         <div class="emi-prev-how">${icon('info')}<span>${card
-            ? `<b>${money(principal)}</b> is charged on the card today and blocks its limit. Each month the EMI is billed on the card (its interest${gstTotal ? ' and GST' : ''} added); paying it into the card frees that part of the limit.`
+            ? `<b>${money(principal)}</b> is an expense on the card today, and is converted at once: it moves to Payables (as Credit Card EMI), while the bank keeps that much of the limit held. Each month the whole EMI is billed on the card, and you can change the amount to match the statement; when the card is paid, its principal comes off Payables, and the plan's share is nil after the last EMI.${gstOnFee || num(fee) ? ` The fee${gstOnFee ? ' and its GST go' : ' goes'} on the card today.` : ''}`
             : `<b>${money(principal)}</b> is spent today and owed to the lender (an EMI loan account, hidden from the accounts list). Each EMI is paid from the account picked: principal off the loan, interest under Loan Interest.`}</span></div>
-        <div class="emi-table scroll"><table><thead><tr><th>#</th><th>Due</th><th class="r">EMI</th><th class="r">Principal</th><th class="r">Interest${gstTotal ? ' + GST' : ''}</th><th class="r">${card ? 'Blocked after' : 'Owed after'}</th></tr></thead>
+        <div class="emi-table scroll"><table><thead><tr><th>#</th><th>Due</th><th class="r">EMI</th><th class="r">Principal</th><th class="r">Interest${gstTotal ? ' + GST' : ''}</th><th class="r">${card ? 'Limit held after' : 'Owed after'}</th></tr></thead>
             <tbody>${rows.map(x => `<tr><td>${x.seq}</td><td>${x.dueDate ? date(x.dueDate) : ''}</td><td class="r"><b>${money(x.emi + x.gst)}</b></td>
                 <td class="r">${money(x.principal)}</td><td class="r muted">${money(r2(x.interest + x.gst))}</td><td class="r">${money(x.balanceAfter)}</td></tr>`).join('')}</tbody>
             <tfoot><tr><th colspan="2">Total</th><th class="r">${money(r2(principal + interest + gstTotal))}</th><th class="r">${money(principal)}</th><th class="r">${money(r2(interest + gstTotal))}</th><th></th></tr></tfoot></table></div>
@@ -111,6 +114,7 @@ export function emiPanelHtml(p) {
     const fact = (ic, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ic)}${text}</span>`;
     const pct = p.progressPercent;
     const nextAmt = next ? num(next.emi) + num(next.gst) : 0;
+    const converted = card && !!p.payableAccountId;
     const btn = (act, ic, label, cls = '', extra = '') => manage ? `<button class="btn xs ${cls}" data-emi="${act}" ${extra}>${icon(ic)}${label}</button>` : '';
     return `<div class="emi-panel">
         ${p.archived ? `<div class="emi-closed-note">${icon('lock')}<span>Closed ${p.archivedOn ? shortDate(p.archivedOn) : ''}: it no longer shows${p.liabilityAccountName ? ' and its account is hidden' : ''}. Re-open it to change something.</span>
@@ -121,11 +125,13 @@ export function emiPanelHtml(p) {
             ${fact('percent', num(p.ratePercent) ? `${num(p.ratePercent)}% a year` : 'no-cost', 'Interest, reducing balance')}
             ${fact('calendar', `${date(p.purchaseDate)} · ${p.months} months`, 'Bought on')}
             ${p.purchaseEntryNo ? fact('journal', esc(p.purchaseEntryNo), 'The purchase entry') : ''}
+            ${p.conversionEntryNo ? fact('link', esc(p.conversionEntryNo), `Converted into EMI: taken off ${p.payAccountName} and put on ${p.payableAccountName}`) : ''}
             ${active ? fact(p.autoPost ? 'repeat' : 'hand', p.autoPost ? (card ? 'bills itself' : 'pays itself') : 'by hand', p.autoPost ? `Each EMI is ${card ? 'billed on the card' : 'paid'} on its due date` : 'Record each EMI yourself') : ''}
             <span class="spacer"></span>
             <span class="xd-actions">
                 ${active && next ? (card
-                    ? `${next.status === 'DUE' ? btn('bill', 'receipt', `Bill EMI ${next.seq}`, '', `title="Bill it on the card: its interest${num(next.gst) ? ' and GST' : ''} added, ${money(nextAmt)} to pay"`) : ''}
+                    ? `${next.status === 'BILLED' && converted ? btn('settle', 'check', `EMI ${next.seq} paid with the bill`, '', `title="The card's bill is paid already, some other way: only its principal comes off ${esc(p.payableAccountName)}"`) : ''}
+                        ${next.status === 'DUE' ? btn('bill', 'receipt', `Bill EMI ${next.seq}`, '',  `title="${converted ? `Bill the whole EMI on the card: ${money(nextAmt)}` : `Bill it on the card: its interest${num(next.gst) ? ' and GST' : ''} added, ${money(nextAmt)} to pay`}"`) : ''}
                         ${btn('pay', 'arrow-in', `Pay EMI ${next.seq} into card`, 'primary', `data-count="1" title="${money(nextAmt)} from the bank into the card: frees ${money(next.principal)} of the limit"`)}`
                     : btn('pay', 'check', `Pay EMI ${next.seq}`, 'primary', `data-count="1" title="${money(nextAmt)} due ${date(next.dueDate)}"`)) : ''}
                 ${active && p.dueNow > 1 ? btn('pay', 'check-circle', `Pay ${p.dueNow} due`, '', `data-count="${p.dueNow}"`) : ''}
@@ -148,9 +154,10 @@ export function emiPanelHtml(p) {
             </div>
             <div class="xd-card">
                 <div class="xd-card-head">${icon(card ? 'card' : 'scale')}${card ? 'On the card' : 'Still owed'}</div>
-                ${card ? `<div class="xd-line"><span title="Charged with the purchase, not billed yet: the card's limit it still holds">Blocked</span><b class="mono ${num(p.blocked) ? 'neg' : ''}">${money(p.blocked)}</b></div>
+                ${converted ? `<div class="xd-line"><span title="This plan's share of ${esc(p.payableAccountName)}: what is still owed. It goes down as the card is paid, and is nil after the last EMI">On Payables</span><b class="mono ${num(p.payableBalance) ? 'neg' : ''}">${money(p.payableBalance)}</b></div>` : ''}
+                ${card ? `<div class="xd-line ${converted ? 'small' : ''}"><span ${converted ? 'class="muted"' : ''} title="Not billed yet: the card's limit it still holds${converted ? '. Left out of the available credit' : ''}">${converted ? 'Limit held' : 'Blocked'}</span><b class="mono ${num(p.blocked) ? 'neg' : ''}">${money(p.blocked)}</b></div>
                     <div class="xd-line small"><span class="muted">Billed, to pay into the card${p.toPay ? ` (${p.toPay})` : ''}</span><b class="mono ${num(p.billedToPay) ? 'neg' : ''}">${money(p.billedToPay)}</b></div>
-                    <div class="xd-line small"><span class="muted">Principal still to repay</span><span class="mono">${money(p.outstanding)}</span></div>`
+                    ${converted ? '' : `<div class="xd-line small"><span class="muted">Principal still to repay</span><span class="mono">${money(p.outstanding)}</span></div>`}`
                     : `<div class="xd-line"><span>Principal</span><b class="mono ${num(p.outstanding) ? 'neg' : ''}">${money(p.outstanding)}</b></div>
                     <div class="xd-line small"><span class="muted">Held in</span><span class="ellipsis">${esc(p.liabilityAccountName || '')}</span></div>`}
                 <div class="xd-line small"><span class="muted">Still to pay (with interest)</span><b class="mono">${money(p.stillToPay)}</b></div>
@@ -161,12 +168,13 @@ export function emiPanelHtml(p) {
                 <div class="xd-line small"><span class="muted">Price</span><span class="mono">${money(p.principal)}</span></div>
                 <div class="xd-line small"><span class="muted">Interest${num(p.gstTotal) ? ' + GST' : ''}</span><span class="mono">${money(num(p.interestTotal) + num(p.gstTotal))}</span></div>
                 ${num(p.processingFee) ? `<div class="xd-line small"><span class="muted">Processing fee</span><span class="mono">${money(p.processingFee)}</span></div>` : ''}
+                ${num(p.feeGst) ? `<div class="xd-line small"><span class="muted">GST on the fee (${num(p.feeGstPercent)}%)</span><span class="mono">${money(p.feeGst)}</span></div>` : ''}
                 <div class="xd-line"><span>Total</span><b class="mono">${money(p.totalPayable)}</b></div>
                 <div class="xd-line small"><span class="muted">Paid so far</span><span class="mono">${money(p.paidSoFar)}</span></div>
             </div>
         </div>
         <div class="emi-sched scroll">
-            <table class="grid dense"><thead><tr><th>#</th><th>Due</th><th class="r">EMI</th><th class="r">Principal</th><th class="r">Interest</th>${num(p.gstTotal) ? '<th class="r">GST</th>' : ''}<th class="r">${card ? 'Blocked after' : 'Owed after'}</th><th>Status</th><th></th></tr></thead>
+            <table class="grid dense"><thead><tr><th>#</th><th>Due</th><th class="r">EMI</th><th class="r">Principal</th><th class="r">Interest</th>${num(p.gstTotal) ? '<th class="r">GST</th>' : ''}<th class="r">${converted ? 'Limit held after' : card ? 'Blocked after' : 'Owed after'}</th><th>Status</th><th></th></tr></thead>
             <tbody>${p.installments.map(i => {
                 const [tone, label] = STATUS[i.status] || ['', i.status];
                 const isNext = next && i.id === next.id;
@@ -174,10 +182,11 @@ export function emiPanelHtml(p) {
                     : i.status === 'BILLED' ? `<span class="badge ${i.overdue ? 'critical' : 'warning'}" title="${esc(i.entryNo || 'Billed on the card')}">${icon(i.overdue ? 'alert' : 'receipt')}billed ${shortDate(i.billedOn)}</span>`
                     : i.overdue ? `<span class="badge critical">${icon('alert')}Overdue</span>` : `<span class="badge ${tone}">${label}</span>`;
                 return `<tr class="${i.status === 'PAID' ? 'emi-paid' : i.status === 'WAIVED' ? 'emi-waived' : i.overdue ? 'emi-late' : ''} ${isNext ? 'emi-next' : ''}">
-                    <td>${i.seq}</td><td class="nowrap">${date(i.dueDate)}</td><td class="r"><b>${money(num(i.emi) + num(i.gst))}</b></td>
+                    <td>${i.seq}</td><td class="nowrap">${date(i.dueDate)}</td><td class="r"><b>${money(num(i.emi) + num(i.gst))}</b>${i.scheduledAmount != null ? `<span class="emi-edited" title="Changed to match the statement. The schedule said ${money(i.scheduledAmount)}">${icon('edit')}</span>` : ''}</td>
                     <td class="r">${money(i.principal)}</td><td class="r muted">${money(i.interest)}</td>${num(p.gstTotal) ? `<td class="r muted">${money(i.gst)}</td>` : ''}
                     <td class="r">${money(i.balanceAfter)}</td><td class="nowrap">${status}</td>
-                    <td class="r">${isNext && manage && active ? `<button class="btn xs" data-emi="pay" data-count="1">${icon(card ? 'arrow-in' : 'check')}${card ? 'Pay into card' : 'Pay'}</button>` : ''}</td></tr>`;
+                    <td class="r">${card && manage && active && i.status === 'BILLED' ? `<button class="btn xs ghost" data-emi="edit-bill" data-id="${i.id}" title="Change what was billed, to match the statement">${icon('edit')}Amount</button>` : ''}
+                        ${isNext && manage && active ? `<button class="btn xs" data-emi="pay" data-count="1">${icon(card ? 'arrow-in' : 'check')}${card ? 'Pay into card' : 'Pay'}</button>` : ''}</td></tr>`;
             }).join('')}</tbody></table>
         </div>
         ${p.notes ? `<div class="xd-note">${icon('info')}<span>${esc(p.notes)}</span></div>` : ''}
@@ -193,9 +202,11 @@ export function bindEmiPanel(el, p, { onChanged, onEdit } = {}) {
         const act = b.dataset.emi;
         try {
             if (act === 'pay') await openPayDialog(p, Number(b.dataset.count) || 1, onChanged);
-            if (act === 'bill') {
-                await api.post(`/expenses/emis/${p.id}/pay`, { count: 1, billOnly: true });
-                toast(`EMI ${p.next.seq} billed on ${p.payAccountName}`);
+            if (act === 'bill') openBillDialog(p, p.next, onChanged);
+            if (act === 'edit-bill') openBillDialog(p, p.installments.find(i => i.id === Number(b.dataset.id)), onChanged);
+            if (act === 'settle') {
+                await api.post(`/expenses/emis/${p.id}/settle`, { count: 1 });
+                toast(`EMI ${p.next.seq} paid: ${money(p.next.principal)} off ${p.payableAccountName}`);
                 onChanged?.();
             }
             if (act === 'foreclose') await openForecloseDialog(p, onChanged);
@@ -243,6 +254,63 @@ async function fromAccounts(p) {
 
 const accountSelect = (list, selected) => list.map(a => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''} data-meta="${esc(`${a.typeLabel} · ${moneyShort(a.balance)}`)}">${esc(a.name)}</option>`).join('');
 
+/** The statement's figures for an EMI: the total, and what makes it up. Changing the total changes the interest. */
+function figuresHtml(i, lockPrincipal) {
+    return `<div class="span-2 emi-figures">
+        <label class="field emi-fig-total"><span>Amount on the statement</span><input name="total" type="number" class="num" step="0.01" min="0" value="${r2(num(i.principal) + num(i.interest) + num(i.gst))}" data-plain></label>
+        <label class="field"><span>Principal</span><input name="principal" type="number" class="num" step="0.01" min="0" value="${num(i.principal)}" ${lockPrincipal ? 'readonly title="Charged with the purchase on this older plan"' : ''} data-plain></label>
+        <label class="field"><span>Interest</span><input name="interest" type="number" class="num" step="0.01" min="0" value="${num(i.interest)}" data-plain></label>
+        <label class="field"><span>GST</span><input name="gst" type="number" class="num" step="0.01" min="0" value="${num(i.gst)}" data-plain></label>
+        <p class="hint emi-fig-note" data-fig-note></p>
+    </div>`;
+}
+
+function bindFigures(form, i, last) {
+    const planned = i.scheduledAmount != null ? num(i.scheduledAmount) : r2(num(i.principal) + num(i.interest) + num(i.gst));
+    const note = () => {
+        const diff = r2(num(form.total.value) - planned);
+        const moved = r2(num(i.principal) - num(form.principal.value));
+        form.querySelector('[data-fig-note]').textContent = [
+            diff ? `${diff > 0 ? `${money(diff)} more` : `${money(-diff)} less`} than the schedule's ${money(planned)}.` : `As the schedule says.`,
+            moved && !last ? `The ${money(Math.abs(moved))} of principal ${moved > 0 ? 'moves to' : 'comes off'} the last EMI, so the plan still repays what was financed.` : '',
+        ].filter(Boolean).join(' ');
+    };
+    form.total.addEventListener('input', () => {
+        form.interest.value = r2(Math.max(0, num(form.total.value) - num(form.principal.value) - num(form.gst.value)));
+        note();
+    });
+    [form.principal, form.interest, form.gst].forEach(el => el.addEventListener('input', () => {
+        form.total.value = r2(num(form.principal.value) + num(form.interest.value) + num(form.gst.value));
+        note();
+    }));
+    note();
+}
+
+const figuresOf = f => ({ principal: num(f.principal.value), interest: num(f.interest.value), gst: num(f.gst.value) });
+const sameFigures = (i, x) => r2(num(i.principal)) === r2(x.principal) && r2(num(i.interest)) === r2(x.interest) && r2(num(i.gst)) === r2(x.gst);
+
+/** Bills the next EMI, or changes one billed: the amount as on the card's statement. */
+function openBillDialog(p, i, onChanged) {
+    const billed = i.status === 'BILLED';
+    const today = isoDate();
+    const dates = billed ? i.billedOn : (i.dueDate > today ? today : i.dueDate);
+    const lastDue = p.installments.filter(x => x.status === 'DUE' && x.id !== i.id).length === 0;
+    openModal({
+        title: `${billed ? 'Change the bill of' : 'Bill'} EMI ${i.seq} of ${p.months}`, sub: `${p.narration} · on ${p.payAccountName}`, iconName: 'receipt',
+        body: `<form class="form-grid two" onsubmit="return false">
+            ${figuresHtml(i, !p.payableAccountId || lastDue)}
+            <label class="field"><span>Billed on</span><input type="date" name="date" value="${dates}" min="${p.purchaseDate}"></label>
+        </form>`,
+        onOpen: m => bindFigures(m.el.querySelector('form'), i, lastDue),
+        actions: [{ label: 'Cancel' }, { label: billed ? 'Save' : 'Bill it', kind: 'primary', iconName: 'check', onClick: async m => {
+            const f = m.el.querySelector('form');
+            await api.post(`/expenses/emis/${p.id}/bill`, { installmentId: i.id, date: f.date.value || null, ...figuresOf(f) });
+            toast(`EMI ${i.seq} ${billed ? 'changed' : 'billed'} · ${money(num(f.total.value))} on ${p.payAccountName}`);
+            onChanged?.();
+        } }],
+    });
+}
+
 /**
  * Pays the next `count` EMIs. A loan EMI from the bank; a card EMI is billed on the card (if not yet) and paid into
  * the card from the bank, or only billed (the card's bill is paid later). Each on its own due date, or on one date.
@@ -259,8 +327,10 @@ async function openPayDialog(p, count, onChanged) {
         body: `<form class="form-grid two" onsubmit="return false">
             <div class="span-2 post-summary"><div class="row"><b>${rows.map(i => `EMI ${i.seq}${i.status === 'BILLED' ? ' (billed)' : ''}`).join(', ')}</b><span class="spacer"></span><b>${money(total)}</b></div>
                 <div class="small muted">${card
-                    ? `Billed on ${esc(p.payAccountName)} (interest${rows.some(i => num(i.gst)) ? ' and GST' : ''} ${money(rows.filter(i => i.status === 'DUE').reduce((s, i) => s + num(i.interest) + num(i.gst), 0))} added where not billed yet), then paid into the card: frees ${money(rows.reduce((s, i) => s + num(i.principal), 0))} of its limit.`
+                    ? p.payableAccountId ? `Billed in full on ${esc(p.payAccountName)} where not billed yet, then paid into it from the bank; ${money(rows.reduce((s, i) => s + num(i.principal), 0))} principal comes off ${esc(p.payableAccountName)}.`
+                    : `Billed on ${esc(p.payAccountName)} (interest${rows.some(i => num(i.gst)) ? ' and GST' : ''} ${money(rows.filter(i => i.status === 'DUE').reduce((s, i) => s + num(i.interest) + num(i.gst), 0))} added where not billed yet), then paid into the card: frees ${money(rows.reduce((s, i) => s + num(i.principal), 0))} of its limit.`
                     : `${money(rows.reduce((s, i) => s + num(i.principal), 0))} principal off ${esc(p.liabilityAccountName || 'the loan')} · ${money(rows.reduce((s, i) => s + num(i.interest) + num(i.gst), 0))} interest under Loan Interest`}</div></div>
+            ${card && one ? figuresHtml(rows[0], !p.payableAccountId || p.installments.filter(x => x.status === 'DUE' && x.id !== rows[0].id).length === 0) : ''}
             ${card ? `<label class="check-line span-2"><input type="checkbox" name="billOnly"> Only bill it on the card now (pay the card's bill later)</label>` : ''}
             <label class="field" data-from><span>${card ? 'Paid into the card from' : 'Paid from'}</span><select name="accountId">${accountSelect(accounts, card ? lastBank : p.payAccountId)}</select></label>
             <label class="field"><span>On</span><input type="date" name="date" value="${one ? (rows[0].dueDate > isoDate() ? isoDate() : rows[0].dueDate) : isoDate()}" max="${isoDate()}" min="${p.purchaseDate}"></label>
@@ -269,14 +339,20 @@ async function openPayDialog(p, count, onChanged) {
         onOpen: m => {
             const f = m.el.querySelector('form');
             f.billOnly?.addEventListener('change', () => { m.el.querySelector('[data-from]').hidden = f.billOnly.checked; });
+            if (card && one) bindFigures(f, rows[0], p.installments.filter(x => x.status === 'DUE' && x.id !== rows[0].id).length === 0);
         },
         actions: [{ label: 'Cancel' }, { label: card ? `Record ${money(total)}` : `Pay ${money(total)}`, kind: 'primary', iconName: 'check', onClick: async m => {
             const f = m.el.querySelector('form');
             const billOnly = !!f.billOnly?.checked;
             const own = f.ownDates?.checked;
             if (!billOnly && !f.accountId.value) throw new Error(card ? 'Add a bank account to pay the card from' : 'Pick the account');
+            // the statement's figures first: this bills the EMI (or changes its bill); paying it follows
+            if (card && one && !sameFigures(rows[0], figuresOf(f))) {
+                await api.post(`/expenses/emis/${p.id}/bill`, { installmentId: rows[0].id, date: rows[0].status === 'DUE' && f.date.value < rows[0].dueDate ? f.date.value : null, ...figuresOf(f) });
+                if (billOnly) { toast(`EMI ${rows[0].seq} billed · ${money(num(f.total.value))}`); onChanged?.(); return; }
+            }
             await api.post(`/expenses/emis/${p.id}/pay`, { count: rows.length, date: own ? null : f.date.value || null, accountId: billOnly ? null : Number(f.accountId.value) || null, billOnly });
-            toast(billOnly ? `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} billed on ${p.payAccountName}` : `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} paid · ${money(total)}`);
+            toast(billOnly ? `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} billed on ${p.payAccountName}` : `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} paid · ${money(card && one ? num(f.total.value) : total)}`);
             onChanged?.();
         } }],
     });
@@ -289,10 +365,10 @@ async function openForecloseDialog(p, onChanged) {
     const owed = card ? num(p.blocked) : num(p.outstanding);
     const saves = num(p.interestLeft) + p.installments.filter(i => i.status === 'DUE').reduce((s, i) => s + num(i.gst), 0);
     openModal({
-        title: `Pay off ${p.narration}`, sub: `${p.left} EMIs left · ${money(owed)} ${card ? 'blocked on the card' : 'principal'}`, iconName: 'flag',
+        title: `Pay off ${p.narration}`, sub: `${p.left} EMIs left · ${money(owed)} ${card ? (p.payableAccountId ? 'not billed yet' : 'blocked on the card') : 'principal'}`, iconName: 'flag',
         body: `<form class="form-grid two" onsubmit="return false">
             <label class="field"><span>On</span><input type="date" name="date" value="${isoDate()}" max="${isoDate()}" min="${p.purchaseDate}"></label>
-            <label class="field"><span>${card ? 'Paid into the card from' : 'Paid from'}</span><select name="accountId">
+            <label class="field"><span>${card ? (p.payableAccountId ? 'Paid from' : 'Paid into the card from') : 'Paid from'}</span><select name="accountId">
                 ${card ? `<option value="${p.payAccountId}">Billed on the card (paid with its bill)</option>` : ''}${accountSelect(accounts, card ? accounts.find(a => a.accountType === 'BANK')?.id : p.payAccountId)}</select></label>
             <label class="field"><span>Foreclosure charges <small class="muted">with GST</small></span><input name="charges" type="number" class="num" step="any" min="0" placeholder="0" data-plain>
                 <span class="chips">${[1, 2, 3].map(x => `<button type="button" class="date-chip" data-pct="${x}">${x}%</button>`).join('')}</span></label>

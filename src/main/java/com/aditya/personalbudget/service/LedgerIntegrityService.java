@@ -79,6 +79,7 @@ public class LedgerIntegrityService {
             Map.entry(LedgerService.SOURCE_REFUND, JournalEntry.class),
             Map.entry(LedgerService.SOURCE_REVERSAL, JournalEntry.class),
             Map.entry(EmiService.SOURCE_PURCHASE, EmiPlan.class),
+            Map.entry(EmiService.SOURCE_CONVERT, EmiPlan.class),
             Map.entry(EmiService.SOURCE_FORECLOSE, EmiPlan.class),
             Map.entry(EmiService.SOURCE_PAYMENT, EmiInstallment.class),
             Map.entry(EmiService.SOURCE_BILL, EmiInstallment.class),

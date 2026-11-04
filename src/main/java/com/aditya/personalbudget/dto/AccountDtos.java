@@ -113,7 +113,9 @@ public final class AccountDtos {
             /* what is owed on an EMI (Expenses › EMIs): listed only when asked for */
             boolean emiAccount,
             /* credit cards with a billing cycle: the latest bill and the cycle still open */
-            CardBillSummary cardBill) {
+            CardBillSummary cardBill,
+            /* a credit card: the limit held by converted EMIs, the principal not billed yet (left out of availableCredit) */
+            BigDecimal emiHeld) {
     }
 
     /** Where a credit card's billing stands, for its row and banner (the full list: {@code /accounts/{id}/card-bills}). */

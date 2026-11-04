@@ -299,7 +299,8 @@ export async function render(container, params, isCurrent) {
     const isOpen = c => ['OPEN', 'PARTIAL'].includes(c.claim.status);   // principal or posted interest still owed
     // Lent / Paid for: every item still open, whatever its date, plus those settled that started in the period
     const all = {
-        EXPENSE: rows.map(r => ({ ...expenseRow(r), emiOf: emiByEntry.get(r.entryId) || null })),
+        EXPENSE: [...rows.map(r => ({ ...expenseRow(r), emiOf: emiByEntry.get(r.entryId) || null })),
+            ...emiBook.plans.filter(pl => pl.conversionEntryId && inPeriod({ date: pl.purchaseDate })).map(emiCreditRow)],
         PAID_FOR: claimRows.filter(c => c.type === 'PAID_FOR' && (isOpen(c) || inPeriod(c))),
         LENT: claimRows.filter(c => c.type === 'LENT' && (isOpen(c) || inPeriod(c))),
         collect: claimRows.filter(c => (c.type === 'LENT' || c.type === 'PAID_FOR') && isOpen(c)),
@@ -349,7 +350,7 @@ export async function render(container, params, isCurrent) {
     const list = sortRows(all[view.type].filter(matchesFor(view.type, query)));
 
     // ---- figures (expenses only, so lending never inflates spending)
-    const expenses = all.EXPENSE.filter(matchesFor('EXPENSE', query));
+    const expenses = all.EXPENSE.filter(r => !r.emiCredit).filter(matchesFor('EXPENSE', query));
     const total = sum(expenses);
     // the previous period under the same filters, so the change compares like with like
     const previousTotal = sum(previous.map(expenseRow).filter(matchesFor('EXPENSE', query)));
@@ -409,9 +410,9 @@ export async function render(container, params, isCurrent) {
         </div>
 
         ${panel({ title: 'Transactions', iconName: 'list', cls: 'p-xp-list', bodyClass: 'flush',
-                  sub: `${list.length} · ${money(sum(list))}`,
+                  sub: `${list.filter(r => !r.emiCredit).length} · ${money(sum(list))}`,
                   actions: `<div class="seg-chips sm" id="xp-types">${TYPES.map(t => `<button class="seg-chip ${view.type === t.key ? 'active' : ''}" data-type="${t.key}">
-                        ${t.iconName ? icon(t.iconName) : ''}${t.label}<span class="count">${all[t.key].filter(matchesFor(t.key, query)).length}</span></button>`).join('')}</div>
+                        ${t.iconName ? icon(t.iconName) : ''}${t.label}<span class="count">${all[t.key].filter(r => !r.emiCredit).filter(matchesFor(t.key, query)).length}</span></button>`).join('')}</div>
                         <label class="switch" title="Group the list by day with daily totals"><input type="checkbox" id="xp-grouped" ${prefs.grouped ? 'checked' : ''}><span></span>By day</label>
                         ${totalsToggle()}`,
                   body: `
@@ -811,7 +812,7 @@ function tally(rows, keyOf) {
     const map = new Map();
     rows.forEach(r => {
         const k = keyOf(r);
-        if (k === null || k === undefined || k === '') return;
+        if (k === null || k === undefined || k === '' || r.emiCredit) return;
         const t = map.get(k) || { count: 0, total: 0 };
         t.count++; t.total += Number(r.amount) || 0;
         map.set(k, t);
@@ -1002,6 +1003,20 @@ function emiRow(p) {
     };
 }
 
+/**
+ * A purchase converted into EMI, as a line under it: the credit on the card that moved it to the EMI payable. It does not
+ * change what was spent, so it counts for nothing in the totals; opening it opens the plan.
+ */
+function emiCreditRow(p) {
+    return {
+        key: `c${p.id}`, sortId: p.purchaseEntryId, type: 'EXPENSE', typeLabel: 'Converted into EMI', emi: p, emiCredit: Number(p.principal),
+        raw: { entryId: p.conversionEntryId, entryNo: p.conversionEntryNo, date: p.purchaseDate, refunds: [], linked: [], items: [] },
+        date: p.purchaseDate, entryNo: p.conversionEntryNo, category: p.categoryName, categoryId: p.categoryId,
+        description: `Converted into EMI · ${p.narration}`, party: p.payableAccountName, reference: p.reference, emiConversion: true,
+        paidFrom: p.payAccountName, paidFromId: p.payAccountId, paidFromType: p.payAccountType, amount: 0, gross: 0,
+    };
+}
+
 /** Refunded / reversed marker for an expense row. */
 const STATUS_META = {
     REVERSED: { label: 'Reversed', tone: 'gray', iconName: 'undo' },
@@ -1093,10 +1108,10 @@ function tableHtml(rows, filtered = false) {
     const head = `<thead><tr>${heads.join('')}<th class="c-caret"></th></tr></thead>`;
     const cols = heads.filter(Boolean).length + 1;
     const cls = `grid xp-table ${claims ? 'xp-claims' : 'xp-expenses'}`;
-    const line = r => (claims ? claimRowHtml(r, !grouped) : r.billTotal ? billTotalHtml(r, !grouped) : r.isBill ? billRowHtml(r, !grouped) : rowHtml(r, !grouped));
+    const line = r => (claims ? claimRowHtml(r, !grouped) : r.emiHead ? emiHeadHtml(r, !grouped) : r.emiGroup ? emiPartHtml(r, !grouped) : r.billTotal ? billTotalHtml(r, !grouped) : r.isBill ? billRowHtml(r, !grouped) : rowHtml(r, !grouped));
     // the total of what is listed, as the last line: amount (and, for lent / borrowed, what is still owed)
     const owed = rows.reduce((s, r) => s + (r.claim && isOpenClaim(r.claim) ? Number(r.claim.outstanding) : 0), 0);
-    const foot = `<tfoot>${listTotalRow({ count: rows.length, span: cols - (claims ? 3 : 2), filtered,
+    const foot = `<tfoot>${listTotalRow({ count: rows.filter(r => !r.emiCredit).length, span: cols - (claims ? 3 : 2), filtered,
         totals: [money(sum(rows)), ...(claims ? [owed ? `<span class="neg">${money(owed)}</span>` : '—'] : [])] })}</tfoot>`;
     if (!grouped) return `<table class="${cls}">${head}<tbody>${nestLinked(rows).map(line).join('')}</tbody>${foot}</table>`;
     const days = new Map();
@@ -1118,7 +1133,48 @@ function tableHtml(rows, filtered = false) {
  * in the order they were recorded; its charges follow them. A single item listed on its own stays a row of its own.
  */
 function nestLinked(rows) {
-    const shown = new Map(rows.filter(r => r.raw).map(r => [r.raw.entryId, r]));
+    return nestBills(gatherEmis(rows));
+}
+
+/** Those on EMI drawn open at first: seeing how they hang together is the point; a fold is then remembered. */
+const emiFoldSeen = new Set();
+
+/**
+ * The lines of an EMI's purchase (the price, its fee, the GST on the fee) and the conversion that moved the price to Payables
+ * are one thing: one head row, where its first line would be, with them under it in that order. Listed alone, a line stays a
+ * row of its own (the conversion then says which purchase it belongs to).
+ */
+function gatherEmis(rows) {
+    const planOf = r => (r.emiCredit ? r.emi : r.emiOf?.what === 'purchase' ? r.emiOf.plan : null);
+    const groups = new Map();
+    rows.forEach(r => {
+        const plan = planOf(r);
+        if (plan?.conversionEntryId) groups.set(plan.id, [...(groups.get(plan.id) || []), r]);
+    });
+    if (![...groups.values()].some(g => g.length > 1)) return rows;
+    const order = { Purchase: 0, Fee: 1, GST: 2, Converted: 3 };
+    const out = [];
+    const drawn = new Set();
+    rows.forEach(r => {
+        const plan = planOf(r);
+        const group = plan?.conversionEntryId ? groups.get(plan.id) : null;
+        if (!group || group.length < 2) { out.push(r); return; }
+        if (drawn.has(plan.id)) return;
+        drawn.add(plan.id);
+        const foldId = plan.purchaseEntryId;
+        if (!emiFoldSeen.has(plan.id)) { emiFoldSeen.add(plan.id); unfoldedBills.add(foldId); }
+        const parts = [...group].sort((a, b) => order[emiPartOf(a).short] - order[emiPartOf(b).short]);
+        const head = { ...parts[0], key: `e${plan.id}`, emiHead: true, emi: plan, foldId, partsShown: parts.length, emiCredit: 0,
+            amount: parts.reduce((s, x) => s + Number(x.amount || 0), 0), date: plan.purchaseDate, party: plan.party, paidFrom: plan.payAccountName, paidFromId: plan.payAccountId, paidFromType: plan.payAccountType };
+        BILLS.set(head.key, head);
+        out.push(head);
+        parts.forEach((x, i) => out.push({ ...x, emiGroup: plan, foldId, item: i === parts.length - 1 ? 'last' : 'mid' }));
+    });
+    return out;
+}
+
+function nestBills(rows) {
+    const shown = new Map(rows.filter(r => r.raw && !r.emiHead && !r.emiGroup).map(r => [r.raw.entryId, r]));
     const children = new Map();
     const billItems = new Map();
     rows.forEach(r => {
@@ -1232,6 +1288,52 @@ function emiTableHtml(rows, filtered) {
             <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td></tr>`;
     }).join('')}</tbody><tfoot>${listTotalRow({ count: rows.length, span: 5, filtered, noun: 'plan',
         totals: [money(sum(rows)), `<span class="neg">${money(rows.reduce((s, r) => s + Number(r.emi.outstanding || 0), 0))}</span>`] })}</tfoot></table>`;
+}
+
+/** What a line of an EMI's purchase is: the purchase, the fee, the GST on the fee, or the conversion. */
+function emiPartOf(r) {
+    if (r.emiCredit) return { label: 'Converted into EMI', short: 'Converted', iconName: 'transfer', tone: 'aqua' };
+    const memo = (r.raw?.memo || '').toLowerCase();
+    if (memo.includes('gst on the processing fee')) return { label: 'GST on the fee', short: 'GST', iconName: 'percent', tone: 'coral' };
+    if (memo.includes('processing fee')) return { label: 'Processing fee', short: 'Fee', iconName: 'receipt', tone: 'coral' };
+    return { label: 'Purchase', short: 'Purchase', iconName: 'cart', tone: 'violet' };
+}
+
+/** The head of an EMI's purchase: what it was, on how many EMIs, what it cost all in; its parts fold under it. */
+function emiHeadHtml(r, withDate) {
+    const p = r.emi;
+    const cat = categoryIcon(p.categoryName);
+    const payer = accountTypeIcon(r.paidFromType);
+    const folded = billFolded(r.foldId);
+    const parts = r.partsShown;
+    return `<tr class="xp-tr xp-bill xp-emi-head xp-parent" data-key="${r.key}">
+        ${withDate ? `<td class="c-date" title="${dayName(r.date)}"><b>${date(r.date)}</b></td>` : ''}
+        <td class="c-cat"><div class="xd-cat"><span class="chip-icon xs ${cat.tone}">${icon(cat.name)}</span><span class="ellipsis">${esc(p.categoryName)}</span></div></td>
+        <td class="c-desc"><div class="xd-cell"><span class="xd-text"><b class="ellipsis" title="${esc(p.narration)}">${esc(p.narration)}</b>
+            <span class="mini-flag aqua emi" title="${p.paidCount} of ${p.months} EMIs paid · ${money(p.emiAmount)} a month · open it to pay, bill or change it">${icon('calendar')}${p.months} × ${moneyShort(p.emiAmount)}</span>
+            <button type="button" class="xl-chip bill ${folded ? '' : 'open'}" data-xb-fold="${r.foldId}" title="${folded ? 'Show' : 'Fold'} the purchase, its fee and the conversion">${icon('list')}<b>${parts}</b><span>parts</span>${icon('chevron-down')}</button></span>
+            ${r.party ? `<span class="xd-party" title="Paid to: ${esc(r.party)}">${esc(r.party)}</span>` : ''}</div></td>
+        <td class="c-pay"><button type="button" class="xd-link xd-payer" data-row-filter-payer="${r.paidFromId}" title="Paid from ${esc(r.paidFrom)} · show only this account">${icon(payer.name)}<span class="ellipsis">${esc(r.paidFrom)}</span></button></td>
+        <td class="r c-amt"><b class="mono neg" title="What it cost: the purchase with its fee. Interest comes with each EMI">${money(r.amount)}</b></td>
+        <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
+    </tr>`;
+}
+
+/** A part under the head: the purchase, the fee, the GST on it, or the credit that moved the price to Payables. */
+function emiPartHtml(r, withDate) {
+    const k = emiPartOf(r);
+    const p = r.emiGroup;
+    const credit = Boolean(r.emiCredit);
+    return `<tr class="xp-tr xp-item item-${r.item} ${credit ? 'xp-emi-credit' : ''} ${billFolded(r.foldId) ? 'xl-folded' : ''}" data-key="${r.key}" data-bill="${r.foldId}">
+        ${withDate ? '<td class="c-date"></td>' : ''}
+        <td class="c-cat"><div class="xd-cat"><span class="chip-icon xs ${k.tone}">${icon(k.iconName)}</span><span class="ellipsis">${esc(k.label)}</span></div></td>
+        <td class="c-desc"><div class="xd-cell"><span class="xd-text"><span class="ellipsis" title="${esc(credit ? `${money(r.emiCredit)} taken off ${r.paidFrom} and put on ${p.payableAccountName}. What was spent does not change` : k.label)}">${credit
+            ? `${esc(r.paidFrom)} → <b>${esc(p.payableAccountName)}</b> · Credit Card EMI` : esc(k.short === 'Purchase' ? p.narration : `${k.label} · ${p.narration}`)}</span></span>
+            <span class="xd-party" title="The entry">${esc(r.entryNo || '')}</span></div></td>
+        <td class="c-pay"></td>
+        <td class="r c-amt">${credit ? `<b class="mono pos" title="A credit on the card, not counted in what was spent">+${money(r.emiCredit)}</b>` : `<b class="mono neg">${money(r.amount)}</b>`}</td>
+        <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
+    </tr>`;
 }
 
 const CLAIM_KIND = { LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],

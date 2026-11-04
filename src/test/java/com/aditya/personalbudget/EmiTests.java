@@ -15,12 +15,17 @@ import com.aditya.personalbudget.security.UserContext;
 import com.aditya.personalbudget.service.AccountService;
 import com.aditya.personalbudget.service.CategoryService;
 import com.aditya.personalbudget.service.EmiService;
+import com.aditya.personalbudget.service.EmiService.BillRequest;
 import com.aditya.personalbudget.service.EmiService.EmiRequest;
 import com.aditya.personalbudget.service.EmiService.ForecloseRequest;
 import com.aditya.personalbudget.service.EmiService.PayRequest;
 import com.aditya.personalbudget.service.EmiService.PlanView;
 import com.aditya.personalbudget.service.ExpenseService;
+import com.aditya.personalbudget.dto.JournalDtos.QuickKind;
+import com.aditya.personalbudget.dto.JournalDtos.QuickTransactionRequest;
 import com.aditya.personalbudget.service.LedgerService;
+import com.aditya.personalbudget.service.ReportService;
+import com.aditya.personalbudget.service.TransactionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +64,12 @@ class EmiTests {
     @Autowired EmiService emis;
     @Autowired ExpenseService expenses;
     @Autowired LedgerService ledger;
+    @Autowired TransactionService transactions;
+    @Autowired AccountService accountService;
+    @Autowired com.aditya.personalbudget.repository.AccountRepository accountRows;
+    @Autowired com.aditya.personalbudget.repository.EmiPlanRepository plans;
+    @Autowired com.aditya.personalbudget.repository.JournalLineRepository journalLines;
+    @Autowired ReportService reports;
 
     @BeforeEach
     void signIn() {
@@ -102,33 +113,38 @@ class EmiTests {
         assertThat(p.emiAmount()).isEqualByComparingTo("10352.90");
         assertThat(p.toBill()).isEqualTo(6);
         assertThat(p.liabilityAccountId()).isNull();
-        // the whole price (and the fee) is charged on the card at once: it blocks the limit
-        assertThat(balances().get(card)).isEqualByComparingTo("60500");
+        // the price is an expense on the card, converted at once to the plan's payable: only the fee stays on the card
+        assertThat(balances().get(card)).isEqualByComparingTo("500");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("60000");
         assertThat(p.blocked()).isEqualByComparingTo("60000");
         assertThat(expenses.list(today.minusMonths(8), today).stream().filter(r -> r.entryId().equals(p.purchaseEntryId())))
                 .extracting(r -> r.amount().doubleValue()).contains(60000.0, 500.0);
 
         // a card EMI is paid into the card from the bank
         assertThatThrownBy(() -> emis.pay(p.id(), new PayRequest(1, null, null, false))).isInstanceOf(BusinessException.class).hasMessageContaining("bank");
-        // two EMIs billed (interest and GST on the card) and paid into the card: that part of the limit is free
+        // two EMIs billed in full and paid into the card: their principal comes off the payable
         PlanView two = emis.pay(p.id(), new PayRequest(2, null, bank, false));
         assertThat(two.paidCount()).isEqualTo(2);
         assertThat(two.outstanding()).isEqualByComparingTo("40396.67");
         assertThat(two.blocked()).isEqualByComparingTo("40396.67");
-        assertThat(balances().get(card)).isEqualByComparingTo("40896.67");   // 60500 + interest and GST 1300.91 − paid 20904.24
+        assertThat(balances().get(card)).isEqualByComparingTo("500");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("40396.67");
         // the third billed only: waiting to be paid into the card
         PlanView billed = emis.pay(p.id(), new PayRequest(1, null, null, true));
         assertThat(billed.toPay()).isEqualTo(1);
         assertThat(billed.blocked()).isEqualByComparingTo("30447.74");
         assertThat(billed.billedToPay()).isEqualByComparingTo("10425.61");   // 10352.90 + GST 72.71
+        assertThat(balances().get(card)).isEqualByComparingTo("10925.61");   // the whole EMI on the card, as on its statement
+        assertThat(owedOn(p.id())).isEqualByComparingTo("40396.67");   // still owed until the card is paid
         assertThat(emis.undo(p.id()).installments().get(2).status()).isEqualTo("DUE");
 
-        // paying off early pays what is still blocked into the card
+        // paying off early takes the rest off the payable, from the bank
         assertThatThrownBy(() -> emis.close(p.id())).isInstanceOf(BusinessException.class).hasMessageContaining("still to pay");
         PlanView closed = emis.foreclose(p.id(), new ForecloseRequest(today, bank, bd(1000)));
         assertThat(closed.status()).isEqualTo("FORECLOSED");
         assertThat(closed.outstanding()).isEqualByComparingTo("0");
         assertThat(balances().get(card)).isEqualByComparingTo("500");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("0");
         assertThat(emis.undo(p.id()).status()).isEqualTo("ACTIVE");
         assertThatThrownBy(() -> emis.delete(p.id())).isInstanceOf(BusinessException.class).hasMessageContaining("undo");
         // once finished it can be closed (put away) and re-opened
@@ -143,6 +159,130 @@ class EmiTests {
                 bd(500), bd(18), today.minusMonths(7), null, card, false, emis.get(p.id()).version()))).isInstanceOf(BusinessException.class);
         assertThat(emis.update(p.id(), new EmiRequest("CARD", "Phone 16 Pro", null, null, null, "Gift", category, bd(60000), bd(12), 6,
                 bd(500), bd(18), today.minusMonths(7), null, card, false, emis.get(p.id()).version())).narration()).isEqualTo("Phone 16 Pro");
+    }
+
+    private Long card(BigDecimal limit) {
+        return accounts.create(new AccountRequest(null, "Limit card " + System.nanoTime(), AccountType.CREDIT_CARD, "HDFC", null, null, null, null, limit, null, null,
+                null, true, null)).id();
+    }
+
+    private Long bank() {
+        return accounts.create(new AccountRequest(null, "Limit bank " + System.nanoTime(), AccountType.BANK, "SBI", null, null, null, null, null, null, null,
+                null, true, null)).id();
+    }
+
+    private Long expenseCategory() {
+        return categories.list().stream().filter(c -> c.kind() == CategoryKind.EXPENSE).findFirst().orElseThrow().id();
+    }
+
+    private BigDecimal available(Long id) {
+        return accounts.list().stream().filter(a -> a.id().equals(id)).findFirst().orElseThrow().availableCredit();
+    }
+
+    @Test
+    void theConversionsCreditDoesNotFreeTheLimitAndThePayableEndsAtNil() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(100000));
+        Long bank = bank();
+        BigDecimal awaitingBefore = awaiting();
+        PlanView p = emis.create(new EmiRequest("CARD", "Fridge " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(30000), bd(0), 3,
+                bd(1000), bd(18), today.minusMonths(4), null, card, false, null, bd(18)));
+        // the fee and its GST are charged with the purchase, as Loan Interest, and counted in what it costs
+        assertThat(p.feeGst()).isEqualByComparingTo("180");
+        assertThat(p.totalPayable()).isEqualByComparingTo("31180");
+        assertThat(balances().get(card)).isEqualByComparingTo("1180");
+        // the card owes only the fee, but the limit stays held
+        assertThat(available(card)).isEqualByComparingTo("68820");
+        assertThat(expenses.list(today.minusMonths(5), today).stream().filter(r -> r.entryId().equals(p.purchaseEntryId())))
+                .extracting(r -> r.amount().doubleValue()).contains(30000.0, 1000.0, 180.0);
+        assertThat(p.conversionEntryNo()).isNotBlank();
+
+        // each EMI: billed in full, its limit moves into the balance; paid, the limit is free and the payable goes down
+        emis.pay(p.id(), new PayRequest(1, null, null, true));
+        assertThat(balances().get(card)).isEqualByComparingTo("11180");
+        assertThat(available(card)).isEqualByComparingTo("68820");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("30000");
+        emis.pay(p.id(), new PayRequest(2, null, bank, false));
+        assertThat(available(card)).isEqualByComparingTo("88820");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("10000");
+        PlanView done = emis.pay(p.id(), new PayRequest(1, null, bank, false));
+        assertThat(done.status()).isEqualTo("CLOSED");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("0");
+        assertThat(balances().get(card)).isEqualByComparingTo("1180");
+        assertThat(available(card)).isEqualByComparingTo("98820");
+        // nothing is left waiting between the card and the payable
+        assertThat(awaiting()).isEqualByComparingTo(awaitingBefore);
+    }
+
+    @Test
+    void aTransferIntoTheCardPaysItsBilledEmisAndChangingItTakesThatBack() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(100000));
+        Long bank = bank();
+        PlanView p = emis.create(new EmiRequest("CARD", "Sofa " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(30000), bd(0), 3,
+                null, null, today.minusMonths(4), null, card, false));
+        emis.pay(p.id(), new PayRequest(2, null, null, true));
+        assertThat(balances().get(card)).isEqualByComparingTo("20000");
+
+        // part of the bill: only the EMI it fully covers
+        var part = transactions.postQuick(new QuickTransactionRequest(QuickKind.TRANSFER, today, bd(15000), bank, card, null, "Card bill", null, null, null));
+        assertThat(emis.get(p.id()).paidCount()).isEqualTo(1);
+        assertThat(owedOn(p.id())).isEqualByComparingTo("20000");
+        // deleted: billed again, and the payable back where it was
+        transactions.deleteTransfer(part.id());
+        PlanView back = emis.get(p.id());
+        assertThat(back.paidCount()).isZero();
+        assertThat(back.toPay()).isEqualTo(2);
+        assertThat(owedOn(p.id())).isEqualByComparingTo("30000");
+        // the whole bill pays both; a later one finds nothing billed
+        transactions.postQuick(new QuickTransactionRequest(QuickKind.TRANSFER, today, bd(20000), bank, card, null, "Card bill", null, null, null));
+        assertThat(emis.get(p.id()).paidCount()).isEqualTo(2);
+        assertThat(owedOn(p.id())).isEqualByComparingTo("10000");
+        assertThat(balances().get(card)).isEqualByComparingTo("0");
+
+        // paid some other way: marked by hand
+        emis.pay(p.id(), new PayRequest(1, null, null, true));
+        PlanView settled = emis.settleBilled(p.id(), new com.aditya.personalbudget.service.EmiService.SettleRequest(1, today));
+        assertThat(settled.status()).isEqualTo("CLOSED");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("0");
+        assertThat(balances().get(card)).isEqualByComparingTo("10000");   // that bill itself is still on the card
+    }
+
+    @Test
+    void payingOffEarlyAndDeletingLeaveNothingBehind() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(100000));
+        Long bank = bank();
+        Long category = expenseCategory();
+        // billed on the card: the rest leaves the payable and joins the card's bill
+        PlanView a = emis.create(new EmiRequest("CARD", "TV " + System.nanoTime(), null, null, null, null, category, bd(30000), bd(0), 3, null, null, today.minusMonths(4), null, card, false));
+        PlanView early = emis.foreclose(a.id(), new ForecloseRequest(today, card, bd(500)));
+        assertThat(early.status()).isEqualTo("FORECLOSED");
+        assertThat(owedOn(a.id())).isEqualByComparingTo("0");
+        assertThat(balances().get(card)).isEqualByComparingTo("30500");
+        assertThat(available(card)).isEqualByComparingTo("69500");
+        // from the bank, with one EMI billed and waiting: both go, and undoing restores both
+        PlanView b = emis.create(new EmiRequest("CARD", "AC " + System.nanoTime(), null, null, null, null, category, bd(30000), bd(0), 3, null, null, today.minusMonths(4), null, card, false));
+        emis.pay(b.id(), new PayRequest(1, null, null, true));
+        emis.foreclose(b.id(), new ForecloseRequest(today, bank, null));
+        assertThat(owedOn(b.id())).isEqualByComparingTo("0");
+        assertThat(balances().get(card)).isEqualByComparingTo("30500");
+        PlanView undone = emis.undo(b.id());
+        assertThat(undone.status()).isEqualTo("ACTIVE");
+        assertThat(undone.toPay()).isEqualTo(1);
+        assertThat(owedOn(b.id())).isEqualByComparingTo("30000");
+        // a plan not started can be edited in full, or deleted with its conversion and payable
+        PlanView c = emis.create(new EmiRequest("CARD", "Bike " + System.nanoTime(), null, null, null, null, category, bd(12000), bd(0), 3, null, null, today, null, card, false));
+        PlanView edited = emis.update(c.id(), new EmiRequest("CARD", c.narration(), null, null, null, null, category, bd(15000), bd(0), 3, null, null, today, null, card, false, c.version()));
+        assertThat(owedOn(c.id())).isEqualByComparingTo("15000");
+        assertThat(edited.payableBalance()).isEqualByComparingTo("15000");
+        BigDecimal before = balances().get(card);
+        BigDecimal payablesBefore = balances().get(payables());
+        emis.delete(c.id());
+        assertThat(balances().get(card)).isEqualByComparingTo(before);
+        assertThat(balances().get(payables())).isEqualByComparingTo(payablesBefore.subtract(bd(15000)));
+        // the balance sheet stays in balance through all of it
+        assertThat(reports.balanceSheet(today, null).balanced()).isTrue();
     }
 
     @Test
@@ -188,7 +328,158 @@ class EmiTests {
         assertThat(after.paidCount()).isEqualTo(0);
         assertThat(after.blocked()).isEqualByComparingTo("60000");
         assertThat(after.installments().getFirst().billedOn()).isEqualTo(after.installments().getFirst().dueDate());
-        assertThat(balances().get(card)).isEqualByComparingTo("90000");
+        // three EMIs billed in full on the card, as on its statement; all of it still owed on the payable until the card is paid
+        assertThat(balances().get(card)).isEqualByComparingTo("30000");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("90000");
+    }
+
+    /** What a plan still owes on the shared Payables. */
+    private BigDecimal owedOn(Long planId) {
+        return emis.get(planId).payableBalance();
+    }
+
+    /** What the household has billed on cards and not yet paid (the contra of Payables, shared by the tests here). */
+    private BigDecimal awaiting() {
+        return accounts.list().stream().filter(a -> a.name().startsWith("Less: EMI billed")).map(a -> a.balance()).findFirst().orElse(BigDecimal.ZERO);
+    }
+
+    private Long payables() {
+        return accounts.list().stream().filter(a -> a.code().equals("2000")).findFirst().orElseThrow().id();
+    }
+
+    @Test
+    void plansShareThePayablesAccountAndTheBalanceSheetCallsThemCreditCardEmi() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(500000));
+        Long bank = bank();
+        int before = accounts.list().size();
+        BigDecimal payablesBefore = balances().getOrDefault(payables(), BigDecimal.ZERO);
+        PlanView a = emis.create(new EmiRequest("CARD", "Washer " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(30000), bd(0), 3, null, null, today.minusMonths(4), null, card, false));
+        PlanView b = emis.create(new EmiRequest("CARD", "Oven " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(12000), bd(0), 3, null, null, today.minusMonths(4), null, card, false));
+        // no account of their own: both sit in Payables, which also holds a bill owed to someone
+        assertThat(a.payableAccountId()).isEqualTo(payables()).isEqualTo(b.payableAccountId());
+        assertThat(accounts.list().size()).isEqualTo(before);
+        assertThat(balances().get(payables()).subtract(payablesBefore)).isEqualByComparingTo("42000");
+
+        // a billed EMI is on the card and still on Payables; the contra line keeps the balance sheet honest
+        emis.pay(a.id(), new PayRequest(1, null, null, true));
+        BigDecimal netWorth = reports.balanceSheet(today, null).netWorth();
+        var sheet = reports.balanceSheet(today, null);
+        assertThat(sheet.balanced()).isTrue();
+        var onPayables = sheet.counterparties().stream().filter(c -> c.accountId().equals(payables())).findFirst().orElseThrow();
+        var emi = onPayables.parties().stream().filter(x -> x.party().equals("Credit Card EMI")).findFirst().orElseThrow();
+        // each plan by itself (the tests here share one household, so other plans may be there too)
+        assertThat(emi.items().stream().filter(i -> i.narration().equals(a.narration())).findFirst().orElseThrow().amount()).isEqualByComparingTo("30000");
+        assertThat(emi.items().stream().filter(i -> i.narration().equals(b.narration())).findFirst().orElseThrow().amount()).isEqualByComparingTo("12000");
+        assertThat(onPayables.parties().getFirst().party()).isEqualTo("Credit Card EMI");
+        assertThat(onPayables.unlinked()).isEqualByComparingTo(BigDecimal.ZERO);
+
+        // paying the card moves it off Payables, and net worth only changes by what left the bank against the card
+        transactions.postQuick(new QuickTransactionRequest(QuickKind.TRANSFER, today, bd(10000), bank, card, null, "Card bill", null, null, null));
+        assertThat(owedOn(a.id())).isEqualByComparingTo("20000");
+        assertThat(reports.balanceSheet(today, null).netWorth()).isEqualByComparingTo(netWorth);
+        assertThat(balances().get(payables()).subtract(payablesBefore)).isEqualByComparingTo("32000");
+        // closing a finished plan leaves the shared account alone
+        emis.foreclose(b.id(), new ForecloseRequest(today, bank, null));
+        emis.close(b.id());
+        assertThat(accounts.list().stream().filter(x -> x.id().equals(payables())).findFirst().orElseThrow().active()).isTrue();
+    }
+
+    @Test
+    void anEmiCanBeBilledAsTheStatementSaysAndPlanStillRepaysWhatWasFinanced() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(500000));
+        Long bank = bank();
+        BigDecimal awaitingBefore = awaiting();
+        PlanView p = emis.create(new EmiRequest("CARD", "Camera " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(30000), bd(12), 3, null, bd(18), today.minusMonths(4), null, card, false));
+        var first = p.installments().getFirst();
+        // the statement says a little more interest
+        PlanView billed = emis.billAs(p.id(), new BillRequest(null, null, first.principal(), first.interest().add(bd(1.5)), first.gst()));
+        var row = billed.installments().getFirst();
+        assertThat(row.status()).isEqualTo("BILLED");
+        assertThat(row.scheduledAmount()).isEqualByComparingTo(first.emi().add(first.gst()));
+        BigDecimal whole = first.emi().add(first.gst()).add(bd(1.5));
+        assertThat(balances().get(card)).isEqualByComparingTo(whole);
+        // changed again after billing: the same entry, a different principal, and the last EMI takes the difference
+        var lastBefore = billed.installments().getLast();
+        PlanView changed = emis.billAs(p.id(), new BillRequest(row.id(), null, row.principal().add(bd(10)), row.interest(), row.gst()));
+        assertThat(changed.installments().getFirst().journalEntryId()).isEqualTo(row.journalEntryId());
+        assertThat(balances().get(card)).isEqualByComparingTo(whole.add(bd(10)));
+        assertThat(changed.installments().getLast().principal()).isEqualByComparingTo(lastBefore.principal().subtract(bd(10)));
+        assertThat(changed.installments().getLast().balanceAfter()).isEqualByComparingTo("0");
+        assertThat(changed.blocked()).isEqualByComparingTo(bd(30000).subtract(first.principal()).subtract(bd(10)));
+        // undoing goes back to the schedule, the last EMI too
+        PlanView undone = emis.undo(p.id());
+        assertThat(undone.installments().getFirst().scheduledAmount()).isNull();
+        assertThat(undone.installments().getFirst().principal()).isEqualByComparingTo(first.principal());
+        assertThat(undone.installments().getLast().principal()).isEqualByComparingTo(lastBefore.principal());
+        assertThat(balances().get(card)).isEqualByComparingTo("0");
+        // to the end with a changed principal: exactly what was financed is repaid; the last EMI's principal is fixed
+        emis.billAs(p.id(), new BillRequest(null, null, first.principal().add(bd(10)), first.interest(), first.gst()));
+        PlanView two = emis.pay(p.id(), new PayRequest(2, null, bank, false));
+        var last = two.installments().getLast();
+        assertThatThrownBy(() -> emis.billAs(p.id(), new BillRequest(last.id(), null, last.principal().add(bd(1)), last.interest(), last.gst())))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("last EMI");
+        PlanView done = emis.pay(p.id(), new PayRequest(1, null, bank, false));
+        assertThat(done.status()).isEqualTo("CLOSED");
+        assertThat(owedOn(p.id())).isEqualByComparingTo("0");
+        assertThat(awaiting()).isEqualByComparingTo(awaitingBefore);
+        // a paid one is not changed
+        assertThatThrownBy(() -> emis.billAs(p.id(), new BillRequest(last.id(), null, last.principal(), last.interest(), last.gst()))).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void aPlanMadeWithItsOwnPayableMovesToTheSharedOneKeepingItsEntries() {
+        LocalDate today = LocalDate.now();
+        Long card = card(bd(500000));
+        Long bank = bank();
+        BigDecimal payablesBefore = balances().getOrDefault(payables(), BigDecimal.ZERO);
+        PlanView p = emis.create(new EmiRequest("CARD", "Old " + System.nanoTime(), null, null, null, null, expenseCategory(), bd(30000), bd(0), 3, null, null, today.minusMonths(4), null, card, false));
+        emis.pay(p.id(), new PayRequest(2, null, null, true));
+        emis.pay(p.id(), new PayRequest(1, null, bank, false));
+        BigDecimal cardBefore = balances().get(card);
+        BigDecimal netWorth = reports.balanceSheet(today, null).netWorth();
+        // as it was first made: an account of its own, and the old asset for what is billed
+        var own = accountService.createInternal("EMI payable · Old plan " + System.nanoTime(), AccountType.PAYABLE, "old", false);
+        own.setEmiAccount(true);
+        own = accountRows.save(own);
+        var oldAsset = accountService.createInternal("EMI billed, awaiting payment", AccountType.OTHER_ASSET, "old", false);
+        oldAsset.setEmiAccount(true);
+        oldAsset = accountRows.save(oldAsset);
+        swap(payables(), own.getId(), p);
+        Long contra = accounts.list().stream().filter(a -> a.name().startsWith("Less: EMI billed")).findFirst().orElseThrow().id();
+        swap(contra, oldAsset.getId(), p);
+        var row = plans.findById(p.id()).orElseThrow();
+        row.setPayableAccountId(own.getId());
+        plans.save(row);
+
+        assertThat(emis.moveToSharedPayables()).isEqualTo(1);
+        assertThat(emis.moveToSharedPayables()).isZero();
+        assertThat(emis.get(p.id()).payableAccountId()).isEqualTo(payables());
+        Long ownId = own.getId(), assetId = oldAsset.getId();
+        assertThat(accounts.list()).noneMatch(a -> a.id().equals(ownId) || a.id().equals(assetId));
+        assertThat(balances().get(payables()).subtract(payablesBefore)).isEqualByComparingTo("20000");
+        assertThat(balances().get(card)).isEqualByComparingTo(cardBefore);
+        assertThat(reports.balanceSheet(today, null).netWorth()).isEqualByComparingTo(netWorth);
+        assertThat(reports.balanceSheet(today, null).balanced()).isTrue();
+    }
+
+    /** Puts this plan's lines on one account back on another, as an earlier version would have them. */
+    private void swap(Long from, Long to, PlanView plan) {
+        var ids = new java.util.LinkedHashSet<Long>();
+        ids.add(plan.conversionEntryId());
+        plan.installments().forEach(i -> { ids.add(i.journalEntryId()); ids.add(i.paymentEntryId()); });
+        emis.get(plan.id()).installments().forEach(i -> { ids.add(i.journalEntryId()); ids.add(i.paymentEntryId()); });
+        ids.remove(null);
+        for (Long id : ids) {
+            var e = ledger.get(id);
+            var lines = journalLines.findByJournalEntryId(id);
+            if (lines.stream().noneMatch(l -> from.equals(l.getAccountId()))) continue;
+            var d = com.aditya.personalbudget.service.JournalDraft.of(e.getEntryDate(), e.getVoucherType(), e.getNarration()).source(e.getSourceType(), e.getSourceId());
+            lines.stream().sorted(java.util.Comparator.comparing(l -> l.getLineNo())).forEach(l -> d.line(new com.aditya.personalbudget.service.JournalDraft.Line(
+                    from.equals(l.getAccountId()) ? to : l.getAccountId(), l.getCategoryId(), l.getChitId(), l.getDebit(), l.getCredit(), l.getMemo())));
+            ledger.repost(id, d);
+        }
     }
 
     private Map<Long, BigDecimal> balances() {

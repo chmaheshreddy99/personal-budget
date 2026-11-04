@@ -57,6 +57,16 @@ public class EmiInstallment implements TenantOwned {
     @PositiveOrZero
     private BigDecimal gst;
 
+    /** Changed to match the card's statement: the schedule's own figures, to go back to if the billing is undone. */
+    @PositiveOrZero
+    private BigDecimal originalPrincipal;
+
+    @PositiveOrZero
+    private BigDecimal originalInterest;
+
+    @PositiveOrZero
+    private BigDecimal originalGst;
+
     /** Principal still owed after this instalment. */
     @PositiveOrZero
     @Column(nullable = false)
@@ -81,4 +91,10 @@ public class EmiInstallment implements TenantOwned {
     /** A card EMI: the money paid into the card for it (which frees the blocked limit). */
     @References(JournalEntry.class)
     private Long paymentEntryId;
+
+    /**
+     * Settled by a payment of the card's bill recorded elsewhere: that transfer (no reference: it stays free to be changed
+     * or deleted, which takes this settlement back).
+     */
+    private Long settledByEntryId;
 }

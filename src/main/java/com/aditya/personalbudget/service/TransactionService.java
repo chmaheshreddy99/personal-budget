@@ -36,6 +36,8 @@ import java.util.stream.Stream;
 @Service
 public class TransactionService {
 
+    private final EmiService emis;
+
     private final LedgerService ledger;
     private final AccountRepository accounts;
     private final JournalEntryRepository entries;
@@ -44,7 +46,8 @@ public class TransactionService {
     private final NotificationService notifications;
 
     public TransactionService(LedgerService ledger, AccountRepository accounts, JournalEntryRepository entries,
-                              CategoryRepository categories, ConstructionTagService projectTags, NotificationService notifications) {
+                              CategoryRepository categories, ConstructionTagService projectTags, NotificationService notifications, EmiService emis) {
+        this.emis = emis;
         this.projectTags = projectTags;
         this.notifications = notifications;
         this.ledger = ledger;
@@ -139,6 +142,9 @@ public class TransactionService {
                 .incomeNature(request.kind() == QuickKind.INCOME ? request.incomeNature() : null)
                 .source(request.kind() == QuickKind.EXPENSE ? LedgerService.SOURCE_EXPENSE : LedgerService.SOURCE_QUICK, null);
         EntryView posted = get(ledger.post(draft).getId());
+        if (request.kind() == QuickKind.TRANSFER && to.getAccountType() == com.aditya.personalbudget.domain.type.AccountType.CREDIT_CARD) {
+            emis.settleFromCardPayment(to.getId(), posted.id(), request.amount(), request.entryDate());
+        }
         notifications.entryPosted(posted);   // a transfer, or an expense large enough
         return posted;
     }
@@ -164,12 +170,18 @@ public class TransactionService {
                 .reference(blankToNull(request.reference()))
                 .party(blankToNull(request.party()))
                 .source(existing.getSourceType(), existing.getSourceId());
-        return get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
+        emis.unsettleCardPayment(id);
+        EntryView changed = get(ledger.repost(id, draft, ConcurrentUpdateException.required(request.version(), "journal_entries", id)).getId());
+        if (to.getAccountType() == com.aditya.personalbudget.domain.type.AccountType.CREDIT_CARD) {
+            emis.settleFromCardPayment(to.getId(), id, request.amount(), request.entryDate());
+        }
+        return changed;
     }
 
     @Transactional
     public void deleteTransfer(Long id) {
         requireTransfer(id);
+        emis.unsettleCardPayment(id);
         ledger.delete(id);
     }
 
@@ -255,6 +267,7 @@ public class TransactionService {
     /** Corrects a locked transfer / income / recurring posting with a mirror-image entry. */
     @Transactional
     public EntryView reverse(Long id, LocalDate date) {
+        emis.unsettleCardPayment(id);
         return get(ledger.reverse(id, date).getId());
     }
 

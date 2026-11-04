@@ -35,6 +35,8 @@ const view = { asOf: isoDate(), compare: 'month', compareTo: '', showPrevious: f
 let PEOPLE = new Map();
 /** People listed before "Show all". */
 const PEOPLE_SHOWN = 6;
+const CARD_EMI = 'Credit Card EMI';
+const emiShown = new Set();
 
 export async function render(container, _params, isCurrent) {
     const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
@@ -54,6 +56,12 @@ export async function render(container, _params, isCurrent) {
     if (!isCurrent()) return;
     view.compareTo = bs.compareDate;
     PEOPLE = new Map((bs.counterparties || []).map(c => [c.accountId, c]));
+    // Payables holding card EMIs opens on them the first time: they are the bulk of it, and worth seeing as what they are
+    PEOPLE.forEach(c => {
+        const emi = c.parties.find(p => p.party === CARD_EMI && owing(p));
+        if (!emi) return;
+        if (!emiShown.has(c.accountId)) { emiShown.add(c.accountId); view.peopleOpen.add(c.accountId); view.openPeople.add(`${c.accountId}|${CARD_EMI}`); }
+    });
     const query = { asOf: view.asOf === isoDate() ? null : view.asOf, compare: view.compare === 'month' ? null : view.compare, to: view.compare === 'custom' ? view.compareTo : null, previous: view.showPrevious };
     showPageRoute('balance-sheet', routeHash('balance-sheet', query), Object.values(query).join('|'), { routed: fromAddress(_params) });
     const reload = () => render(container, [], isCurrent);
@@ -372,7 +380,7 @@ function accountRow(a, isLiability) {
 
 // ===================================================================== who owes you, whom you owe
 
-const KIND = { LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],
+const KIND = { EMI: ['coral', 'card', 'Credit card EMI'], LENT: ['violet', 'hand', 'Lent'], PAID_FOR: ['aqua', 'users', 'Paid for'], BORROWED: ['coral', 'arrow-in', 'Borrowed'],
     BILL_DUE: ['gold', 'receipt', 'Bill'], ENTRY: ['gray', 'journal', null] };
 const owing = p => Number(p.amount) !== 0;
 
@@ -434,13 +442,13 @@ function personHtml(c, p, total) {
     const key = `${c.accountId}|${p.party}`;
     const open = view.openPeople.has(key);
     const kinds = [...new Set(p.items.filter(i => Number(i.amount) !== 0).map(i => (KIND[i.kind] || [])[2] || i.kindLabel))];
-    const what = p.named ? kinds.join(' · ') : (c.payable ? 'expenses paid later, transfers' : 'entries') + ' · payments settle the oldest first';
+    const what = p.party === CARD_EMI ? 'still to repay · comes off as each EMI is paid' : p.named ? kinds.join(' · ') : (c.payable ? 'expenses paid later, transfers' : 'entries') + ' · payments settle the oldest first';
     const share = (Math.abs(Number(p.amount)) / total) * 100;
     const settledNow = !owing(p);
     return `
     <div class="bp-person-wrap ${open ? 'open' : ''}">
         <button type="button" class="bp-person ${p.overdue ? 'overdue' : ''} ${settledNow ? 'settled' : ''}" data-person="${esc(key)}" title="${open ? 'Fold' : 'Show'} the items">
-            <span class="bp-avatar ${p.named ? '' : 'muted'}">${p.named ? esc(initials(p.party)) : icon('layers')}</span>
+            <span class="bp-avatar ${p.named ? '' : 'muted'}">${p.party === CARD_EMI ? icon('card') : p.named ? esc(initials(p.party)) : icon('layers')}</span>
             <span class="bp-name"><b class="ellipsis">${esc(p.party)}</b>
                 <small class="ellipsis" title="${esc(what)}">${settledNow ? `settled · was ${money(p.previous)}` : `${esc(what)} · ${p.openItems} item${p.openItems === 1 ? '' : 's'}${p.oldest ? ` · ${ageOf(p.oldest)}` : ''}`}</small></span>
             ${p.overdue ? `<span class="bp-flag">${icon('alert')}overdue</span>` : ''}
@@ -457,6 +465,8 @@ function personHtml(c, p, total) {
 function itemHtml(i, payable) {
     const k = KIND[i.kind] || ['gray', 'tag', i.kindLabel];
     const href = i.claimId ? `#/expenses/claim/${i.claimId}` : `#/entry/${i.entryId}`;
+    // a card EMI: what is still owed on the plan, and when the next EMI falls
+    if (i.kind === 'EMI') i = { ...i, kindLabel: 'Bought on EMI' };
     return `<a class="bp-item ${i.overdue ? 'overdue' : ''} ${Number(i.amount) === 0 ? 'settled' : ''}" href="${href}"
         title="${i.claimId ? 'Open it in Expenses: payments, interest, history' : 'Open the entry (what is still open of it, after the payments made oldest first)'}">
         <span class="chip-icon xs ${k[0]}">${icon(k[1])}</span>

@@ -2291,3 +2291,12 @@ td.c-ctst, th.c-ctst { width: 112px; white-space: nowrap; }
 .ts-sample-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 4px; font-size: 12px; }
 .ts-targets { flex-wrap: wrap; margin: 4px 0 2px; }
 .ts-target-hint { margin: 2px 0 2px; }
+.emi-fee-gst { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px; }
+.emi-fee-gst[hidden] { display: none; }
+.xp-emi-credit > td { background: rgba(19, 168, 154, 0.05); }
+.emi-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 8px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-sunken); }
+.emi-figures .emi-fig-total, .emi-figures .emi-fig-note { grid-column: 1 / -1; }
+.emi-figures .emi-fig-note { margin: 0; }
+.emi-edited { margin-left: 4px; color: var(--text-muted); }
+.emi-edited svg { width: 11px; height: 11px; vertical-align: -1px; }
+tr.xp-emi-head > td { background: rgba(19, 168, 154, 0.04); }

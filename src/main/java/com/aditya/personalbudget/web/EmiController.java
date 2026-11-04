@@ -74,6 +74,20 @@ public class EmiController {
         return emis.undo(id);
     }
 
+    /** Bills the next EMI with the statement's figures, or changes one billed and not paid yet. */
+    @PostMapping("/{id}/bill")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public PlanView bill(@PathVariable Long id, @Valid @RequestBody com.aditya.personalbudget.service.EmiService.BillRequest request) {
+        return emis.billAs(id, request);
+    }
+
+    /** Billed EMIs already paid with the card's bill: they come off Payables. */
+    @PostMapping("/{id}/settle")
+    @RequiresPermission(Permission.POST_TRANSACTIONS)
+    public PlanView settle(@PathVariable Long id, @Valid @RequestBody com.aditya.personalbudget.service.EmiService.SettleRequest request) {
+        return emis.settleBilled(id, request);
+    }
+
     @PostMapping("/{id}/foreclose")
     @RequiresPermission(Permission.POST_TRANSACTIONS)
     public PlanView foreclose(@PathVariable Long id, @Valid @RequestBody ForecloseRequest request) {

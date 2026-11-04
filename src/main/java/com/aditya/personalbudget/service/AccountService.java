@@ -45,9 +45,15 @@ public class AccountService {
     private final BudgetRepository budgets;
     private final LedgerService ledger;
     private final com.aditya.personalbudget.repository.BankInterestPostingRepository interestPostings;
+    private final com.aditya.personalbudget.repository.EmiPlanRepository emiPlans;
+    private final com.aditya.personalbudget.repository.EmiInstallmentRepository emiInstallments;
 
     public AccountService(AccountRepository accounts, JournalEntryRepository entries, BudgetRepository budgets,
-                          LedgerService ledger, com.aditya.personalbudget.repository.BankInterestPostingRepository interestPostings) {
+                          LedgerService ledger, com.aditya.personalbudget.repository.BankInterestPostingRepository interestPostings,
+                          com.aditya.personalbudget.repository.EmiPlanRepository emiPlans,
+                          com.aditya.personalbudget.repository.EmiInstallmentRepository emiInstallments) {
+        this.emiPlans = emiPlans;
+        this.emiInstallments = emiInstallments;
         this.interestPostings = interestPostings;
         this.accounts = accounts;
         this.entries = entries;
@@ -89,6 +95,7 @@ public class AccountService {
             }
         }
 
+        Map<Long, BigDecimal> heldByEmis = heldByEmis();
         return books.accounts().values().stream()
                 .sorted(Comparator.comparing(Account::getCode))
                 .map(a -> {
@@ -98,7 +105,7 @@ public class AccountService {
                     return toView(a, balance, monthMoves.getOrDefault(a.getId(), Money.ZERO),
                             monthIn.getOrDefault(a.getId(), Money.ZERO), monthOut.getOrDefault(a.getId(), Money.ZERO),
                             balance.subtract(thirtyDaysAgo.getOrDefault(a.getId(), Money.ZERO)),
-                            lastActivity.get(a.getId()), counts.getOrDefault(a.getId(), 0L), trend, today, cardBill(a, books, today));
+                            lastActivity.get(a.getId()), counts.getOrDefault(a.getId(), 0L), trend, today, cardBill(a, books, today), heldByEmis.getOrDefault(a.getId(), Money.ZERO));
                 })
                 .toList();
     }
@@ -424,14 +431,29 @@ public class AccountService {
         return String.valueOf(next);
     }
 
+    /**
+     * By card: the limit converted EMIs still hold. Conversion takes the price off the card's balance, but the bank frees
+     * the limit only as each EMI's principal is billed (from then on it is in the balance) and paid.
+     */
+    private Map<Long, BigDecimal> heldByEmis() {
+        Long tenant = UserContext.tenantId();
+        Map<Long, com.aditya.personalbudget.domain.entity.EmiPlan> running = emiPlans.findByTenantId(tenant).stream()
+                .filter(p -> p.getPayableAccountId() != null && "ACTIVE".equals(p.getStatus()))
+                .collect(java.util.stream.Collectors.toMap(com.aditya.personalbudget.domain.entity.EmiPlan::getId, java.util.function.Function.identity()));
+        Map<Long, BigDecimal> held = new java.util.HashMap<>();
+        emiInstallments.findByTenantId(tenant).stream().filter(i -> running.containsKey(i.getPlanId()) && "DUE".equals(i.getStatus()))
+                .forEach(i -> held.merge(running.get(i.getPlanId()).getPayAccountId(), i.getPrincipal(), BigDecimal::add));
+        return held;
+    }
+
     private AccountView toView(Account a, BigDecimal balance, BigDecimal monthMove, BigDecimal in, BigDecimal out,
-                               BigDecimal change30, LocalDate last, long count, List<BigDecimal> trend, LocalDate today, CardBillSummary cardBill) {
+                               BigDecimal change30, LocalDate last, long count, List<BigDecimal> trend, LocalDate today, CardBillSummary cardBill, BigDecimal emiHeld) {
         boolean details = canSeeBankDetails();   // sensitive: admins only
         BigDecimal utilization = null;
         BigDecimal available = null;
         if (Money.isPositive(a.getCreditLimit())) {
-            utilization = Money.percent(balance, a.getCreditLimit());
-            available = a.getCreditLimit().subtract(balance);
+            utilization = Money.percent(balance.add(emiHeld), a.getCreditLimit());
+            available = a.getCreditLimit().subtract(balance).subtract(emiHeld);
         }
         Long daysToMaturity = a.getMaturityDate() == null ? null : ChronoUnit.DAYS.between(today, a.getMaturityDate());
         return new AccountView(a.getId(), a.getCode(), a.getName(), a.getAccountClass(), a.getAccountType(),
@@ -440,6 +462,6 @@ public class AccountService {
                 a.getDescription(), Boolean.TRUE.equals(a.getSystemAccount()), Boolean.TRUE.equals(a.getActive()),
                 balance, monthMove, in, out, change30, utilization, available, daysToMaturity,
                 ReportService.bucket(a), last, count, trend, a.getVersion(), a.isChitBook(), a.getHostedChitId(), a.getChitRole(),
-                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount(), cardBill);
+                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount(), cardBill, emiHeld);
     }
 }

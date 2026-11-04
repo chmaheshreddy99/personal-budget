@@ -52,6 +52,8 @@ public class InterestPostingJob implements ApplicationRunner {
                     tenant.getId(), tenant.getCode(), tenant.getName(), tenant.getCurrency(), Feature.all(), false));
             try {
                 int moved = emis.moveCardPlansToTheCard();
+                int shared = emis.moveToSharedPayables();
+                if (shared > 0) log.info("Organization {}: {} card EMI plan(s) moved to Payables", tenant.getCode(), shared);
                 if (moved > 0) log.info("Organization {}: {} card EMI plan(s) now charged on the card", tenant.getCode(), moved);
             } catch (RuntimeException e) {
                 log.warn("Organization {}: could not move the card EMIs to their cards: {}", tenant.getCode(), e.getMessage());
