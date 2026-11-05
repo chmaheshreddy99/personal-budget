@@ -934,7 +934,14 @@ function metrics(a, debt, all = []) {
     const billTile = !bill ? [] : [tile('receipt', 'Bill payable', money(bill.outstanding, { decimals: 2 }),
         Number(bill.outstanding) > 0 ? `by ${date(bill.dueDate)} · minimum ${money(bill.minimumDue)}` : `next statement ${date(bill.nextStatementDate)}`,
         Number(bill.outstanding) > 0 && bill.daysToDue <= 5 ? 'alert' : '', '', 'See it under Bills')];
+    // all that is owed on a card: its balance, plus the EMI principal not billed yet (once billed it is in the balance)
+    const held = Number(a.emiHeld || 0);
+    const totalTile = a.accountType !== 'CREDIT_CARD' ? [] : [tile('scale', 'Total owed', money(Number(a.balance) + held, { decimals: 2 }),
+        held ? `${moneyShort(a.balance)} + ${moneyShort(held)} EMIs` : 'no EMIs running', '', '',
+        held ? `Total outstanding: ${money(a.balance)} on the card now + ${money(held)} of EMI principal not billed yet. EMIs already billed are in the card's balance, so nothing counts twice. Interest still to come is not included`
+            : 'Total outstanding: all of it is on the card, no EMI is waiting to be billed')];
     const list = [
+        ...totalTile,
         ...billTile,
         tile('arrow-in', debt ? 'Added this month' : 'In this month', money(monthIn),
             `${a.transactionCount} entries in total`, '', bar(monthIn + monthOut ? (monthIn / (monthIn + monthOut)) * 100 : 0), 'The bar: money in against all movement this month'),
@@ -964,9 +971,9 @@ function metrics(a, debt, all = []) {
         a.daysToMaturity >= 0 ? `in ${a.daysToMaturity} days (${(a.daysToMaturity / 365).toFixed(1)} yrs)` : 'Matured', a.daysToMaturity >= 0 && a.daysToMaturity < 60 ? 'gold' : ''));
     if (a.quantity) list.push(tile('gem', 'Holding', `${number(a.quantity)} g / units`,
         `${money(Number(a.balance) / Number(a.quantity))} per unit`));
-    if (a.openingBalance) list.push(tile('flag', 'Opening balance', money(a.openingBalance),
+    if (a.openingBalance && a.accountType !== 'CREDIT_CARD') list.push(tile('flag', 'Opening balance', money(a.openingBalance),
         `${date(a.openingDate)} · ${Number(a.openingBalance) ? `${last >= Number(a.openingBalance) ? '+' : '−'}${moneyShort(Math.abs(last - Number(a.openingBalance)))} since` : ''}`));
-    list.push(tile('layers', 'Category', esc(a.bucket || a.typeLabel), esc(a.typeLabel)));
+    if (a.accountType !== 'CREDIT_CARD') list.push(tile('layers', 'Category', esc(a.bucket || a.typeLabel), esc(a.typeLabel)));   // a card says so in its head
     return list;
 }
 

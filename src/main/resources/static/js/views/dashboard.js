@@ -274,7 +274,7 @@ function catTrendHtml(a) {
 function debtHtml(d) {
     const items = (d.liabilityBreakdown || []).map(x => ({ label: x.label, value: Number(x.value) })).filter(x => x.value > 0);
     const total = items.reduce((s, x) => s + x.value, 0);
-    const cards = d.accounts.filter(a => a.accountType === 'CREDIT_CARD' && a.utilizationPercent !== null);
+    const cards = d.accounts.filter(a => a.accountType === 'CREDIT_CARD');
     if (!total && !cards.length) return emptyState('Nothing owed: no loans, cards or dues', 'scale');
     const assets = Number(d.kpis.totalAssets) || 1;
     return `<div class="dx-debt">
@@ -283,18 +283,23 @@ function debtHtml(d) {
                 <span class="ellipsis">${esc(it.label)}</span><b>${moneyShort(it.value)}</b></div>`).join('')}
                 <div class="dx-ratio"><small>Debt to assets</small><i class="progress ${total / assets > 0.4 ? 'over' : 'good'}"><span style="width:${Math.min(100, (total / assets) * 100)}%"></span></i>
                     <b>${percent((total / assets) * 100, 0)}</b></div></div></div>
-        ${cards.length ? `<div class="dx-cards"><div class="section-title">${icon('card')} Card usage</div>${cards.map(c => {
-            const u = Number(c.utilizationPercent);
+        ${cards.length ? `<div class="dx-cards"><div class="dx-card-row dx-card-head"><div class="section-title">${icon('card')} Cards</div><small>Used</small><small title="On the card now, plus the EMI principal not billed yet">Outstanding</small></div>${cards.map(c => {
+            const limited = c.utilizationPercent !== null;
+            const u = Number(c.utilizationPercent || 0);
             const held = Number(c.emiHeld || 0);
-            return `<div class="dx-plan" title="${esc(`${money(c.balance)} on the card${held ? ` + ${money(held)} held by EMIs not billed yet` : ''}, of ${money(c.creditLimit)}`)}"><span class="ellipsis">${esc(c.name)}</span>
-                <i class="progress ${u > 70 ? 'over' : u > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, u)}%"></span></i><b>${percent(u, 0)}</b></div>`;
+            const owed = Number(c.balance) + held;
+            return `<div class="dx-plan dx-card-row" title="${esc(`${money(c.balance)} on the card${held ? ` + ${money(held)} of EMI principal not billed yet` : ''}${limited ? `, of ${money(c.creditLimit)}` : ''}`)}"><span class="ellipsis">${esc(c.name)}</span>
+                ${limited ? `<i class="progress ${u > 70 ? 'over' : u > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, u)}%"></span></i><b>${percent(u, 0)}</b>` : '<i></i><span></span>'}<b class="mono">${money(owed, { decimals: 2 })}</b></div>`;
         }).join('')}${cards.length > 1 ? (() => {
             // as the Card usage figure on the Accounts page: a card in credit does not offset the others
-            const limit = cards.reduce((s, c) => s + Number(c.creditLimit), 0);
-            const used = cards.reduce((s, c) => s + Math.max(0, Number(c.balance)) + Number(c.emiHeld || 0), 0);
+            const limited = cards.filter(c => c.utilizationPercent !== null);
+            const owedOn = c => Math.max(0, Number(c.balance)) + Number(c.emiHeld || 0);
+            const limit = limited.reduce((s, c) => s + Number(c.creditLimit), 0);
+            const used = limited.reduce((s, c) => s + owedOn(c), 0);
+            const owed = cards.reduce((s, c) => s + owedOn(c), 0);
             const all = limit ? (used / limit) * 100 : 0;
-            return `<div class="dx-plan dx-plan-all" title="${esc(`${money(used)} of ${money(limit)} across your cards`)}"><span class="ellipsis"><b>All cards</b></span>
-                <i class="progress ${all > 70 ? 'over' : all > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, all)}%"></span></i><b>${percent(all, 0)}</b></div>`;
+            return `<div class="dx-plan dx-plan-all dx-card-row" title="${esc(`${money(owed)} outstanding across your cards${limit ? `; ${money(used)} of ${money(limit)} of limit used` : ''}`)}"><span class="ellipsis"><b>All cards</b></span>
+                <i class="progress ${all > 70 ? 'over' : all > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, all)}%"></span></i><b>${percent(all, 0)}</b><b class="mono">${money(owed, { decimals: 2 })}</b></div>`;
         })() : ''}</div>` : ''}
     </div>`;
 }

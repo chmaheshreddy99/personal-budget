@@ -2398,3 +2398,11 @@ details.emi-prev-how { display: block; flex: none; }
 .accounts-page .acct-key:has(.ck-tile:nth-child(8)) .ck-tile b { font-size: 12.5px; }
 .accounts-page .acct-key .ck-tile small { display: block; }
 .accounts-page .acct-key .ck-tile .ck-note { display: block; }
+
+/* the Debt picture's cards: name, how much of the limit is used, what is outstanding in all */
+.dx-cards { grid-template-columns: minmax(0, 1fr) minmax(24px, 44px) 30px max-content; column-gap: 6px; }   /* the rows share these columns, so bars and amounts line up */
+.dx-cards .dx-card-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; column-gap: 6px; }
+.dx-card-row > b { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dx-card-head .section-title { margin: 0; }
+.dx-card-head small { font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-align: right; white-space: nowrap; }
+.dx-card-head small:first-of-type { grid-column: 2 / 4; }
