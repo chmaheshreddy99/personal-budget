@@ -16,6 +16,8 @@
  *
  * EMIs lists everything bought on EMI (card or loan) that is still being paid, whatever the period, plus those finished
  * in it; an expanded plan shows where it stands, the money and every instalment, with pay, undo and pay off early.
+ * Among the expenses, something bought on a card EMI is one itemized transaction: its parts folded under one head, which
+ * opens on what was charged and what became of it. The schedule stays under EMIs.
  *
  * Routes: #/expenses, #/expenses/today (opens on today), #/expenses/collect (opens on "to collect"), #/expenses/emi[/<id>],
  * #/expenses/owe (money you borrowed and bills still to pay), #/expenses/claim/<id> (opens that lent / borrowed
@@ -633,6 +635,7 @@ export async function render(container, params, isCurrent) {
                 if (action.dataset.xpAction === 'item-refund') openRefundDialog(r, reload, Number(action.dataset.line));
                 if (action.dataset.xpAction === 'journal') location.hash = '#/transactions';
                 if (action.dataset.xpAction === 'emi-plan') { view.type = 'emi'; view.open = `m${action.dataset.plan}`; reload(); }
+                if (action.dataset.xpAction === 'emi-edit') openExpenseDialog({ emi: r.emi, onSaved: reload });
                 if (action.dataset.xpAction === 'refund') openRefundDialog(r, reload);
                 if (action.dataset.xpAction === 'reverse') openReverseDialog(r, reload);
                 if (action.dataset.xpAction === 'add-charge') openChargeDialog(r, { accounts, expenseCategories, onSaved: (saved, { keepOpen = false } = {}) => {
@@ -722,10 +725,12 @@ export async function render(container, params, isCurrent) {
         tr.classList.add('expanded');
         const detail = document.createElement('tr');
         detail.className = 'detail-row';
-        detail.innerHTML = `<td colspan="${tr.children.length}">${r.emi ? emiPanelHtml(r.emi) : r.claim ? claimPanelHtml(r.claim, { scroll: true }) : await expenseDetail(r, { rows: all.EXPENSE, budgets, accounts, month: to.slice(0, 7),
+        const plan = r.type === 'EMI' ? r.emi : null;   // the EMIs list; among the expenses it is a transaction
+        detail.innerHTML = `<td colspan="${tr.children.length}">${plan ? emiPanelHtml(plan) : r.emi ? await emiTransactionHtml(r, { rows: all.EXPENSE, accounts })
+            : r.claim ? claimPanelHtml(r.claim, { scroll: true }) : await expenseDetail(r, { rows: all.EXPENSE, budgets, accounts, month: to.slice(0, 7),
             monthLabel: new Date(to + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short' }) })}</td>`;
         tr.after(detail);
-        if (r.emi) bindEmiPanel(detail, r.emi, { onChanged: reload, onEdit: p => openExpenseDialog({ emi: p, onSaved: reload }) });
+        if (plan) bindEmiPanel(detail, r.emi, { onChanged: reload, onEdit: p => openExpenseDialog({ emi: p, onSaved: reload }) });
         if (r.claim) {
             bindClaimPanel(detail, r.claim, { onChanged: reload });   // Edit opens the matching lend / borrow form
             fitPanel(listEl, tr, detail);
@@ -735,7 +740,7 @@ export async function render(container, params, isCurrent) {
     // ↑ / ↓ move through the rows, Enter expands, ← / → step through the quick periods
     const cursor = () => listEl.querySelector('tr.xp-tr.cursor') || listEl.querySelector('tr.xp-tr.expanded');
     const nav = listNavigator({
-        items: () => [...listEl.querySelectorAll('tr.xp-tr')],
+        items: () => [...listEl.querySelectorAll('tr.xp-tr:not(.xl-folded)')],
         selected: cursor,
         select: el => { listEl.querySelectorAll('tr.cursor').forEach(x => x.classList.remove('cursor')); el.classList.add('cursor'); },
         open: el => toggleRow(el, rowOf(el.dataset.key)),
@@ -758,6 +763,12 @@ export async function render(container, params, isCurrent) {
         if (item) { if (view.flash === view.open) view.flash = item.key; view.open = item.key; }
     }
     const reopen = view.open && listEl.querySelector(`tr[data-key="${view.open}"]`);
+    if (reopen?.classList.contains('xl-folded')) {   // a part of something folded: show the parts
+        const id = reopen.dataset.bill;
+        unfoldedBills.add(Number(id));
+        listEl.querySelectorAll(`[data-bill="${id}"]`).forEach(x => x.classList.remove('xl-folded'));
+        listEl.querySelector(`[data-xb-fold="${id}"]`)?.classList.add('open');
+    }
     if (reopen) {
         const flash = view.flash === view.open;   // opened from a link elsewhere: show where it is
         view.flash = null;
@@ -1005,7 +1016,7 @@ function emiRow(p) {
 
 /**
  * A purchase converted into EMI, as a line under it: the credit on the card that moved it to the EMI payable. It does not
- * change what was spent, so it counts for nothing in the totals; opening it opens the plan.
+ * change what was spent, so it counts for nothing in the totals; opening it shows the transaction it is part of.
  */
 function emiCreditRow(p) {
     return {
@@ -1136,9 +1147,6 @@ function nestLinked(rows) {
     return nestBills(gatherEmis(rows));
 }
 
-/** Those on EMI drawn open at first: seeing how they hang together is the point; a fold is then remembered. */
-const emiFoldSeen = new Set();
-
 /**
  * The lines of an EMI's purchase (the price, its fee, the GST on the fee) and the conversion that moved the price to Payables
  * are one thing: one head row, where its first line would be, with them under it in that order. Listed alone, a line stays a
@@ -1162,7 +1170,6 @@ function gatherEmis(rows) {
         if (drawn.has(plan.id)) return;
         drawn.add(plan.id);
         const foldId = plan.purchaseEntryId;
-        if (!emiFoldSeen.has(plan.id)) { emiFoldSeen.add(plan.id); unfoldedBills.add(foldId); }
         const parts = [...group].sort((a, b) => order[emiPartOf(a).short] - order[emiPartOf(b).short]);
         const head = { ...parts[0], key: `e${plan.id}`, emiHead: true, emi: plan, foldId, partsShown: parts.length, emiCredit: 0,
             amount: parts.reduce((s, x) => s + Number(x.amount || 0), 0), date: plan.purchaseDate, party: plan.party, paidFrom: plan.payAccountName, paidFromId: plan.payAccountId, paidFromType: plan.payAccountType };
@@ -1318,6 +1325,94 @@ function emiHeadHtml(r, withDate) {
         <td class="c-caret"><span class="expand-caret">${icon('chevron-down')}</span></td>
     </tr>`;
 }
+
+/**
+ * Something bought on a card EMI, opened among the expenses: the transaction, not the plan. One line of facts with the way
+ * to the plan, then what was charged as the items of a bill, what the conversion did with it, the entries behind it, and
+ * the plan in a few words. The schedule and paying it are under EMIs.
+ */
+async function emiTransactionHtml(r, { rows, accounts }) {
+    const p = r.emi;
+    const manage = can('POST_TRANSACTIONS');
+    const [purchase, conversion] = await Promise.all([p.purchaseEntryId, p.conversionEntryId].map(id => (id ? api.get(`/transactions/${id}`).catch(() => null) : null)));
+    const lines = rows.filter(x => x.emiOf?.what === 'purchase' && x.emiOf.plan.id === p.id);
+    const part = short => lines.find(x => emiPartOf(x).short === short);
+    const items = [
+        { kind: 'Purchase', label: p.narration, amount: Number(p.principal), category: p.categoryName },
+        { kind: 'Fee', label: 'Processing fee', amount: Number(p.processingFee || 0), category: part('Fee')?.category },
+        { kind: 'GST', label: `GST on the fee${Number(p.feeGstPercent) ? ` (${Number(p.feeGstPercent)}%)` : ''}`, amount: Number(p.feeGst || 0), category: part('GST')?.category },
+    ].filter(x => x.amount);
+    const total = items.reduce((s, x) => s + x.amount, 0);
+    const moved = Number(p.conversionEntryId ? p.principal : 0);
+    const color = i => PART_COLORS[i % PART_COLORS.length];
+    const fact = (ico, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ico)}${text}</span>`;
+    const account = accounts?.find(a => a.id === p.payAccountId);
+    const next = p.status === 'ACTIVE' ? p.next : null;
+    const posting = (entry, label) => (entry ? `${label ? `<div class="xd-line small xet-sub"><span class="muted">${esc(label)}</span><span class="muted">${esc(entry.entryNo)}</span></div>` : ''}
+        ${entry.lines.map(l => `<div class="xd-line"><span class="xd-side">${Number(l.debit) ? 'Dr' : 'Cr'}</span><span class="ellipsis" title="${esc(l.memo || l.accountName)}">${esc(l.accountName)}</span>
+            <b class="mono ${Number(l.debit) ? '' : 'muted'}">${money(Number(l.debit) || Number(l.credit))}</b></div>`).join('')}` : '');
+    return `
+    <div class="xp-detail2 xp-emi-txn">
+        <div class="xd-top">
+            ${fact('journal', `<b>${esc(p.purchaseEntryNo || '')}</b> Expense on EMI`, 'The purchase entry')}
+            ${fact('calendar', `${date(p.purchaseDate)} · ${dayName(p.purchaseDate)}`)}
+            ${p.party ? fact('user', esc(p.party), 'Bought from') : ''}
+            ${p.reference ? fact('tag', esc(p.reference), 'Bill / UPI reference') : ''}
+            ${purchase ? fact('history', `${dateTime(purchase.createdAt)} · ${esc(purchase.createdBy || '')}`, 'Recorded') : ''}
+            <span class="spacer"></span>
+            <span class="xd-actions">
+                <button class="btn xs primary" data-xp-action="emi-plan" data-plan="${p.id}" data-key="${r.key}" title="The schedule, paying it, paying it off">${icon('calendar')}Open in EMIs</button>
+                ${manage && !p.archived ? `<button class="btn xs" data-xp-action="emi-edit" data-key="${r.key}" title="${p.editable ? 'Change the purchase and its terms' : 'Change what it was, its category and lender (the terms are fixed once an EMI is billed or paid)'}">${icon('edit')}Edit</button>` : ''}
+            </span>
+        </div>
+        <div class="xl-card xb-card">
+            <div class="xl-head">
+                <span class="chip-icon xs aqua">${icon('list')}</span>
+                <div class="grow min-0"><b>Charged · ${items.length} item${items.length === 1 ? '' : 's'}</b>
+                    <small class="muted">one charge of ${money(total)} on ${esc(p.payAccountName)}</small></div>
+            </div>
+            <div class="xl-bar" role="img" aria-label="What was charged">${items.map((x, i) => `<i style="width:${(x.amount / total) * 100}%" title="${esc(`${x.label} · ${money(x.amount)}`)}"><em style="width:100%;background:${color(i)}"></em></i>`).join('')}</div>
+            <div class="xi-table">
+                <div class="xi-row xi-head"><span>Item</span><span>Category</span><span class="xi-pct">Share</span><span class="xi-amt">Amount</span><span class="xi-act"></span></div>
+                <div class="xi-rows">${items.map((x, i) => {
+                    const ci = x.category ? categoryIcon(x.category) : null;
+                    return `<div class="xi-row">
+                        <span class="xi-what"><i class="xl-swatch" style="background:${color(i)}"></i><span class="ellipsis" title="${esc(x.label)}">${esc(x.label)}</span></span>
+                        <span class="xi-cat">${ci ? `<span class="chip-icon xs ${ci.tone}">${icon(ci.name)}</span><span class="ellipsis" title="${esc(x.category)}">${esc(x.category)}</span>` : ''}</span>
+                        <span class="xi-pct">${percent(x.amount / total * 100, 0)}</span>
+                        <span class="xi-amt"><b class="mono">${money(x.amount)}</b></span><span class="xi-act"></span></div>`;
+                }).join('')}</div>
+                <div class="xi-row xi-sum xi-total"><span class="xi-note"></span><span class="xi-label">Total charged</span><span class="xi-amt"><b class="mono">${money(total)}</b></span><span class="xi-act"></span></div>
+                ${moved ? `<div class="xi-row xi-sum pos" title="A credit on the card, not a refund: what was spent stays the same"><span class="xi-note"></span><span class="xi-label">${icon('transfer')}Converted into EMI, moved to ${esc(p.payableAccountName)}</span><span class="xi-amt"><b class="mono">−${money(moved)}</b></span><span class="xi-act"></span></div>
+                    <div class="xi-row xi-sum"><span class="xi-note"></span><span class="xi-label">Left on the card that day</span><span class="xi-amt"><b class="mono">${money(total - moved)}</b></span><span class="xi-act"></span></div>` : ''}
+            </div>
+        </div>
+        <div class="xd-cards">
+            <div class="xd-card xd-posting">
+                <div class="xd-card-head">${icon('journal')}Posting</div>
+                ${posting(purchase, conversion ? 'The purchase' : '')}
+                ${posting(conversion, 'The conversion')}
+            </div>
+            <div class="xd-card xd-category">
+                <div class="xd-card-head">${icon('calendar')}On EMI</div>
+                <div class="xd-line"><span>${p.months} × ${money(num(p.emiAmount))}</span><b class="mono">${Number(p.ratePercent) ? `${Number(p.ratePercent)}% a year` : 'No-cost'}</b></div>
+                <i class="xd-bar"><em style="width:${p.progressPercent}%"></em></i>
+                <div class="xd-line small"><span class="muted">${p.paidCount} of ${p.months} paid</span><span class="muted">${p.closedOn ? `ended ${shortDate(p.closedOn)}` : `ends ${shortDate(p.endDate)}`}</span></div>
+                ${next ? `<div class="xd-line small"><span class="${next.overdue ? 'neg' : 'muted'}">Next${next.overdue ? ', overdue' : ''}: ${date(next.dueDate)}</span><b class="mono">${money(num(next.emi) + num(next.gst) - num(next.paidTowards))}</b></div>` : ''}
+                <div class="xd-line small"><span class="muted">Still to pay, with interest</span><b class="mono">${money(p.stillToPay)}</b></div>
+            </div>
+            <div class="xd-card xd-payee">
+                <div class="xd-card-head">${icon('card')}${esc(p.payAccountName)}</div>
+                ${p.payableAccountName ? `<div class="xd-line small"><span class="muted" title="This plan's share of ${esc(p.payableAccountName)}: what is still owed">On ${esc(p.payableAccountName)}</span><b class="mono">${money(p.payableBalance)}</b></div>` : ''}
+                <div class="xd-line small"><span class="muted" title="Not billed yet: the card's limit it still holds">Limit held</span><b class="mono">${money(p.blocked)}</b></div>
+                ${account ? `<div class="xd-line small"><span class="muted">Card owes now</span><b class="mono">${money(account.balance)}</b></div>` : ''}
+            </div>
+        </div>
+        ${p.notes ? `<div class="xd-note">${icon('info')}<span>${esc(p.notes)}</span></div>` : ''}
+        <div class="xp-evidence" data-ev-entry="${p.purchaseEntryId}" data-ev-count="0"></div>
+    </div>`;
+}
+const num = v => Number(v || 0);
 
 /** A part under the head: the purchase, the fee, the GST on it, or the credit that moved the price to Payables. */
 function emiPartHtml(r, withDate) {

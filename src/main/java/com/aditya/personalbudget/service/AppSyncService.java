@@ -96,14 +96,19 @@ public class AppSyncService {
                            BigDecimal forgoneInterest, BigDecimal benchmarkRate) {
     }
 
-    public record AppEmiInstalment(int seq, LocalDate dueDate, BigDecimal emi, String status, boolean overdue, LocalDate paidOn) {
+    public record AppEmiInstalment(int seq, LocalDate dueDate, BigDecimal emi, String status, boolean overdue, LocalDate paidOn,
+                                   /* the figures, to bill it as the statement has it; billed and part paid: how much so far */
+                                   Long id, BigDecimal principal, BigDecimal interest, BigDecimal gst, BigDecimal scheduledAmount, BigDecimal paidTowards) {
     }
 
     /** An EMI plan: kind CARD (paid with the card) or LOAN. */
     public record AppEmi(Long id, String kind, String narration, String lender, BigDecimal emiAmount, int months, int paidCount, int left,
                          int dueNow, BigDecimal outstanding, BigDecimal stillToPay, BigDecimal overdueAmount, LocalDate nextDueDate,
                          BigDecimal nextAmount, Long payAccountId, String payAccountName, String payAccountType, int progressPercent,
-                         LocalDate endDate, List<AppEmiInstalment> instalments) {
+                         LocalDate endDate, List<AppEmiInstalment> instalments,
+                         /* a card EMI converted: where it is owed, and the entries that go together in Expenses */
+                         String payableAccountName, BigDecimal payableBalance, Long purchaseEntryId, String purchaseEntryNo, String conversionEntryNo,
+                         BigDecimal principal, String categoryName) {
     }
 
     public record AppIncome(Long entryId, String entryNo, LocalDate date, String narration, String party, String reference,
@@ -165,7 +170,13 @@ public class AppSyncService {
 
     /** EMIs paid on the phone: the next {@code count} of a plan, from accountId (a card EMI: the bank paying into the card). */
     public record SyncEmiPayment(@NotBlank @Size(max = 64) String clientId, @NotNull Long planId, Integer count, LocalDate date,
-                                 Long accountId) {
+                                 Long accountId,
+                                 /* a card EMI as the statement has it (to bill it, or change its bill); billOnly: not paid yet */
+                                 Long installmentId, BigDecimal principal, BigDecimal interest, BigDecimal gst, Boolean billOnly) {
+
+        public SyncEmiPayment(String clientId, Long planId, Integer count, LocalDate date, Long accountId) {
+            this(clientId, planId, count, date, accountId, null, null, null, null, null);
+        }
     }
 
     /** Money moved between two of my accounts (bank to cash, a card bill paid ...). */
@@ -244,14 +255,17 @@ public class AppSyncService {
         Set<AccountClass> shown = Set.of(AccountClass.ASSET, AccountClass.LIABILITY);
         Set<String> payTypes = Set.of("BANK", "CREDIT_CARD", "CASH", "WALLET", "MEAL_CARD", "PAYABLE");
         List<AppAccount> list = new ArrayList<>();
-        for (AccountView a : accounts.list()) {
-            if (!a.active() || !shown.contains(a.accountClass())) continue;
+        List<AccountView> allAccounts = accounts.list();
+        java.math.BigDecimal contra = allAccounts.stream().filter(AccountView::emiContra).map(AccountView::balance).findFirst().orElse(java.math.BigDecimal.ZERO);
+        for (AccountView a : allAccounts) {
+            if (!a.active() || !shown.contains(a.accountClass()) || a.emiContra()) continue;
             String group = a.emiAccount() ? "EMI" : a.projectBook() ? "CONSTRUCTION" : a.chitBook() ? "HOSTED_CHIT" : "OWN";
             String groupName = a.projectBook() ? (a.projectId() == null ? "Common business accounts" : projectName.getOrDefault(a.projectId(), "Construction"))
                     : a.chitBook() ? (a.hostedChitId() == null ? "Common chit accounts" : chitName.getOrDefault(a.hostedChitId(), "Host a Chit")) : null;
             String number = a.accountNumber();
             list.add(new AppAccount(a.id(), a.name(), a.accountType().name(), a.typeLabel(), a.accountClass().name(), group, groupName, a.institution(),
-                    number == null || number.length() < 4 ? null : number.substring(number.length() - 4), a.balance(), a.creditLimit(), a.availableCredit(),
+                    number == null || number.length() < 4 ? null : number.substring(number.length() - 4),
+                    DefaultChartOfAccounts.PAYABLES.equals(a.code()) ? a.balance().add(contra) : a.balance(), a.creditLimit(), a.availableCredit(),
                     a.monthIn(), a.monthOut(), a.lastActivity(), "OWN".equals(group) && payTypes.contains(a.accountType().name()), a.systemAccount()));
         }
         // expense categories first (the order the app offers them in), then income
@@ -293,7 +307,8 @@ public class AppSyncService {
                         p.outstanding(), p.stillToPay(), p.overdueAmount(), p.next() == null ? null : p.next().dueDate(),
                         p.next() == null ? null : p.next().emi(), p.payAccountId(), p.payAccountName(), p.payAccountType(), p.progressPercent(),
                         p.endDate(), p.installments().stream().map(i -> new AppEmiInstalment(i.seq(), i.dueDate(), i.emi(), i.status(), i.overdue(),
-                                i.paidOn())).toList()))
+                                i.paidOn(), i.id(), i.principal(), i.interest(), i.gst(), i.scheduledAmount(), i.paidTowards())).toList(),
+                        p.payableAccountName(), p.payableBalance(), p.purchaseEntryId(), p.purchaseEntryNo(), p.conversionEntryNo(), p.principal(), p.categoryName()))
                 .toList();
         List<AppIncome> incomeList = !f.contains(com.aditya.personalbudget.domain.type.Feature.INCOME) ? List.of() : incomes(from, cats);
         List<AppGift> giftList = !f.contains(com.aditya.personalbudget.domain.type.Feature.GIFTS) ? List.of() : gifts.list().stream()

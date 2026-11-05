@@ -25,7 +25,9 @@ accounts, statements and expenses on the phone, so it works without the server, 
     lent, the account it came into), and **Remind** opens WhatsApp with a polite reminder.
   - **EMIs:** every EMI running (card or loan), how far it is paid, what is due this month and next, and what is still
     to pay. Tap one for the instalments to come; **Pay EMI** pays the next one (or 2, 3, 6) from the bank, or into
-    the card for a card EMI.
+    the card for a card EMI. A card EMI can also be **billed** by itself, and its amount set as on the card's statement
+    (before billing, or until it is paid). Bought on a card EMI, it is one row under Expenses: opened, its purchase, fee,
+    GST on the fee and the conversion to Payables, together.
   - **Income:** what came in this month, last month or in all, by day, with the top sources (tap one to see only it)
     and **Add income**.
 - **Recording (+):** one sheet with four modes at the top: **Expense**, **Paid for** (a bill paid for someone, owed

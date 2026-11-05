@@ -655,7 +655,79 @@ public class ChitService {
                 compoundEarned, simpleEarned, compoundProjected, simpleProjected,
                 Money.round(currentValue), realizedGain, c.getVersion(),
                 c.getPayoutAmount() == null ? null : payoutEntries(c).stream().findFirst().map(JournalEntry::getId).orElse(null),
-                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today), c.getOrganizerEmail());
+                c.getClosedAt(), c.getStatus() != ChitStatus.CLOSED && closable(c, pending, today), c.getOrganizerEmail(),
+                payoutDelay(c, maturityDate, books, today));
+    }
+
+    private static final BigDecimal DAY_BASE = BigDecimal.valueOf(36500);   // rate in percent over 365 days, as bank interest
+    private static final java.util.Set<com.aditya.personalbudget.domain.type.AccountType> LOAN_TYPES = java.util.EnumSet.of(
+            com.aditya.personalbudget.domain.type.AccountType.HOME_LOAN, com.aditya.personalbudget.domain.type.AccountType.VEHICLE_LOAN,
+            com.aditya.personalbudget.domain.type.AccountType.PERSONAL_LOAN, com.aditya.personalbudget.domain.type.AccountType.GOLD_LOAN,
+            com.aditya.personalbudget.domain.type.AccountType.EDUCATION_LOAN, com.aditya.personalbudget.domain.type.AccountType.LOAN);
+
+    /**
+     * See {@link com.aditya.personalbudget.dto.ChitDtos.PayoutDelay}. Due at maturity; a prize taken earlier is due the day
+     * it was recorded, so only the part not received that day counts. Empty while nothing is due yet or a day has not
+     * passed, and for a chit closed with no payout recorded.
+     */
+    private com.aditya.personalbudget.dto.ChitDtos.PayoutDelay payoutDelay(Chit c, LocalDate maturity, LedgerSnapshot books, LocalDate today) {
+        boolean recorded = c.getPayoutAmount() != null;
+        if (!recorded && (c.getStatus() == ChitStatus.CLOSED || !today.isAfter(maturity))) return null;
+        LocalDate due = recorded && c.getPayoutDate().isBefore(maturity) ? c.getPayoutDate() : maturity;
+
+        // the stretches between the due date, each part received and today
+        record Stretch(LocalDate from, LocalDate to, BigDecimal owed, BigDecimal received) { }
+        List<Stretch> stretches = new java.util.ArrayList<>();
+        LocalDate cursor = due;
+        BigDecimal owed = c.getMaturityAmount();
+        if (recorded) {
+            BigDecimal total = Money.ZERO;
+            List<PayoutReceiptView> parts = payoutReceipts(c).stream().sorted(Comparator.comparing(PayoutReceiptView::date)).toList();
+            for (PayoutReceiptView part : parts) {
+                if (part.date().isAfter(cursor)) {
+                    stretches.add(new Stretch(cursor, part.date(), owed, part.amount()));
+                    cursor = part.date();
+                }
+                total = total.add(part.amount());
+                owed = c.getPayoutAmount().subtract(total).max(Money.ZERO);   // once agreed, what is left of what was agreed
+            }
+            // a payout from before parts were kept apart was received in full
+            if (parts.isEmpty()) owed = payoutPending(c);
+        }
+        if (owed.signum() > 0 && today.isAfter(cursor)) stretches.add(new Stretch(cursor, today, owed, Money.ZERO));
+        if (stretches.isEmpty() && owed.signum() > 0) return null;
+
+        Account bank = bestRate(books, a -> a.getAccountType() == com.aditya.personalbudget.domain.type.AccountType.BANK);
+        Account loan = bestRate(books, a -> LOAN_TYPES.contains(a.getAccountType()) && Money.isPositive(a.getBalance()));
+        List<com.aditya.personalbudget.dto.ChitDtos.DelayPeriod> periods = stretches.stream().map(s -> {
+            long days = ChronoUnit.DAYS.between(s.from(), s.to());
+            return new com.aditya.personalbudget.dto.ChitDtos.DelayPeriod(s.from(), s.to(), days, Money.round(s.owed()), Money.round(s.received()),
+                    lostOn(s.owed(), bank, days), lostOn(s.owed(), loan, days));
+        }).toList();
+        return new com.aditya.personalbudget.dto.ChitDtos.PayoutDelay(due, stretches.isEmpty(), owed.signum() > 0,
+                periods.stream().mapToLong(com.aditya.personalbudget.dto.ChitDtos.DelayPeriod::days).sum(), Money.round(owed),
+                measure(bank, periods, com.aditya.personalbudget.dto.ChitDtos.DelayPeriod::bankInterest, owed),
+                measure(loan, periods, com.aditya.personalbudget.dto.ChitDtos.DelayPeriod::loanInterest, owed), periods);
+    }
+
+    /** The open personal account of that kind paying (or costing) the most; the name settles a tie. */
+    private static Account bestRate(LedgerSnapshot books, java.util.function.Predicate<Account> kind) {
+        return books.accounts().values().stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActive()) && !a.isChitBook() && !a.isProjectBook() && !a.isEmiAccount()
+                        && Money.isPositive(a.getInterestRate()) && kind.test(a))
+                .max(Comparator.comparing(Account::getInterestRate).thenComparing(Account::getName, Comparator.reverseOrder()))
+                .orElse(null);
+    }
+
+    private static BigDecimal lostOn(BigDecimal owed, Account source, long days) {
+        return source == null ? Money.ZERO : Money.round(owed.multiply(source.getInterestRate()).multiply(BigDecimal.valueOf(days))
+                .divide(DAY_BASE, java.math.MathContext.DECIMAL64));
+    }
+
+    private static com.aditya.personalbudget.dto.ChitDtos.DelayMeasure measure(Account source, List<com.aditya.personalbudget.dto.ChitDtos.DelayPeriod> periods,
+                                                                              java.util.function.Function<com.aditya.personalbudget.dto.ChitDtos.DelayPeriod, BigDecimal> lost, BigDecimal owed) {
+        return source == null ? null : new com.aditya.personalbudget.dto.ChitDtos.DelayMeasure(source.getId(), source.getName(), source.getInterestRate(),
+                periods.stream().map(lost).reduce(Money.ZERO, BigDecimal::add), lostOn(owed, source, 1));
     }
 
     /**

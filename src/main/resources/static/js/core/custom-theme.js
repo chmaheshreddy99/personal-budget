@@ -3,7 +3,8 @@
  * A custom theme starts from one of the built-in themes (its base: Classic, Breeze, Pearl or Ocean, whose sheets and
  * markup it keeps) and overrides it with the options below (colours, type, sizes, panels, buttons, tables, open rows,
  * icons, menu, motion, and the look of each kind of heading and text by itself: bold, italic, underlined, its case, size,
- * colour, background and an accent edge), compiled into one stylesheet that goes after every other one.
+ * colour, background and an accent edge; the left panes of the pages on their own: width, surface, items, icons, and the
+ * font, weight, size, colour and line spacing of each part), compiled into one stylesheet that goes after every other one.
  *
  * Stored as preferences (core/prefs.js):
  *   customThemes  { themes: [{ id, name, base, opts, updatedAt }] }
@@ -55,6 +56,25 @@ const textOptions = t => [
     { key: `tx.${t.id}.italic`, target: t.id, label: 'Italic', type: 'toggle', default: false },
     { key: `tx.${t.id}.underline`, target: t.id, label: 'Underlined', type: 'toggle', default: false },
     { key: `tx.${t.id}.edge`, target: t.id, label: 'Accent edge on the left', type: 'toggle', default: false },
+];
+
+/** The parts of a left pane (core/left-pane.js marks the panes) whose text can be styled by itself. */
+export const LEFT_TARGETS = [
+    { id: 'name', label: 'Names', hint: 'Account, chit and budget names, the items of a menu', selector: '.acct-name, .lh-item-top > b, .bn-row .title, .set-item b, .list-item b, .list-item .title, .gp-item b' },
+    { id: 'metric', label: 'Metrics', hint: 'Balances, amounts and other figures', selector: '.acct-bal, .acct-delta, .bn-amt, .group-label > b, .mono, .value' },
+    { id: 'detail', label: 'Details', hint: 'The second lines and small facts under a name', selector: '.acct-meta, .fact, .acct-facts, .set-item small, .chit-prog small, .list-item small, .lh-item small, .muted' },
+    { id: 'group', label: 'Group headers', hint: 'Bank accounts, Credit cards, Statements', selector: '.group-label, .class-head, .section-title' },
+    { id: 'title', label: 'Pane titles', hint: 'The title at the top of a pane', selector: '.panel-head h3, .side-head' },
+    { id: 'filter', label: 'Search & filters', hint: 'The search box and the chips under it', selector: '.search-box input, .list-tools input, .cf-chip, .seg-chip' },
+];
+const leftTextOptions = t => [
+    { key: `lp.${t.id}.font`, target: t.id, label: 'Font', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['system', 'System'], ['segoe', 'Segoe UI'], ['inter', 'Inter'], ['roboto', 'Roboto'], ['verdana', 'Verdana'], ['georgia', 'Georgia'], ['mono', 'Mono']] },
+    { key: `lp.${t.id}.weight`, target: t.id, label: 'Weight', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'Semi-bold'], ['700', 'Bold'], ['800', 'Extra bold']] },
+    { key: `lp.${t.id}.size`, target: t.id, label: 'Size', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['10', '10'], ['11', '11'], ['12', '12'], ['13', '13'], ['14', '14'], ['15', '15'], ['16', '16'], ['18', '18']] },
+    { key: `lp.${t.id}.leading`, target: t.id, label: 'Line spacing', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['1.1', 'Tight'], ['1.3', 'Snug'], ['1.5', 'Roomy'], ['1.75', 'Airy'], ['2', 'Double']] },
+    { key: `lp.${t.id}.case`, target: t.id, label: 'Letters', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['none', 'As written'], ['uppercase', 'UPPER CASE'], ['capitalize', 'Each Word']] },
+    { key: `lp.${t.id}.color`, target: t.id, label: 'Own colour', type: 'colorAuto', default: '', hint: 'Off: the colour of the theme' },
+    { key: `lp.${t.id}.italic`, target: t.id, label: 'Italic', type: 'toggle', default: false },
 ];
 
 /**
@@ -135,6 +155,20 @@ export const GROUPS = [
         { key: 'iconScale', label: 'Icon size', type: 'range', default: 1, min: 0.7, max: 1.3, step: 0.05, unit: '×' },
         { key: 'iconStyle', label: 'Icon tiles', type: 'choice', default: 'soft', options: [['soft', 'Soft'], ['solid', 'Solid'], ['outline', 'Outline']] },
     ] },
+    { id: 'leftPane', label: 'Left panes', iconName: 'grid', hint: 'Width, surface, spacing and icons, wherever a page has one', options: [
+        { key: 'lpScale', label: 'Width', type: 'range', default: 1, min: 0.7, max: 1.8, step: 0.05, unit: '×', hint: 'Against each page’s normal width. Drag a pane’s edge to set one page by itself; double-click the edge to come back here' },
+        { key: 'lpBg', label: 'Background', type: 'colorAuto', default: '', hint: 'Off: the panel of the theme' },
+        { key: 'lpSelected', label: 'Selected item', type: 'colorAuto', default: '', hint: 'Off: as the theme' },
+        { key: 'lpItemGap', label: 'Space between items', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['0', '0'], ['2', '2'], ['4', '4'], ['6', '6'], ['8', '8'], ['12', '12']] },
+        { key: 'lpItemPad', label: 'Item padding', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['2', 'Tight'], ['5', 'Snug'], ['8', 'Normal'], ['12', 'Roomy'], ['16', 'Airy']] },
+        { key: 'lpIcons', label: 'Show icons', type: 'toggle', default: true },
+        { key: 'lpIconScale', label: 'Icon size', type: 'range', default: 1, min: 0.7, max: 1.6, step: 0.05, unit: '×' },
+        { key: 'lpIconStyle', label: 'Icon tiles', type: 'choice', default: 'auto', options: [['auto', 'As the theme'], ['soft', 'Soft'], ['solid', 'Solid'], ['outline', 'Outline'], ['bare', 'No tile']] },
+        { key: 'lpIconColor', label: 'Icon colour', type: 'colorAuto', default: '', hint: 'Off: each its own' },
+        { key: 'lpEdge', label: 'Always show the edge to drag', type: 'toggle', default: false },
+    ] },
+    { id: 'leftPaneText', label: 'Left pane text', iconName: 'edit', hint: 'Names, metrics, details: font, weight, size, colour, line spacing',
+        targets: LEFT_TARGETS, options: LEFT_TARGETS.flatMap(leftTextOptions) },
     { id: 'frame', label: 'Menu & motion', iconName: 'settings', hint: 'Top menu, animation', options: [
         { key: 'menuStyle', label: 'Menu item', type: 'choice', default: 'pill', options: [['pill', 'Pill'], ['tab', 'Tab with underline'], ['underline', 'Underline only']] },
         { key: 'topbarHeight', label: 'Top bar height', type: 'range', default: 50, min: 40, max: 60, step: 1, unit: 'px' },
@@ -448,6 +482,36 @@ export function compileTheme(theme) {
         if (v('background') === 'tint') add(`${self} { background: ${rgba(P, 0.12)} !important; border-radius: ${px(Math.max(3, r - 6))}; }`);
         if (band) add(`${self} { background: var(--grad-navy) !important; border-radius: ${px(Math.max(3, r - 6))}; }`);
         if (v('edge')) add(`${self} { box-shadow: inset 3px 0 0 ${A} !important; padding-left: 8px !important; }`);
+    });
+
+    // ---- left panes (every part scoped to .lp-pane; nothing at all while left as the theme has it)
+    const lp = '.lp-pane';
+    if (Number(o.lpScale) !== 1) add(`:root { --lp-scale: ${Number(o.lpScale)}; }`);
+    if (o.lpBg) add(`${lp}.panel, ${lp} .panel { background: ${o.lpBg} !important; backdrop-filter: none; -webkit-backdrop-filter: none; }`,
+        `${lp} .panel-body, ${lp} .list-tools, ${lp} .panel-head { background: transparent !important; }`);
+    const lpItems = `${lp} :is(.acct-item, .acct-item.rich, .list-item, .bn-item, .lh-item, .set-item)`;
+    if (o.lpSelected) add(`${lp} :is(.acct-item, .acct-item.rich, .list-item, .bn-item, .lh-item, .set-item):is(.selected, .active) { background: ${o.lpSelected} !important; color: ${inkOn(o.lpSelected)}; }`);
+    if (o.lpItemGap !== 'auto') add(`${lpItems} { margin-bottom: ${o.lpItemGap}px !important; }`);
+    if (o.lpItemPad !== 'auto') add(`${lpItems} { padding-top: ${o.lpItemPad}px !important; padding-bottom: ${o.lpItemPad}px !important; }`);
+    if (!o.lpIcons) add(`${lp} .chip-icon { display: none !important; }`, `${lp} :is(.acct-item, .acct-item.rich) { grid-template-columns: minmax(0, 1fr) !important; }`);
+    if (Number(o.lpIconScale) !== 1) add(`${lp} .chip-icon { zoom: ${Number(o.lpIconScale)}; }`, `${lp} :is(.acct-item, .acct-item.rich) { grid-template-columns: auto minmax(0, 1fr) !important; }`);
+    if (o.lpIconStyle === 'soft') add(`${lp} .chip-icon:not(.art) { background: ${rgba(P, 0.12)} !important; color: ${P} !important; box-shadow: none !important; }`);
+    if (o.lpIconStyle === 'solid') add(`${lp} .chip-icon:not(.art) { background: linear-gradient(180deg, ${shade(P, 0.15)}, ${shade(P, -0.1)}) !important; color: #ffffff !important; box-shadow: none !important; }`);
+    if (o.lpIconStyle === 'outline') add(`${lp} .chip-icon:not(.art) { background: transparent !important; box-shadow: inset 0 0 0 1px currentColor !important; }`);
+    if (o.lpIconStyle === 'bare') add(`${lp} .chip-icon:not(.art) { background: transparent !important; box-shadow: none !important; }`);
+    if (o.lpIconColor) add(`${lp} .chip-icon:not(.art), ${lp} .chip-icon:not(.art) svg { color: ${o.lpIconColor} !important; }`);
+    if (o.lpEdge) add('.lp-handle::before { opacity: 0.35; }');
+    LEFT_TARGETS.forEach(t => {
+        const v = name => o[`lp.${t.id}.${name}`];
+        const self = `${lp} :is(${t.selector})`;
+        const text = `${self}, ${self} :is(b, strong, span:not(.chip-icon), small)`;
+        if (v('font') !== 'auto') add(`${text} { font-family: ${FONTS[v('font')] || FONTS.system} !important; }`);
+        if (v('weight') !== 'auto') add(`${text} { font-weight: ${v('weight')} !important; }`);
+        if (v('size') !== 'auto') add(`${self} { font-size: ${v('size')}px !important; }`, `${self} :is(b, strong, span:not(.chip-icon), small) { font-size: inherit !important; }`);
+        if (v('leading') !== 'auto') add(`${self} { line-height: ${v('leading')} !important; }`);
+        if (v('case') !== 'auto') add(`${text} { text-transform: ${v('case')} !important; letter-spacing: ${v('case') === 'uppercase' ? '0.04em' : '0'} !important; }`);
+        if (v('color')) add(`${text} { color: ${v('color')} !important; }`);
+        if (v('italic')) add(`${text} { font-style: italic !important; }`);
     });
 
     // ---- motion

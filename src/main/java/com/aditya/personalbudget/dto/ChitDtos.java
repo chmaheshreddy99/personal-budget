@@ -174,7 +174,30 @@ public final class ChitDtos {
             /* closed by the user (null while open), and whether it can be closed now */
             LocalDateTime closedAt,
             boolean closable,
-            String organizerEmail) {
+            String organizerEmail,
+            /* what a payout not received by its due date costs; empty before it is due */
+            PayoutDelay payoutDelay) {
+    }
+
+    /**
+     * What waiting for a payout costs: from the day it was due, simple interest (rate / 365) on what was still to come,
+     * the maturity amount until a payout is recorded and what is left of it after each part. Two measures of the same
+     * money, each from the user's own accounts: {@code bank} what it would have earned in the best-paying bank account,
+     * {@code loan} what it would have saved against the costliest loan still owed. Either is empty when no such account
+     * has a rate. {@code onTime}: paid in full by the due date, nothing lost. {@code running}: still growing, on
+     * {@code outstanding}.
+     */
+    public record PayoutDelay(LocalDate dueDate, boolean onTime, boolean running, long daysLate, BigDecimal outstanding,
+                              DelayMeasure bank, DelayMeasure loan, List<DelayPeriod> periods) {
+    }
+
+    /** One measure of the loss: the account the rate comes from, what has been lost, and what each further day costs. */
+    public record DelayMeasure(Long accountId, String accountName, BigDecimal ratePercent, BigDecimal interestLost, BigDecimal perDay) {
+    }
+
+    /** A stretch at one outstanding amount; {@code received}: what came in on its last day and ended it (0 for the one still running). */
+    public record DelayPeriod(LocalDate from, LocalDate to, long days, BigDecimal outstanding, BigDecimal received,
+                              BigDecimal bankInterest, BigDecimal loanInterest) {
     }
 
     public record InstallmentView(

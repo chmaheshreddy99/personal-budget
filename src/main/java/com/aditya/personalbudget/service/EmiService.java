@@ -2,6 +2,7 @@ package com.aditya.personalbudget.service;
 
 import com.aditya.personalbudget.domain.entity.Account;
 import com.aditya.personalbudget.domain.entity.Category;
+import com.aditya.personalbudget.domain.entity.EmiCardAllocation;
 import com.aditya.personalbudget.domain.entity.EmiInstallment;
 import com.aditya.personalbudget.domain.entity.EmiPlan;
 import com.aditya.personalbudget.domain.entity.JournalEntry;
@@ -14,6 +15,7 @@ import com.aditya.personalbudget.exception.BusinessException;
 import com.aditya.personalbudget.exception.NotFoundException;
 import com.aditya.personalbudget.repository.AccountRepository;
 import com.aditya.personalbudget.repository.CategoryRepository;
+import com.aditya.personalbudget.repository.EmiCardAllocationRepository;
 import com.aditya.personalbudget.repository.EmiInstallmentRepository;
 import com.aditya.personalbudget.repository.EmiPlanRepository;
 import com.aditya.personalbudget.repository.JournalEntryRepository;
@@ -58,8 +60,8 @@ import java.util.stream.Collectors;
  *   <li>Each month the whole EMI is billed, as the statement has it (its figures can be changed to match, before or after
  *       billing): {@code Dr Less: EMI billed, awaiting card payment} (principal) and {@code Dr Expenses [Loan Interest]}
  *       (interest and GST) {@code / Cr the card}.</li>
- *   <li>When the card is paid ({@code Dr the card / Cr the bank}, from the plan or by a transfer into the card, the
- *       oldest billed EMIs first) the principal leaves Payables: {@code Dr Payables / Cr Less: EMI billed ...}. So what each
+ *   <li>When the card is paid ({@code Dr the card / Cr the bank}, from the plan or by transfers into the card, the
+ *       oldest billed EMIs first; part payments add up until they cover the EMI) the principal leaves Payables: {@code Dr Payables / Cr Less: EMI billed ...}. So what each
  *       plan holds on Payables is what is still owed, and is nil once every EMI is paid. The "Less" account is a contra
  *       liability, nil between bills: it keeps a billed EMI from being counted twice, on the card and on Payables.</li>
  *   <li>Paying off early takes the rest off Payables, from the bank, or billed on the card.</li>
@@ -100,7 +102,7 @@ public class EmiService {
     /** A card bill is due about this long after it is billed; later than that it is overdue. */
     static final int CARD_GRACE_DAYS = 20;
     /** What is billed on a card and not yet paid: a contra liability beside Payables, nil once the bills are paid. */
-    static final String AWAITING_ACCOUNT = "Less: EMI billed, awaiting card payment";
+    static final String AWAITING_ACCOUNT = Account.EMI_CONTRA_NAME;
     /** The asset the same thing was held in at first; moved by {@link #moveToSharedPayables()}. */
     private static final String OLD_AWAITING_ACCOUNT = "EMI billed, awaiting payment";
 
@@ -164,7 +166,9 @@ public class EmiService {
                                   BigDecimal gst, BigDecimal balanceAfter, String status, boolean overdue, LocalDate billedOn,
                                   LocalDate paidOn, Long journalEntryId, String entryNo, Long paymentEntryId, String paymentEntryNo,
                                   /* changed to match the statement: what the schedule said (null when not changed) */
-                                  BigDecimal scheduledAmount) {
+                                  BigDecimal scheduledAmount,
+                                  /* billed and part paid by transfers into the card: how much so far */
+                                  BigDecimal paidTowards) {
     }
 
     /**
@@ -197,6 +201,7 @@ public class EmiService {
 
     private final EmiPlanRepository plans;
     private final EmiInstallmentRepository installments;
+    private final EmiCardAllocationRepository allocations;
     private final AccountRepository accounts;
     private final AccountService accountService;
     private final JournalEntryRepository entries;
@@ -206,11 +211,12 @@ public class EmiService {
     private final CategoryRepository categoryRows;
     private final ActivityService activity;
 
-    public EmiService(EmiPlanRepository plans, EmiInstallmentRepository installments, AccountRepository accounts,
+    public EmiService(EmiPlanRepository plans, EmiInstallmentRepository installments, EmiCardAllocationRepository allocations, AccountRepository accounts,
                       AccountService accountService, JournalEntryRepository entries, JournalLineRepository lines, LedgerService ledger,
                       CategoryService categories, CategoryRepository categoryRows, ActivityService activity) {
         this.plans = plans;
         this.installments = installments;
+        this.allocations = allocations;
         this.accounts = accounts;
         this.accountService = accountService;
         this.entries = entries;
@@ -264,11 +270,13 @@ public class EmiService {
         Map<Long, String> numbers = entries.findByTenantId(tenant).stream().collect(Collectors.toMap(JournalEntry::getId, JournalEntry::getEntryNo));
         Map<Long, List<EmiInstallment>> byPlan = installments.findByTenantId(tenant).stream()
                 .collect(Collectors.groupingBy(EmiInstallment::getPlanId));
+        Map<Long, BigDecimal> paidTowards = allocations.findByTenantId(tenant).stream()
+                .collect(Collectors.toMap(EmiCardAllocation::getInstallmentId, EmiCardAllocation::getAmount, BigDecimal::add));
         LocalDate today = OrgClock.today();
         List<EmiPlan> all = plans.findByTenantId(tenant);
         List<PlanView> list = all.stream().filter(p -> withClosed || !Boolean.TRUE.equals(p.getArchived()))
                 .map(p -> view(p, byPlan.getOrDefault(p.getId(), List.of()).stream().sorted(Comparator.comparing(EmiInstallment::getSeq)).toList(),
-                        accountById, categoryName, numbers, today))
+                        accountById, categoryName, numbers, today, paidTowards))
                 .sorted(Comparator.comparing(PlanView::archived)
                         .thenComparing((PlanView v) -> !"ACTIVE".equals(v.status()))
                         .thenComparing(v -> v.next() == null ? LocalDate.MAX : v.next().dueDate())
@@ -291,7 +299,7 @@ public class EmiService {
     }
 
     private PlanView view(EmiPlan p, List<EmiInstallment> rows, Map<Long, Account> accountById, Map<Long, String> categoryName,
-                          Map<Long, String> numbers, LocalDate today) {
+                          Map<Long, String> numbers, LocalDate today, Map<Long, BigDecimal> paidTowards) {
         boolean card = CARD.equals(p.getKind());
         List<InstallmentView> iv = rows.stream().map(i -> {
             boolean open = "DUE".equals(i.getStatus()) || "BILLED".equals(i.getStatus());
@@ -300,7 +308,8 @@ public class EmiService {
                     Money.nz(i.getGst()), i.getBalanceAfter(), i.getStatus(), overdue, i.getBilledOn(), i.getPaidOn(), i.getJournalEntryId(),
                     i.getJournalEntryId() == null ? null : numbers.get(i.getJournalEntryId()), i.getPaymentEntryId(),
                     i.getPaymentEntryId() == null ? null : numbers.get(i.getPaymentEntryId()),
-                    i.getOriginalPrincipal() == null ? null : i.getOriginalPrincipal().add(i.getOriginalInterest()).add(Money.nz(i.getOriginalGst())));
+                    i.getOriginalPrincipal() == null ? null : i.getOriginalPrincipal().add(i.getOriginalInterest()).add(Money.nz(i.getOriginalGst())),
+                    "BILLED".equals(i.getStatus()) ? paidTowards.getOrDefault(i.getId(), Money.ZERO) : Money.ZERO);
         }).toList();
         List<InstallmentView> paid = iv.stream().filter(i -> "PAID".equals(i.status())).toList();
         List<InstallmentView> billed = iv.stream().filter(i -> "BILLED".equals(i.status())).toList();
@@ -310,16 +319,17 @@ public class EmiService {
         BigDecimal principalPaid = sumI(paid, InstallmentView::principal);
         BigDecimal outstanding = foreclosed ? Money.ZERO : p.getPrincipal().subtract(principalPaid).max(Money.ZERO);
         BigDecimal blocked = !card || foreclosed ? Money.ZERO : p.getPrincipal().subtract(principalPaid).subtract(sumI(billed, InstallmentView::principal)).max(Money.ZERO);
-        BigDecimal billedToPay = billed.stream().map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add);
+        BigDecimal billedToPay = billed.stream().map(i -> i.emi().add(i.gst()).subtract(i.paidTowards())).reduce(Money.ZERO, BigDecimal::add);
         List<InstallmentView> counted = iv.stream().filter(i -> !"WAIVED".equals(i.status())).toList();
         BigDecimal interestTotal = sumI(counted, InstallmentView::interest);
         BigDecimal interestPaid = sumI(iv.stream().filter(i -> "PAID".equals(i.status()) || "BILLED".equals(i.status())).toList(), InstallmentView::interest);
         BigDecimal gstTotal = sumI(counted, InstallmentView::gst);
-        BigDecimal paidSoFar = paid.stream().map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add);
-        BigDecimal stillToPay = open.stream().map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add);
+        BigDecimal partPaid = sumI(billed, InstallmentView::paidTowards);
+        BigDecimal paidSoFar = paid.stream().map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add).add(partPaid);
+        BigDecimal stillToPay = open.stream().map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add).subtract(partPaid);
         int toBill = card ? (int) due.stream().filter(i -> !i.dueDate().isAfter(today)).count() : 0;
         int toPay = card ? billed.size() : (int) due.stream().filter(i -> !i.dueDate().isAfter(today)).count();
-        BigDecimal overdue = open.stream().filter(InstallmentView::overdue).map(i -> i.emi().add(i.gst())).reduce(Money.ZERO, BigDecimal::add);
+        BigDecimal overdue = open.stream().filter(InstallmentView::overdue).map(i -> i.emi().add(i.gst()).subtract(i.paidTowards())).reduce(Money.ZERO, BigDecimal::add);
         InstallmentView next = open.isEmpty() ? null : open.getFirst();
         Account pay = accountById.get(p.getPayAccountId());
         Account liability = p.getLiabilityAccountId() == null ? null : accountById.get(p.getLiabilityAccountId());
@@ -664,6 +674,10 @@ public class EmiService {
         if (!billed && all.stream().anyMatch(x -> "DUE".equals(x.getStatus()) && x.getSeq() < i.getSeq())) throw new BusinessException("Bill the earlier EMIs first");
         LocalDate on = r.date() != null ? r.date() : billed ? i.getBilledOn() : i.getDueDate();
         if (on.isBefore(p.getPurchaseDate())) throw new BusinessException("An EMI cannot be billed before the purchase");
+        BigDecimal paidSoFar = paidTowards(i);
+        if (Money.round(r.principal()).add(Money.round(r.interest())).add(Money.round(Money.nz(r.gst()))).compareTo(paidSoFar) < 0) {
+            throw new BusinessException(ActivityService.money(paidSoFar) + " is already paid towards EMI " + i.getSeq() + ": the amount cannot be less");
+        }
         setFigures(p, i, all, Money.round(r.principal()), Money.round(r.interest()), Money.round(Money.nz(r.gst())));
         if (!billed) {
             bill(p, i, on);
@@ -680,6 +694,11 @@ public class EmiService {
             }
             i.setBilledOn(on);
             installments.save(i);
+            // brought down to what is paid already: it is paid
+            if (paidSoFar.signum() > 0 && whole(i).compareTo(paidSoFar) == 0) {
+                settle(p, i, on, null);
+                closeIfDone(p);
+            }
         }
         activity.record(billed ? "CHANGED" : "POSTED", AREA, (billed ? "Changed the bill of EMI " : "Billed EMI ") + i.getSeq() + " of " + p.getMonths() + " · " + p.getNarration()
                 + " · " + ActivityService.money(i.getPrincipal().add(i.getInterest()).add(Money.nz(i.getGst()))));
@@ -757,7 +776,7 @@ public class EmiService {
 
     /** A billed card EMI paid into the card from the bank: that part of the limit is free again. */
     private void payCard(EmiPlan p, EmiInstallment i, LocalDate on, Long fromId) {
-        BigDecimal amount = i.getPrincipal().add(i.getInterest()).add(Money.nz(i.getGst()));
+        BigDecimal amount = whole(i).subtract(paidTowards(i));
         String label = "EMI " + i.getSeq() + " of " + p.getMonths();
         JournalDraft d = JournalDraft.of(on, VoucherType.EMI_PAYMENT, label + " paid into the card · " + p.getNarration())
                 .debit(p.getPayAccountId(), amount, label + " · frees " + ActivityService.money(i.getPrincipal()) + " of the limit")
@@ -804,8 +823,9 @@ public class EmiService {
     }
 
     /**
-     * A payment into a card (a transfer) pays its billed EMIs, oldest first, as far as it goes. An EMI the payment does not
-     * fully cover, or one billed after it, waits. Returns how many were paid.
+     * A payment into a card (a transfer) pays its billed EMIs, oldest first, as far as it goes. Part of an EMI is kept
+     * towards it, and part payments add up: when they cover it, it is paid and its principal comes off Payables. An EMI
+     * billed after the payment waits. What is left of the payment is for the card's other spending. Returns how many were paid.
      */
     @Transactional
     public int settleFromCardPayment(Long cardId, Long paymentEntryId, BigDecimal amount, LocalDate on) {
@@ -818,22 +838,44 @@ public class EmiService {
         BigDecimal left = amount;
         int paid = 0;
         for (EmiInstallment i : billed) {
-            BigDecimal whole = i.getPrincipal().add(i.getInterest()).add(Money.nz(i.getGst()));
-            if (whole.compareTo(left) > 0 || on.isBefore(i.getBilledOn())) continue;
-            EmiPlan p = onCard.get(i.getPlanId());
-            settle(p, i, on, paymentEntryId);
-            closeIfDone(p);
-            left = left.subtract(whole);
-            paid++;
+            if (left.signum() <= 0) break;
+            if (on.isBefore(i.getBilledOn())) continue;
+            BigDecimal owed = whole(i).subtract(paidTowards(i));
+            BigDecimal take = owed.min(left);
+            if (take.signum() <= 0) continue;
+            EmiCardAllocation share = new EmiCardAllocation();
+            share.setTenantId(i.getTenantId());
+            share.setInstallmentId(i.getId());
+            share.setPaymentEntryId(paymentEntryId);
+            share.setAmount(take);
+            share.setPaidOn(on);
+            allocations.save(share);
+            left = left.subtract(take);
+            if (take.compareTo(owed) == 0) {
+                EmiPlan p = onCard.get(i.getPlanId());
+                settle(p, i, on, paymentEntryId);
+                closeIfDone(p);
+                paid++;
+            }
         }
         return paid;
     }
 
-    /** The card payment was changed, deleted or reversed: the EMIs it paid are billed again. */
+    /**
+     * The card payment was changed, deleted or reversed: its share comes off the EMIs it went to, and any of them that now
+     * falls short is billed again (what other payments gave it still counts). One paid off with the whole plan stays paid.
+     */
     @Transactional
     public void unsettleCardPayment(Long paymentEntryId) {
+        Set<Long> touched = new java.util.HashSet<>();
+        for (EmiCardAllocation share : allocations.findByPaymentEntryId(paymentEntryId)) {
+            touched.add(share.getInstallmentId());
+            allocations.deleteById(share.getId());
+        }
         for (EmiInstallment i : installments.findByTenantId(UserContext.tenantId())) {
-            if (!paymentEntryId.equals(i.getSettledByEntryId())) continue;
+            if (!paymentEntryId.equals(i.getSettledByEntryId()) && !(touched.contains(i.getId()) && "PAID".equals(i.getStatus()))) continue;
+            EmiPlan plan = plans.findById(i.getPlanId()).orElse(null);
+            if (plan != null && i.getPaymentEntryId() != null && i.getPaymentEntryId().equals(plan.getForecloseEntryId())) continue;
             Long entry = i.getPaymentEntryId();
             i.setStatus("BILLED");
             i.setPaidOn(null);
@@ -847,6 +889,15 @@ public class EmiService {
                 plans.save(p);
             });
         }
+    }
+
+    private static BigDecimal whole(EmiInstallment i) {
+        return i.getPrincipal().add(i.getInterest()).add(Money.nz(i.getGst()));
+    }
+
+    /** What transfers into the card have put towards a billed EMI so far. */
+    private BigDecimal paidTowards(EmiInstallment i) {
+        return allocations.findByInstallmentId(i.getId()).stream().map(EmiCardAllocation::getAmount).reduce(Money.ZERO, BigDecimal::add);
     }
 
     private void closeIfDone(EmiPlan p) {
@@ -896,6 +947,8 @@ public class EmiService {
             last.setSettledByEntryId(null);
             installments.save(last);
             if (entry != null) ledger.delete(entry);
+            // paid wholly by transfers: undoing it says they do not count towards it. Part of it stays part paid
+            if (paidTowards(last).compareTo(whole(last)) >= 0) allocations.findByInstallmentId(last.getId()).forEach(a -> allocations.deleteById(a.getId()));
             what = "payment into the card of EMI ";
         } else {
             Long entry = last.getJournalEntryId();
@@ -905,6 +958,7 @@ public class EmiService {
             last.setJournalEntryId(null);
             installments.save(last);
             if (entry != null) ledger.delete(entry);
+            allocations.findByInstallmentId(last.getId()).forEach(a -> allocations.deleteById(a.getId()));
             if (CARD.equals(p.getKind())) restoreFigures(p, last);
             what = CARD.equals(p.getKind()) ? "billing of EMI " : "EMI ";
             // undone by hand: it is not booked again by itself tonight
@@ -951,7 +1005,7 @@ public class EmiService {
                 // what is billed and not paid yet is paid with it
                 billedPaidOff = all.stream().filter(i -> "BILLED".equals(i.getStatus())).toList();
                 for (EmiInstallment i : billedPaidOff) {
-                    BigDecimal whole = i.getPrincipal().add(i.getInterest()).add(Money.nz(i.getGst()));
+                    BigDecimal whole = whole(i).subtract(paidTowards(i));
                     d.debit(p.getPayAccountId(), whole, "EMI " + i.getSeq() + " paid into the card")
                             .debit(p.getPayableAccountId(), i.getPrincipal(), "Principal of EMI " + i.getSeq())
                             .credit(awaitingAccount(), i.getPrincipal(), "EMI " + i.getSeq() + " paid");

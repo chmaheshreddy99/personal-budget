@@ -193,7 +193,11 @@ public class AppSyncWriter {
     @Transactional
     public SyncResult writeEmiPayment(AppSyncService.SyncEmiPayment e) {
         return once(e.clientId(), Feature.EXPENSES, "pay EMIs", () -> {
-            var p = emis.pay(e.planId(), new EmiService.PayRequest(e.count() == null ? 1 : e.count(), e.date(), e.accountId(), false));
+            if (e.principal() != null) {
+                emis.billAs(e.planId(), new EmiService.BillRequest(e.installmentId(), e.date(), e.principal(), Money.nz(e.interest()), e.gst()));
+            }
+            var p = Boolean.TRUE.equals(e.billOnly()) ? emis.get(e.planId())
+                    : emis.pay(e.planId(), new EmiService.PayRequest(e.count() == null ? 1 : e.count(), e.date(), e.accountId(), false));
             var last = p.installments().stream().filter(i -> i.paymentEntryId() != null || i.journalEntryId() != null).reduce((a, b) -> b);
             activity.record("POSTED", "Expenses", "Synced from the phone app · EMI of " + ActivityService.cut(p.narration(), 50));
             return new Booked(last.map(i -> i.paymentEntryId() != null ? i.paymentEntryId() : i.journalEntryId()).orElse(null),

@@ -285,9 +285,17 @@ function debtHtml(d) {
                     <b>${percent((total / assets) * 100, 0)}</b></div></div></div>
         ${cards.length ? `<div class="dx-cards"><div class="section-title">${icon('card')} Card usage</div>${cards.map(c => {
             const u = Number(c.utilizationPercent);
-            return `<div class="dx-plan"><span class="ellipsis">${esc(c.name)}</span>
+            const held = Number(c.emiHeld || 0);
+            return `<div class="dx-plan" title="${esc(`${money(c.balance)} on the card${held ? ` + ${money(held)} held by EMIs not billed yet` : ''}, of ${money(c.creditLimit)}`)}"><span class="ellipsis">${esc(c.name)}</span>
                 <i class="progress ${u > 70 ? 'over' : u > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, u)}%"></span></i><b>${percent(u, 0)}</b></div>`;
-        }).join('')}</div>` : ''}
+        }).join('')}${cards.length > 1 ? (() => {
+            // as the Card usage figure on the Accounts page: a card in credit does not offset the others
+            const limit = cards.reduce((s, c) => s + Number(c.creditLimit), 0);
+            const used = cards.reduce((s, c) => s + Math.max(0, Number(c.balance)) + Number(c.emiHeld || 0), 0);
+            const all = limit ? (used / limit) * 100 : 0;
+            return `<div class="dx-plan dx-plan-all" title="${esc(`${money(used)} of ${money(limit)} across your cards`)}"><span class="ellipsis"><b>All cards</b></span>
+                <i class="progress ${all > 70 ? 'over' : all > 30 ? 'warning' : 'good'}"><span style="width:${Math.min(100, all)}%"></span></i><b>${percent(all, 0)}</b></div>`;
+        })() : ''}</div>` : ''}
     </div>`;
 }
 

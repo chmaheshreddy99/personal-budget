@@ -364,7 +364,7 @@ function chitRows(chits) {
                     <span class="acct-delta pos" title="Interest earned so far">+${moneyShort(c.compoundInterestEarned)}</span>
                 </div>
                 <div class="chit-prog"><div class="acct-util good" title="${percent(paidPct, 0)} paid in"><span style="width:${paidPct}%"></span></div>
-                    <small>${c.status === 'CLOSED' ? `${icon('lock')}closed` : Number(c.payoutPending) ? `<span class="gold-ink">${icon('hourglass')}${moneyShort(c.payoutPending)} of payout to come</span>`
+                    ${payoutLossChip(c)}<small>${c.status === 'CLOSED' ? `${icon('lock')}closed` : Number(c.payoutPending) ? `<span class="gold-ink">${icon('hourglass')}${moneyShort(c.payoutPending)} of payout to come</span>`
                         : c.payoutAmount !== null ? `${icon('gift')}paid out ${shortDate(c.payoutDate)}`
                         : `${percent(paidPct, 0)} · ${c.daysToMaturity >= 0 ? `matures ${shortDate(c.maturityDate)}` : 'matured'}`}</small></div>
             </div>
@@ -489,6 +489,7 @@ function drawDetail(container, { chit: c, installments, interestSchedule, payout
                 <span title="Cash actually paid after dividends">${icon('cash')}Cash paid <b>${moneyShort(c.cashPaid)}</b></span>
             </div>
         </section>
+        ${c.payoutDelay?.running ? payoutLossHtml(c) : ''}
         ${panel({
             title: 'Chit passbook', iconName: 'calendar', cls: 'p-chit-tabs', bodyClass: 'flush',
             actions: `${exportButton({ label: '' })}<div class="tabs sm" id="chit-tabs">
@@ -702,14 +703,55 @@ function installmentsHtml(installments, manage, upi, acked = new Map()) {
     </table>`;
 }
 
+/** The lost interest as a mark in the list: from the bank's rate to the loan's, while the payout is still owed. */
+function payoutLossChip(c) {
+    const d = c.payoutDelay;
+    if (!d?.running) return '';
+    const figures = [d.bank, d.loan].filter(Boolean).map(m => Number(m.interestLost)).sort((a, b) => a - b);
+    return `<span class="pl-chip" title="Payout ${d.daysLate} day${d.daysLate === 1 ? '' : 's'} late, ${money(d.outstanding)} still to come. Interest lost so far${d.bank ? `: ${money(d.bank.interestLost)} at the best bank rate` : ''}${d.loan ? `, ${money(d.loan.interestLost)} at the costliest loan's` : ''}">${icon('clock')}${d.daysLate}d late${figures.length ? ` · −${figures.map(v => moneyShort(v)).join(' to ')}` : ''}</span>`;
+}
+
+/**
+ * What waiting for the payout costs: how late, on how much, and the interest it could have earned in the best-paying bank
+ * account and saved against the costliest loan, with the stretches it is worked out from behind a fold.
+ */
+function payoutLossHtml(c) {
+    const d = c.payoutDelay;
+    const late = `${d.daysLate} day${d.daysLate === 1 ? '' : 's'}`;
+    const measure = (m, label, verb, none) => (m ? `
+        <div class="pl-fig" title="${esc(`${m.accountName} at ${Number(m.ratePercent)}% a year, simple interest over 365 days`)}">
+            <small>${label}</small><b class="mono neg">${money(Math.round(Number(m.interestLost)))}</b>
+            <span class="ellipsis">${verb} ${esc(m.accountName)}, ${Number(m.ratePercent)}%${d.running ? ` · +${money(m.perDay)} a day` : ''}</span></div>` : `
+        <div class="pl-fig empty"><small>${label}</small><span>${none}</span></div>`);
+    return `
+    <div class="pl-band ${d.running ? 'running' : 'ended'}">
+        <span class="pl-icon">${icon(d.running ? 'clock' : 'history')}</span>
+        <div class="pl-what"><b>${d.running ? `Payout ${late} late` : `Payout came ${late} late`}</b>
+            <span class="muted">${d.running ? `${money(d.outstanding)} still to come` : 'in full now'} · due ${date(d.dueDate)}${d.running && c.installmentsPending ? ` · ${c.installmentsPending} installment${c.installmentsPending === 1 ? '' : 's'} unpaid` : ''}</span></div>
+        ${measure(d.bank, 'Bank interest lost', 'in', 'No bank account has a rate: set one to see this')}
+        ${measure(d.loan, 'Loan interest paid', 'on', 'No loan with a rate and a balance')}
+        <details class="pl-how"><summary>${icon('info')}How</summary>
+            <div class="pl-pop">
+                <p class="small muted">Simple interest from the due date on what was still to come: the maturity amount until a payout is recorded, then what is left of it.</p>
+                <table class="grid compact dense"><thead><tr><th>From</th><th>To</th><th class="r">Days</th><th class="r">Outstanding</th><th class="r">Then received</th>${d.bank ? '<th class="r">Bank</th>' : ''}${d.loan ? '<th class="r">Loan</th>' : ''}</tr></thead>
+                    <tbody>${d.periods.map(p => `<tr><td>${date(p.from)}</td><td>${date(p.to)}</td><td class="r">${p.days}</td><td class="r mono">${money(p.outstanding)}</td><td class="r mono">${Number(p.received) ? money(p.received) : '—'}</td>
+                        ${d.bank ? `<td class="r mono">${money(p.bankInterest)}</td>` : ''}${d.loan ? `<td class="r mono">${money(p.loanInterest)}</td>` : ''}</tr>`).join('')}</tbody>
+                    <tfoot><tr class="total"><td colspan="5">Lost</td>${d.bank ? `<td class="r mono">${money(d.bank.interestLost)}</td>` : ''}${d.loan ? `<td class="r mono">${money(d.loan.interestLost)}</td>` : ''}</tr></tfoot></table>
+            </div></details>
+    </div>`;
+}
+
 /**
  * The payout as it came in: agreed, received and still to come, then each part with its entry, the account it went
  * into and an undo (the first part is the payout itself: Undo payout takes it out).
  */
 function payoutHtml(c, parts, manage) {
     const agreed = Number(c.payoutAmount), received = Number(c.payoutReceived), toCome = Number(c.payoutPending || 0);
+    const delay = c.payoutDelay;
     return `
     <div class="payout-tab">
+        ${delay?.onTime ? `<div class="pl-ontime">${icon('check-circle')}<span>Received by its due date (${date(delay.dueDate)}): no interest lost.</span></div>` : ''}
+        ${delay && !delay.onTime && !delay.running ? payoutLossHtml(c) : ''}
         <div class="payout-sum">
             <div><small>Payout</small><b>${money(agreed)}</b><span class="muted">${date(c.payoutDate)}</span></div>
             <div><small>Received</small><b class="pos">${money(received)}</b><span class="muted">${parts.length} part${parts.length === 1 ? '' : 's'}</span></div>

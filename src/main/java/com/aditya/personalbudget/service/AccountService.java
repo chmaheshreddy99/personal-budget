@@ -216,7 +216,7 @@ public class AccountService {
         }
         if (hasTransactions(id)) {
             throw new BusinessException("'" + account.getName()
-                    + "' has transactions. Deactivate it instead, or delete its transactions first");
+                    + "' has transactions. Close it instead, or delete its transactions first");
         }
         openingEntry(account).ifPresent(e -> ledger.delete(e.getId()));
         interestPostings.deleteAll(interestPostings.findByAccountId(id));   // undone periods: nothing of them is in the books
@@ -277,6 +277,8 @@ public class AccountService {
         account.setBillingDay(card ? r.billingDay() : null);
         account.setPaymentDueDays(card ? (r.paymentDueDays() != null ? r.paymentDueDays() : Integer.valueOf(CardBilling.DEFAULT_DAYS_TO_PAY)) : null);
         account.setActive(r.active() == null || r.active());
+        if (Boolean.TRUE.equals(account.getActive())) account.setClosedOn(null);
+        else if (account.getClosedOn() == null) account.setClosedOn(OrgClock.today());
 
         boolean balanceSheet = type.getAccountClass() == AccountClass.ASSET
                 || type.getAccountClass() == AccountClass.LIABILITY;
@@ -435,7 +437,16 @@ public class AccountService {
      * By card: the limit converted EMIs still hold. Conversion takes the price off the card's balance, but the bank frees
      * the limit only as each EMI's principal is billed (from then on it is in the balance) and paid.
      */
-    private Map<Long, BigDecimal> heldByEmis() {
+    public Map<Long, BigDecimal> heldByEmis() {
+        return heldByEmisNow();
+    }
+
+    /** How much of an account's limit is used: the one figure the Accounts page and the dashboard both show. */
+    public static BigDecimal utilization(Account a, BigDecimal balance, BigDecimal emiHeld) {
+        return Money.isPositive(a.getCreditLimit()) ? Money.percent(balance.add(emiHeld), a.getCreditLimit()) : null;
+    }
+
+    private Map<Long, BigDecimal> heldByEmisNow() {
         Long tenant = UserContext.tenantId();
         Map<Long, com.aditya.personalbudget.domain.entity.EmiPlan> running = emiPlans.findByTenantId(tenant).stream()
                 .filter(p -> p.getPayableAccountId() != null && "ACTIVE".equals(p.getStatus()))
@@ -452,7 +463,7 @@ public class AccountService {
         BigDecimal utilization = null;
         BigDecimal available = null;
         if (Money.isPositive(a.getCreditLimit())) {
-            utilization = Money.percent(balance.add(emiHeld), a.getCreditLimit());
+            utilization = utilization(a, balance, emiHeld);
             available = a.getCreditLimit().subtract(balance).subtract(emiHeld);
         }
         Long daysToMaturity = a.getMaturityDate() == null ? null : ChronoUnit.DAYS.between(today, a.getMaturityDate());
@@ -462,6 +473,6 @@ public class AccountService {
                 a.getDescription(), Boolean.TRUE.equals(a.getSystemAccount()), Boolean.TRUE.equals(a.getActive()),
                 balance, monthMove, in, out, change30, utilization, available, daysToMaturity,
                 ReportService.bucket(a), last, count, trend, a.getVersion(), a.isChitBook(), a.getHostedChitId(), a.getChitRole(),
-                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount(), cardBill, emiHeld);
+                details ? a.getHolderName() : null, details ? a.getIfsc() : null, details ? a.getUpiId() : null, a.isProjectBook(), a.getProjectId(), a.getProjectRole(), a.isEmiAccount(), cardBill, emiHeld, a.getClosedOn(), a.isEmiContra());
     }
 }

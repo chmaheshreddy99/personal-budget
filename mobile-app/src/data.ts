@@ -65,7 +65,7 @@ export function joinExpenseLines(lines: ServerExpense[]) {
   lines.forEach(l => entries.set(l.entryId, [...(entries.get(l.entryId) || []), l]));
   return [...entries.values()].map(list => {
     const items: ExpenseItem[] = list.map((l, i) => ({ key: `${l.entryId}-${l.lineId ?? i}`, name: itemName(l.memo, l.categoryName), category: l.categoryName, amount: l.amount }));
-    return { first: list[0], amount: list.reduce((s, l) => s + l.amount, 0), items: list.length > 1 ? items : undefined };
+    return { first: list[0], lines: list, amount: list.reduce((s, l) => s + l.amount, 0), items: list.length > 1 ? items : undefined };
   });
 }
 
@@ -104,14 +104,43 @@ export type Claim = {
 };
 export const owedToMe = (c: { kind: string }) => c.kind === 'LENT' || c.kind === 'PAID_FOR';
 
-export type EmiInstalment = { seq: number; dueDate: string; emi: number; status: string; overdue: boolean; paidOn: string | null };
+/** The figures come from a newer server: id, principal ... are missing in a snapshot kept from an older one. */
+export type EmiInstalment = { seq: number; dueDate: string; emi: number; status: string; overdue: boolean; paidOn: string | null;
+  id?: number; principal?: number; interest?: number; gst?: number; scheduledAmount?: number | null; paidTowards?: number };
 /** An EMI plan: kind CARD (billed on a card, paid into it from the bank) or LOAN (paid from the bank). */
 export type Emi = {
   id: number; kind: 'CARD' | 'LOAN' | string; narration: string; lender: string | null; emiAmount: number; months: number; paidCount: number;
   left: number; dueNow: number; outstanding: number; stillToPay: number; overdueAmount: number; nextDueDate: string | null; nextAmount: number | null;
   payAccountId: number | null; payAccountName: string | null; payAccountType: string | null; progressPercent: number; endDate: string | null;
   instalments: EmiInstalment[];
+  /** a card EMI converted: where it is owed, what is still owed there, and the entries that go together in Expenses */
+  payableAccountName?: string | null; payableBalance?: number | null; purchaseEntryId?: number | null; purchaseEntryNo?: string | null;
+  conversionEntryNo?: string | null; principal?: number; categoryName?: string;
 };
+
+/** What an EMI comes to on the card's statement, with GST. */
+export const emiWhole = (i: EmiInstalment) => Math.round((i.emi + (i.gst || 0)) * 100) / 100;
+/** What is still to pay of it: part payments into the card count. */
+export const emiLeft = (i: EmiInstalment) => Math.round((emiWhole(i) - (i.paidTowards || 0)) * 100) / 100;
+
+/** One part of something bought on EMI: the purchase, its fee, the GST on the fee, or the conversion (a credit). */
+export type EmiPart = { key: string; label: string; detail: string; amount: number; credit?: boolean };
+
+/** The lines of an EMI's purchase in order, then the conversion that moved the price to Payables. */
+export function emiParts(lines: ServerExpense[], emi: Emi): EmiPart[] {
+  const rank = (memo: string) => (memo.includes('gst on the processing fee') ? 2 : memo.includes('processing fee') ? 1 : 0);
+  const LABEL = ['Purchase', 'Processing fee', 'GST on the fee'];
+  const parts: EmiPart[] = [...lines]
+    .sort((a, b) => rank((a.memo || '').toLowerCase()) - rank((b.memo || '').toLowerCase()))
+    .map((l, i) => ({ key: `${l.entryId}-${l.lineId ?? i}`, label: LABEL[rank((l.memo || '').toLowerCase())], detail: l.categoryName, amount: l.amount }));
+  parts.push({ key: `${emi.id}-conversion`, label: 'Converted into EMI', detail: `To ${emi.payableAccountName || 'Payables'}`, amount: emi.principal ?? 0, credit: true });
+  return parts;
+}
+
+/** A new statement total: the interest takes the difference, never below nothing. */
+export function interestForTotal(total: number, principal: number, gst: number) {
+  return Math.max(0, Math.round((total - principal - gst) * 100) / 100);
+}
 
 export type ServerIncome = {
   entryId: number; entryNo: string; date: string; narration: string; party: string | null; reference: string | null;

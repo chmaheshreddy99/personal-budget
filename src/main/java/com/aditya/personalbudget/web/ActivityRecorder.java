@@ -172,6 +172,8 @@ public class ActivityRecorder implements HandlerInterceptor, ResponseBodyAdvice<
         if (path.matches("/claims/\\d+/interest-plan")) return of("CHANGED", "Money owed", "Changed how interest is collected", details);
         if (path.startsWith("/claims")) return of(verb, "Money owed", post ? "Recorded money lent / owed" : put ? "Edited money lent / owed" : "Deleted money lent / owed", details);
 
+        if (path.matches("/accounts/\\d+/close")) return of("CLOSED", "Accounts", "Closed an account", details);
+        if (path.matches("/accounts/\\d+/reopen")) return of("REOPENED", "Accounts", "Re-opened an account", details);
         if (path.startsWith("/accounts")) return of(verb, "Accounts", post ? "Added an account" : put ? "Edited an account" : "Deleted an account", details);
         if (path.startsWith("/categories")) return of(verb, "Settings", post ? "Added a category" : put ? "Changed a category" : "Deleted a category", details);
         if (path.startsWith("/budgets/copy")) return of("ADDED", "Budgets", "Copied last month's budgets", details);

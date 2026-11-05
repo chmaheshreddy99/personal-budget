@@ -204,30 +204,26 @@ export async function openExpenseDialog({ expense = null, copy = false, claim = 
                 <div class="xp-budget expense-only" data-budget></div>
             </section>
             <section class="xp-emi-col emi-only">
-                <div class="xp-section-head"><span class="section-title">${icon('calendar')} EMI terms</span>${emi && !emi.editable ? '<span class="small muted">fixed: EMIs are billed or paid</span>' : ''}</div>
-                <div class="xp-emi">
+                <div class="xp-section-head emi-terms-head"><span class="section-title">${icon('calendar')} EMI terms</span>${emi && !emi.editable ? '<span class="small muted">fixed: EMIs are billed or paid</span>' : ''}
                     <div class="xp-emi-kinds" data-emi-kinds>
-                        <button type="button" class="date-chip ${emiKind === 'CARD' ? 'selected' : ''}" data-emi-kind="CARD" ${locked}>${icon('card')}Credit card EMI</button>
-                        <button type="button" class="date-chip ${emiKind === 'LOAN' ? 'selected' : ''}" data-emi-kind="LOAN" ${locked}>${icon('briefcase')}Loan / finance EMI</button>
-                    </div>
-                    <div class="form-grid three">
+                        <button type="button" class="date-chip ${emiKind === 'CARD' ? 'selected' : ''}" data-emi-kind="CARD" ${locked}>${icon('card')}Credit card</button>
+                        <button type="button" class="date-chip ${emiKind === 'LOAN' ? 'selected' : ''}" data-emi-kind="LOAN" ${locked}>${icon('briefcase')}Loan / finance</button>
+                    </div></div>
+                <div class="xp-emi">
+                    <div class="emi-terms">
                         <label class="field"><span>Months</span><input name="emiMonths" type="number" min="1" max="360" step="1" value="${emi?.months ?? 6}" ${locked} data-plain></label>
-                        <label class="field"><span>Interest <small class="muted">% a year · 0 no-cost</small></span><input name="emiRate" type="number" min="0" max="60" step="0.01" placeholder="0" value="${emi && Number(emi.ratePercent) ? Number(emi.ratePercent) : ''}" ${locked} data-plain></label>
+                        <label class="field" title="A year, on the reducing balance. 0 or empty: no-cost"><span>Interest %</span><input name="emiRate" type="number" min="0" max="60" step="0.01" placeholder="0 no-cost" value="${emi && Number(emi.ratePercent) ? Number(emi.ratePercent) : ''}" ${locked} data-plain></label>
+                        <label class="field" title="Charged on each EMI's interest"><span>Interest GST %</span><input name="emiGst" type="number" min="0" max="50" step="any" value="${emi ? (Number(emi.gstPercent) || '') : 18}" ${locked} data-plain></label>
                         <label class="field"><span>Processing fee</span><input name="emiFee" type="number" min="0" step="any" placeholder="₹ 0" value="${emi && Number(emi.processingFee) ? Number(emi.processingFee) : ''}" ${locked} data-plain></label>
-                    </div>
-                    <div class="xp-due-chips"><span class="small muted">Months</span>${EMI_MONTHS.map(n => `<button type="button" class="date-chip" data-emi-months="${n}" ${locked}>${n}</button>`).join('')}</div>
-                    <div class="form-grid three">
                         <label class="field"><span>First EMI on</span><input name="emiFirst" type="date" value="${emi?.firstDueDate || ''}" ${locked}></label>
-                        <label class="field"><span>Last EMI <small class="muted">worked out</small></span><input name="emiLast" type="date" value="${emi?.endDate || ''}" title="Change it to set the months" ${locked}></label>
-                        <label class="field"><span>GST on interest <small class="muted">%</small></span><input name="emiGst" type="number" min="0" max="50" step="any" value="${emi ? (Number(emi.gstPercent) || '') : 18}" ${locked} data-plain></label>
+                        <label class="field" title="Worked out from the months. Change it to set the months"><span>Last EMI</span><input name="emiLast" type="date" value="${emi?.endDate || ''}" ${locked}></label>
+                        <div class="field emi-fee-gst" data-emi-fee-gst><span><label class="emi-fee-gst-on" title="Add GST on the processing fee"><input type="checkbox" name="emiFeeGstOn" ${emi ? (Number(emi.feeGstPercent) ? 'checked' : '') : 'checked'} ${locked}>GST on fee %</label></span>
+                            <input name="emiFeeGst" type="number" min="0" max="50" step="any" aria-label="GST on the processing fee, percent" value="${emi && Number(emi.feeGstPercent) ? Number(emi.feeGstPercent) : 18}" ${locked} data-plain></div>
+                        <label class="field emi-loan-only"><span>Lender</span><input name="emiLender" maxlength="100" value="${esc(emi?.lender || '')}" placeholder="e.g. Bajaj Finserv" data-plain></label>
                     </div>
-                    <div class="emi-fee-gst" data-emi-fee-gst>
-                        <label class="check-line"><input type="checkbox" name="emiFeeGstOn" ${emi ? (Number(emi.feeGstPercent) ? 'checked' : '') : 'checked'} ${locked}> Add GST on the processing fee</label>
-                        <label class="field"><span>GST on fee <small class="muted">%</small></span><input name="emiFeeGst" type="number" min="0" max="50" step="any" value="${emi && Number(emi.feeGstPercent) ? Number(emi.feeGstPercent) : 18}" ${locked} data-plain></label>
-                    </div>
-                    <div class="form-grid two">
-                        <label class="field emi-loan-only"><span>Lender</span><input name="emiLender" maxlength="100" value="${esc(emi?.lender || '')}" placeholder="e.g. Bajaj Finserv, HDB Financial" data-plain></label>
-                        <label class="check-line emi-auto"><input type="checkbox" name="emiAuto" ${emi ? (emi.autoPost ? 'checked' : '') : 'checked'}> <span data-emi-auto-label>Bill each EMI on the card by itself on its due date</span></label>
+                    <div class="emi-terms-foot">
+                        <div class="xp-due-chips">${EMI_MONTHS.map(n => `<button type="button" class="date-chip" data-emi-months="${n}" title="${n} months" ${locked}>${n}</button>`).join('')}<span class="small muted">months</span></div>
+                        <label class="check-line emi-auto"><input type="checkbox" name="emiAuto" ${emi ? (emi.autoPost ? 'checked' : '') : 'checked'}> <span data-emi-auto-label>Bill each EMI by itself when due</span></label>
                     </div>
                 </div>
                 <div data-emi-preview></div>
@@ -624,7 +620,7 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
         if (mode !== 'EMI') return;
         const kind = form.dataset.emiKind || 'CARD';
         form.classList.toggle('emi-loan', kind === 'LOAN');
-        form.querySelector('[data-emi-auto-label]').textContent = kind === 'CARD' ? 'Bill each EMI on the card by itself on its due date' : 'Pay each EMI by itself on its due date';
+        form.querySelector('[data-emi-auto-label]').textContent = kind === 'CARD' ? 'Bill each EMI by itself when due' : 'Pay each EMI by itself when due';
         form.querySelectorAll('[data-emi-months]').forEach(c => c.classList.toggle('selected', c.dataset.emiMonths === form.emiMonths.value));
         form.querySelector('[data-emi-fee-gst]').hidden = !(Number(form.emiFee.value) > 0);
         form.emiFeeGst.disabled = !form.emiFeeGstOn.checked || form.emiFeeGstOn.disabled;
@@ -635,10 +631,10 @@ function bind(form, { categories, budgets, payers, allPayers, claimList, history
     emiDefaults();
     updateEmi();
     form.addEventListener('click', e => {
-        const k = e.target.closest('[data-emi-kind]');
+        const k = e.target.closest('button[data-emi-kind]');   // the form has the attribute too
         if (k && !k.disabled) {
             form.dataset.emiKind = k.dataset.emiKind;
-            form.querySelectorAll('[data-emi-kind]').forEach(b => b.classList.toggle('selected', b === k));
+            form.querySelectorAll('button[data-emi-kind]').forEach(b => b.classList.toggle('selected', b === k));
             // a card EMI usually carries GST on its interest and books itself; a finance company's is paid by hand
             form.emiGst.value = k.dataset.emiKind === 'CARD' ? (form.emiGst.value || 18) : '';
             form.emiAuto.checked = k.dataset.emiKind === 'CARD';

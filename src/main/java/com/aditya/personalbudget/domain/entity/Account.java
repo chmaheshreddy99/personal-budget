@@ -187,6 +187,9 @@ public class Account implements TenantOwned {
     @Column(nullable = false)
     private Boolean active;
 
+    /** The day the account was closed (empty while it is open): a closed account keeps its history and takes no new entries. */
+    private LocalDate closedOn;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
@@ -200,6 +203,16 @@ public class Account implements TenantOwned {
 
     public boolean isEmiAccount() {
         return Boolean.TRUE.equals(emiAccount);
+    }
+
+    /**
+     * The contra of Payables for EMIs billed on a card and not yet paid. A book-keeping account: its entries stay in the
+     * journal and the trial balance, but people see it netted into Payables and never pick it.
+     */
+    public static final String EMI_CONTRA_NAME = "Less: EMI billed, awaiting card payment";
+
+    public boolean isEmiContra() {
+        return isEmiAccount() && EMI_CONTRA_NAME.equals(name);
     }
 
     public boolean isProjectBook() {

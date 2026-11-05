@@ -141,6 +141,26 @@ public class CounterpartyService {
             // natural-sign balance per item on both dates; the moves of the entries not made for an item
             Map<Long, BigDecimal[]> byClaim = new LinkedHashMap<>();
             List<Move> other = new ArrayList<>();
+            // Payables is shown net of the EMIs billed on a card (ReportService), and so is each plan's share of it
+            Account contra = DefaultChartOfAccounts.PAYABLES.equals(account.getCode())
+                    ? books.accounts().values().stream().filter(Account::isEmiContra).findFirst().orElse(null) : null;
+            if (contra != null) {
+                for (JournalLine l : lines.findByAccountId(contra.getId())) {
+                    JournalEntry e = entryById.get(l.getJournalEntryId());
+                    Long planId = planOf.apply(e);
+                    if (planId == null) {
+                        continue;
+                    }
+                    BigDecimal value = books.natural(contra.getId(), l.getDebit().subtract(l.getCredit()));
+                    BigDecimal[] v = byPlan.computeIfAbsent(planId, k -> new BigDecimal[] {Money.ZERO, Money.ZERO});
+                    if (!e.getEntryDate().isAfter(asOf)) {
+                        v[0] = v[0].add(value);
+                    }
+                    if (!e.getEntryDate().isAfter(compareDate)) {
+                        v[1] = v[1].add(value);
+                    }
+                }
+            }
             for (JournalLine l : lines.findByAccountId(account.getId())) {
                 JournalEntry e = entryById.get(l.getJournalEntryId());
                 if (e == null || e.getEntryDate().isAfter(asOf) && e.getEntryDate().isAfter(compareDate)) {
@@ -230,9 +250,11 @@ public class CounterpartyService {
                     .thenComparing(PartyBalance::amount, Comparator.reverseOrder()).thenComparing(PartyBalance::party)).toList();
             BigDecimal listed = parties.stream().map(PartyBalance::amount).reduce(Money.ZERO, BigDecimal::add);
             BigDecimal listedBefore = parties.stream().map(PartyBalance::previous).reduce(Money.ZERO, BigDecimal::add);
+            BigDecimal contraNow = contra == null ? Money.ZERO : now.getOrDefault(contra.getId(), Money.ZERO);
+            BigDecimal contraBefore = contra == null ? Money.ZERO : before.getOrDefault(contra.getId(), Money.ZERO);
             out.add(new Counterparties(account.getId(), account.getName(), payable,
-                    parties, Money.round(now.getOrDefault(account.getId(), Money.ZERO).subtract(listed)),
-                    Money.round(before.getOrDefault(account.getId(), Money.ZERO).subtract(listedBefore))));
+                    parties, Money.round(now.getOrDefault(account.getId(), Money.ZERO).add(contraNow).subtract(listed)),
+                    Money.round(before.getOrDefault(account.getId(), Money.ZERO).add(contraBefore).subtract(listedBefore))));
         }
         return out;
     }

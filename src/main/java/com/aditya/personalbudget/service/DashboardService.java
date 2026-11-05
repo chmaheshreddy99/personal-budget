@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 public class DashboardService {
 
     private final InsuranceService insurance;
+    private final AccountService accountService;
 
     private static final int UPCOMING_DAYS = 45;
 
@@ -49,8 +50,9 @@ public class DashboardService {
 
     public DashboardService(LedgerService ledger, ReportService reports, BudgetService budgets, ChitService chits,
                             RecurringService recurring, JournalEntryRepository entries,
-                            InsuranceService insurance) {
+                            InsuranceService insurance, AccountService accountService) {
         this.insurance = insurance;
+        this.accountService = accountService;
         this.ledger = ledger;
         this.reports = reports;
         this.budgets = budgets;
@@ -77,7 +79,7 @@ public class DashboardService {
                 breakdownByType(books, balances, AccountClass.LIABILITY),
                 topBudgets(month),
                 upcoming(today, books),
-                accountTiles(books, balances),
+                accountTiles(books),
                 ledger.toViews(entries.findByTenantId(UserContext.tenantId()).stream()
                         .sorted(JournalEntryRepository.NEWEST_FIRST).limit(8).toList()));
     }
@@ -144,11 +146,12 @@ public class DashboardService {
         Map<AccountType, BigDecimal> byType = new TreeMap<>();
         for (Account a : books.accountsOfClass(cls)) {
             BigDecimal value = balances.getOrDefault(a.getId(), Money.ZERO);
-            if (value.signum() > 0) {
+            if (value.signum() > 0 || a.isEmiContra()) {
                 byType.merge(a.getAccountType(), value, BigDecimal::add);
             }
         }
         return byType.entrySet().stream()
+                .filter(e -> e.getValue().signum() > 0)
                 .map(e -> new ValuePoint(e.getKey().getLabel(), e.getValue()))
                 .sorted(Comparator.comparing(ValuePoint::value).reversed())
                 .toList();
@@ -199,17 +202,19 @@ public class DashboardService {
         return items.stream().sorted(Comparator.comparing(UpcomingItem::date)).limit(12).toList();
     }
 
-    private List<AccountTile> accountTiles(LedgerSnapshot books, Map<Long, BigDecimal> balances) {
+    /** Each balance and card usage as the Accounts page has it: every entry counted, future-dated ones too. */
+    private List<AccountTile> accountTiles(LedgerSnapshot books) {
+        Map<Long, BigDecimal> balances = books.balancesAsOf(LocalDate.MAX);
+        Map<Long, BigDecimal> held = accountService.heldByEmis();   // what the limit still holds for EMIs not billed yet
         return books.accounts().values().stream()
                 .filter(a -> Boolean.TRUE.equals(a.getActive()))
                 .filter(a -> !a.isChitBook() && !a.isProjectBook() && (a.getAccountType().isLiquid() || a.getAccountType() == AccountType.CREDIT_CARD))
                 .sorted(Comparator.comparing(Account::getCode))
                 .map(a -> {
-                    BigDecimal balance = balances.getOrDefault(a.getId(), Money.ZERO);
-                    BigDecimal utilization = Money.isPositive(a.getCreditLimit())
-                            ? Money.percent(balance, a.getCreditLimit()) : null;
+                    BigDecimal balance = a.getBalance() != null ? a.getBalance() : balances.getOrDefault(a.getId(), Money.ZERO);
+                    BigDecimal emiHeld = held.getOrDefault(a.getId(), Money.ZERO);
                     return new AccountTile(a.getId(), a.getName(), a.getAccountType().getLabel(),
-                            a.getAccountType().name(), balance, utilization);
+                            a.getAccountType().name(), balance, AccountService.utilization(a, balance, emiHeld), a.getCreditLimit(), emiHeld);
                 })
                 .toList();
     }

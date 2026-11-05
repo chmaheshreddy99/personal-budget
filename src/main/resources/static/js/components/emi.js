@@ -82,9 +82,9 @@ export function emiPreviewHtml({ principal, rate, months, gst, fee, feeGst = 0, 
             ${num(fee) ? `<span title="${gstOnFee ? `${money(fee)} + GST ${money(gstOnFee)}` : 'Processing fee'}"><small>Fee${gstOnFee ? ' + GST' : ''}</small><b class="neg">${money(r2(num(fee) + gstOnFee))}</b></span>` : ''}
             <span class="total"><small>You pay</small><b>${money(r2(total))}</b></span>
         </div>
-        <div class="emi-prev-how">${icon('info')}<span>${card
+        <details class="emi-prev-how"><summary>${icon('info')}How it is booked</summary><span>${card
             ? `<b>${money(principal)}</b> is an expense on the card today, and is converted at once: it moves to Payables (as Credit Card EMI), while the bank keeps that much of the limit held. Each month the whole EMI is billed on the card, and you can change the amount to match the statement; when the card is paid, its principal comes off Payables, and the plan's share is nil after the last EMI.${gstOnFee || num(fee) ? ` The fee${gstOnFee ? ' and its GST go' : ' goes'} on the card today.` : ''}`
-            : `<b>${money(principal)}</b> is spent today and owed to the lender (an EMI loan account, hidden from the accounts list). Each EMI is paid from the account picked: principal off the loan, interest under Loan Interest.`}</span></div>
+            : `<b>${money(principal)}</b> is spent today and owed to the lender (an EMI loan account, hidden from the accounts list). Each EMI is paid from the account picked: principal off the loan, interest under Loan Interest.`}</span></details>
         <div class="emi-table scroll"><table><thead><tr><th>#</th><th>Due</th><th class="r">EMI</th><th class="r">Principal</th><th class="r">Interest${gstTotal ? ' + GST' : ''}</th><th class="r">${card ? 'Limit held after' : 'Owed after'}</th></tr></thead>
             <tbody>${rows.map(x => `<tr><td>${x.seq}</td><td>${x.dueDate ? date(x.dueDate) : ''}</td><td class="r"><b>${money(x.emi + x.gst)}</b></td>
                 <td class="r">${money(x.principal)}</td><td class="r muted">${money(r2(x.interest + x.gst))}</td><td class="r">${money(x.balanceAfter)}</td></tr>`).join('')}</tbody>
@@ -113,7 +113,7 @@ export function emiPanelHtml(p) {
     const next = p.next;
     const fact = (ic, text, title = '') => `<span class="xd-fact" ${title ? `title="${esc(title)}"` : ''}>${icon(ic)}${text}</span>`;
     const pct = p.progressPercent;
-    const nextAmt = next ? num(next.emi) + num(next.gst) : 0;
+    const nextAmt = next ? num(next.emi) + num(next.gst) - num(next.paidTowards) : 0;
     const converted = card && !!p.payableAccountId;
     const btn = (act, ic, label, cls = '', extra = '') => manage ? `<button class="btn xs ${cls}" data-emi="${act}" ${extra}>${icon(ic)}${label}</button>` : '';
     return `<div class="emi-panel">
@@ -178,13 +178,14 @@ export function emiPanelHtml(p) {
             <tbody>${p.installments.map(i => {
                 const [tone, label] = STATUS[i.status] || ['', i.status];
                 const isNext = next && i.id === next.id;
+                const partPaid = i.status === 'BILLED' && num(i.paidTowards) ? `<span class="badge aqua" title="Paid towards it by transfers into the card. It comes off Payables when the whole EMI is paid">${money(i.paidTowards)} paid</span>` : '';
                 const status = i.status === 'PAID' ? `<span class="badge good" title="${esc([i.entryNo, i.paymentEntryNo].filter(Boolean).join(' · '))}">${icon('check')}${card ? 'paid ' : ''}${shortDate(i.paidOn)}</span>`
                     : i.status === 'BILLED' ? `<span class="badge ${i.overdue ? 'critical' : 'warning'}" title="${esc(i.entryNo || 'Billed on the card')}">${icon(i.overdue ? 'alert' : 'receipt')}billed ${shortDate(i.billedOn)}</span>`
                     : i.overdue ? `<span class="badge critical">${icon('alert')}Overdue</span>` : `<span class="badge ${tone}">${label}</span>`;
                 return `<tr class="${i.status === 'PAID' ? 'emi-paid' : i.status === 'WAIVED' ? 'emi-waived' : i.overdue ? 'emi-late' : ''} ${isNext ? 'emi-next' : ''}">
                     <td>${i.seq}</td><td class="nowrap">${date(i.dueDate)}</td><td class="r"><b>${money(num(i.emi) + num(i.gst))}</b>${i.scheduledAmount != null ? `<span class="emi-edited" title="Changed to match the statement. The schedule said ${money(i.scheduledAmount)}">${icon('edit')}</span>` : ''}</td>
                     <td class="r">${money(i.principal)}</td><td class="r muted">${money(i.interest)}</td>${num(p.gstTotal) ? `<td class="r muted">${money(i.gst)}</td>` : ''}
-                    <td class="r">${money(i.balanceAfter)}</td><td class="nowrap">${status}</td>
+                    <td class="r">${money(i.balanceAfter)}</td><td class="nowrap">${status}${partPaid}</td>
                     <td class="r">${card && manage && active && i.status === 'BILLED' ? `<button class="btn xs ghost" data-emi="edit-bill" data-id="${i.id}" title="Change what was billed, to match the statement">${icon('edit')}Amount</button>` : ''}
                         ${isNext && manage && active ? `<button class="btn xs" data-emi="pay" data-count="1">${icon(card ? 'arrow-in' : 'check')}${card ? 'Pay into card' : 'Pay'}</button>` : ''}</td></tr>`;
             }).join('')}</tbody></table>
@@ -319,13 +320,13 @@ async function openPayDialog(p, count, onChanged) {
     const accounts = await fromAccounts(p);
     const card = p.kind === 'CARD';
     const rows = p.installments.filter(i => i.status === 'DUE' || (card && i.status === 'BILLED')).slice(0, count);
-    const total = rows.reduce((s, i) => s + num(i.emi) + num(i.gst), 0);
+    const total = rows.reduce((s, i) => s + num(i.emi) + num(i.gst) - num(i.paidTowards), 0);
     const one = rows.length === 1;
     const lastBank = accounts.find(a => a.accountType === 'BANK')?.id;
     openModal({
         title: one ? `${card ? 'Pay EMI' : 'Pay EMI'} ${rows[0].seq} of ${p.months}${card ? ' into the card' : ''}` : `Pay ${rows.length} EMIs${card ? ' into the card' : ''}`, sub: p.narration, iconName: card ? 'card' : 'calendar',
         body: `<form class="form-grid two" onsubmit="return false">
-            <div class="span-2 post-summary"><div class="row"><b>${rows.map(i => `EMI ${i.seq}${i.status === 'BILLED' ? ' (billed)' : ''}`).join(', ')}</b><span class="spacer"></span><b>${money(total)}</b></div>
+            <div class="span-2 post-summary"><div class="row"><b>${rows.map(i => `EMI ${i.seq}${i.status === 'BILLED' ? (num(i.paidTowards) ? ` (${money(i.paidTowards)} paid already)` : ' (billed)') : ''}`).join(', ')}</b><span class="spacer"></span><b>${money(total)}</b></div>
                 <div class="small muted">${card
                     ? p.payableAccountId ? `Billed in full on ${esc(p.payAccountName)} where not billed yet, then paid into it from the bank; ${money(rows.reduce((s, i) => s + num(i.principal), 0))} principal comes off ${esc(p.payableAccountName)}.`
                     : `Billed on ${esc(p.payAccountName)} (interest${rows.some(i => num(i.gst)) ? ' and GST' : ''} ${money(rows.filter(i => i.status === 'DUE').reduce((s, i) => s + num(i.interest) + num(i.gst), 0))} added where not billed yet), then paid into the card: frees ${money(rows.reduce((s, i) => s + num(i.principal), 0))} of its limit.`
@@ -352,7 +353,7 @@ async function openPayDialog(p, count, onChanged) {
                 if (billOnly) { toast(`EMI ${rows[0].seq} billed · ${money(num(f.total.value))}`); onChanged?.(); return; }
             }
             await api.post(`/expenses/emis/${p.id}/pay`, { count: rows.length, date: own ? null : f.date.value || null, accountId: billOnly ? null : Number(f.accountId.value) || null, billOnly });
-            toast(billOnly ? `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} billed on ${p.payAccountName}` : `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} paid · ${money(card && one ? num(f.total.value) : total)}`);
+            toast(billOnly ? `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} billed on ${p.payAccountName}` : `${one ? `EMI ${rows[0].seq}` : `${rows.length} EMIs`} paid · ${money(card && one ? num(f.total.value) - num(rows[0].paidTowards) : total)}`);
             onChanged?.();
         } }],
     });

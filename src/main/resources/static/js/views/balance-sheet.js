@@ -442,7 +442,7 @@ function personHtml(c, p, total) {
     const key = `${c.accountId}|${p.party}`;
     const open = view.openPeople.has(key);
     const kinds = [...new Set(p.items.filter(i => Number(i.amount) !== 0).map(i => (KIND[i.kind] || [])[2] || i.kindLabel))];
-    const what = p.party === CARD_EMI ? 'still to repay · comes off as each EMI is paid' : p.named ? kinds.join(' · ') : (c.payable ? 'expenses paid later, transfers' : 'entries') + ' · payments settle the oldest first';
+    const what = p.party === CARD_EMI ? 'not billed yet · what is billed is on the card' : p.named ? kinds.join(' · ') : (c.payable ? 'expenses paid later, transfers' : 'entries') + ' · payments settle the oldest first';
     const share = (Math.abs(Number(p.amount)) / total) * 100;
     const settledNow = !owing(p);
     return `

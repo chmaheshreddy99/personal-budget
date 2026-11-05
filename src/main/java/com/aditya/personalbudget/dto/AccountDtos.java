@@ -115,7 +115,26 @@ public final class AccountDtos {
             /* credit cards with a billing cycle: the latest bill and the cycle still open */
             CardBillSummary cardBill,
             /* a credit card: the limit held by converted EMIs, the principal not billed yet (left out of availableCredit) */
-            BigDecimal emiHeld) {
+            BigDecimal emiHeld,
+            /* the day it was closed; empty while open, or for one closed before the date was kept */
+            LocalDate closedOn,
+            /* the book-keeping contra of Payables (see Account.isEmiContra): counted in totals, not listed or offered */
+            boolean emiContra) {
+    }
+
+    /**
+     * Closes an account on {@code date}. What it still holds or owes is moved to {@code moveToAccountId} by a transfer on
+     * that date, so it closes at nil; a balance with no account to move it to is refused.
+     */
+    public record CloseRequest(@NotNull LocalDate date, Long moveToAccountId) {
+    }
+
+    /**
+     * Whether an account can be closed, for the dialog. {@code blockers} must be sorted out first; {@code notes} are worth
+     * knowing but do not stop it. {@code lastActivity} is the earliest date it can close on.
+     */
+    public record CloseCheck(Long accountId, String accountName, BigDecimal balance, boolean debt, LocalDate lastActivity,
+                             List<String> blockers, List<String> notes) {
     }
 
     /** Where a credit card's billing stands, for its row and banner (the full list: {@code /accounts/{id}/card-bills}). */

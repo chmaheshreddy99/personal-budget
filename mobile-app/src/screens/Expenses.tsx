@@ -6,14 +6,15 @@
  * only it). Each row is short; a tap opens it to every detail, its evidence (add a photo or a file) and, while it
  * waits to be synced, to change or delete it. Search finds an expense by what it was, the shop, category, account or an
  * item on it. A bill of several items is one row with its total; opened, it shows how the bill splits between categories
- * and a table of its items (item, category, amount) ending with the item count and the total. With a category picked, such a row shows what the bill spent in that category.
+ * and a table of its items (item, category, amount) ending with the item count and the total. Something bought on a card
+ * EMI is one row too: opened, its purchase, fee, GST on the fee and the conversion to Payables, together. With a category picked, such a row shows what the bill spent in that category.
  */
 import React, { useMemo, useState } from 'react';
 import { LayoutAnimation, Platform, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, UIManager, View } from 'react-native';
-import { AlertTriangle, ArrowDownLeft, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock, HandCoins, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
+import { AlertTriangle, ArrowDownLeft, ArrowLeftRight, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock, HandCoins, Hourglass, Paperclip, Pencil, Receipt, Search, Smartphone, Trash2, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EvidenceTarget, useApp } from '../state';
-import { ExpenseItem, LocalExpense, hasFeature, itemName, itemsByCategory, joinExpenseLines, mobileOn } from '../data';
+import { Emi, EmiPart, ExpenseItem, LocalExpense, emiParts, hasFeature, itemName, itemsByCategory, joinExpenseLines, mobileOn } from '../data';
 import { date, dayLabel, isoDate, money, moneyShort } from '../format';
 import { Button, Card, Chip, Empty, GradientPanel, IconBubble, Pill, categoryLook } from '../ui';
 import { EvidenceStrip } from '../evidence';
@@ -34,6 +35,9 @@ type Row = {
   items?: ExpenseItem[];
   /** with a category picked: what of this row is in it */
   inCategory?: number;
+  /** bought on a card EMI: the plan, and what goes together under this row */
+  emi?: Emi;
+  parts?: EmiPart[];
 };
 
 /** "Groceries, Household +2" */
@@ -98,9 +102,13 @@ function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: 
         category: items ? categoriesOf(items) : e.categoryName, amount: e.amount, reference: e.reference || null, notes: e.notes, entryNo: e.entryNo, entryId: e.entryId, local: e, status: e.status, items };
     });
     const synced = new Set(app.queue.map(e => e.entryNo).filter(Boolean));
-    const server: Row[] = joinExpenseLines((app.snapshot?.expenses || []).filter(x => !synced.has(x.entryNo) && x.status !== 'REVERSED')).map(({ first: x, amount, items }) => ({
-      key: `s${x.entryId}`, date: x.date, title: x.narration, party: x.party, paidFrom: x.paidFrom, category: items ? categoriesOf(items) : x.categoryName, amount,
-      reference: x.reference, entryNo: x.entryNo, entryId: x.entryId, items }));
+    const planOf = new Map((app.snapshot?.emis || []).filter(e => e.purchaseEntryId && e.conversionEntryNo).map(e => [e.purchaseEntryId as number, e]));
+    const server: Row[] = joinExpenseLines((app.snapshot?.expenses || []).filter(x => !synced.has(x.entryNo) && x.status !== 'REVERSED')).map(({ first: x, lines, amount, items }) => {
+      const emi = planOf.get(x.entryId);
+      return { key: `s${x.entryId}`, date: x.date, title: emi ? emi.narration : x.narration, party: x.party, paidFrom: x.paidFrom,
+        category: emi?.categoryName || (items ? categoriesOf(items) : x.categoryName), amount,
+        reference: x.reference, entryNo: x.entryNo, entryId: x.entryId, items, emi, parts: emi ? emiParts(lines, emi) : undefined };
+    });
     let all = [...local, ...server];
     if (filter === 'phone') all = local;
     if (filter === 'month') all = all.filter(r => r.date.startsWith(month));
@@ -217,7 +225,7 @@ function ExpenseList({ header, onEdit }: { header: React.ReactNode; onEdit: (e: 
 
 function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onToggle: () => void; onEdit: (e: LocalExpense) => void }) {
   const app = useApp();
-  const look = r.items ? { Icon: Receipt, fg: colors.ocean, bg: colors.sunken } : categoryLook(r.category);
+  const look = r.emi ? { Icon: CalendarClock, fg: colors.violet, bg: colors.violetSoft } : r.items ? { Icon: Receipt, fg: colors.ocean, bg: colors.sunken } : categoryLook(r.category);
   const stt = r.status ? STATUS[r.status] : null;
   const editable = !!r.local && (r.status === 'QUEUED' || r.status === 'FAILED');
   const target: EvidenceTarget = r.local && !r.local.entryId && !r.local.pendingId ? { clientId: r.local.clientId, label: r.title }
@@ -231,7 +239,7 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
         <IconBubble Icon={look.Icon} fg={look.fg} bg={look.bg} size={38} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={st.title} numberOfLines={open ? 3 : 1}>{r.title}</Text>
-          <Text style={st.sub} numberOfLines={1}>{[r.items ? `${r.items.length} items` : null, r.category, r.items && r.title === r.party ? null : r.party].filter(Boolean).join(' · ')}</Text>
+          <Text style={st.sub} numberOfLines={1}>{[r.emi ? `${r.emi.months} × ${moneyShort(r.emi.emiAmount)}` : r.items ? `${r.items.length} items` : null, r.category, r.items && r.title === r.party ? null : r.party].filter(Boolean).join(' · ')}</Text>
         </View>
         <View style={{ alignItems: 'flex-end', gap: 3 }}>
           <Text style={st.amount}>−{money(r.inCategory ?? r.amount)}</Text>
@@ -246,10 +254,10 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
       {open ? (
         <View style={st.more}>
           {stt ? <Pill text={r.status === 'FAILED' && r.local?.message ? `Not accepted: ${r.local.message}` : stt[0]} fg={stt[1]} bg={stt[2]} Icon={stt[3]} /> : null}
-          {r.items ? <BillItems items={r.items} total={r.amount} /> : null}
+          {r.parts && r.emi ? <EmiParts parts={r.parts} emi={r.emi} spent={r.amount} /> : r.items ? <BillItems items={r.items} total={r.amount} /> : null}
           <View style={st.grid}>
             {detail('Date', date(r.date))}
-            {r.items ? null : detail('Category', r.category)}
+            {r.items && !r.emi ? null : detail('Category', r.category)}
             {detail('Paid from', r.paidFrom)}
             {detail('Paid to', r.party)}
             {detail('Reference', r.reference)}
@@ -271,6 +279,34 @@ function ExpenseRow({ r, open, onToggle, onEdit }: { r: Row; open: boolean; onTo
         </View>
       ) : null}
     </Card>
+  );
+}
+
+/** Something bought on a card EMI, opened: what it cost, then what moved it off the card, and what is still owed. */
+function EmiParts({ parts, emi, spent }: { parts: EmiPart[]; emi: Emi; spent: number }) {
+  return (
+    <View style={st.bill}>
+      <View style={st.billHeadRow}>
+        <Text style={[st.billHeadCell, st.colItem]}>Part</Text>
+        <Text style={[st.billHeadCell, st.colCat]}>Where</Text>
+        <Text style={[st.billHeadCell, st.colAmt]}>Amount</Text>
+      </View>
+      {parts.map(p => (
+        <View key={p.key} style={st.billRow}>
+          <View style={[st.colItem, st.billCat]}>
+            {p.credit ? <ArrowLeftRight color={colors.green} size={13} style={{ marginTop: 2 }} /> : null}
+            <Text style={[st.billName, { flex: 1 }]} numberOfLines={2}>{p.label}</Text>
+          </View>
+          <Text style={[st.colCat, st.billCatText]} numberOfLines={2}>{p.detail}</Text>
+          <Text style={[st.colAmt, st.billAmt, p.credit && { color: colors.green }]}>{p.credit ? '+' : ''}{money(p.amount)}</Text>
+        </View>
+      ))}
+      <View style={st.billFoot}>
+        <Text style={st.billCount}>Spent {money(spent)}</Text>
+        {emi.payableBalance != null ? <Text style={st.billCount}>Still on {emi.payableAccountName || 'Payables'} {money(emi.payableBalance)}</Text> : null}
+      </View>
+      <Text style={st.sub}>The conversion is a credit on the card, not a refund: what was spent stays the same. Bill or pay it under EMIs.</Text>
+    </View>
   );
 }
 

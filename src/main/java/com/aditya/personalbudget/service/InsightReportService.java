@@ -182,8 +182,14 @@ public class InsightReportService {
     // ================================================================== accounts
 
     private List<AccountInsight> accounts(LedgerSnapshot books, LocalDate from, LocalDate to) {
-        Map<Long, BigDecimal> opening = books.balancesAsOf(from.minusDays(1));
-        Map<Long, BigDecimal> closing = books.balancesAsOf(to);
+        Map<Long, BigDecimal> opening = new HashMap<>(books.balancesAsOf(from.minusDays(1)));
+        Map<Long, BigDecimal> closing = new HashMap<>(books.balancesAsOf(to));
+        // the contra of Payables is told as part of it
+        books.accounts().values().stream().filter(Account::isEmiContra).findFirst().ifPresent(contra -> books.accounts().values().stream()
+                .filter(a -> DefaultChartOfAccounts.PAYABLES.equals(a.getCode())).findFirst().ifPresent(payables -> {
+                    opening.merge(payables.getId(), opening.getOrDefault(contra.getId(), Money.ZERO), BigDecimal::add);
+                    closing.merge(payables.getId(), closing.getOrDefault(contra.getId(), Money.ZERO), BigDecimal::add);
+                }));
         Map<Long, BigDecimal> in = new HashMap<>();
         Map<Long, BigDecimal> out = new HashMap<>();
         Map<Long, Integer> counts = new HashMap<>();
@@ -206,6 +212,7 @@ public class InsightReportService {
         }
         return books.accounts().values().stream()
                 .filter(a -> a.getAccountClass() == AccountClass.ASSET || a.getAccountClass() == AccountClass.LIABILITY)
+                .filter(a -> !a.isEmiContra())
                 .filter(a -> Boolean.TRUE.equals(a.getActive()) || closing.getOrDefault(a.getId(), Money.ZERO).signum() != 0)
                 .sorted(Comparator.comparing(Account::getCode))
                 .map(a -> {

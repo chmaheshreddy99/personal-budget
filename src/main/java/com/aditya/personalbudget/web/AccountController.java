@@ -31,10 +31,31 @@ public class AccountController {
 
     private final AccountService accounts;
     private final BankInterestService interest;
+    private final com.aditya.personalbudget.service.AccountClosureService closure;
 
-    public AccountController(AccountService accounts, BankInterestService interest) {
+    public AccountController(AccountService accounts, BankInterestService interest, com.aditya.personalbudget.service.AccountClosureService closure) {
         this.accounts = accounts;
         this.interest = interest;
+        this.closure = closure;
+    }
+
+    @GetMapping("/{id}/close-check")
+    @RequiresPermission(Permission.VIEW)
+    public com.aditya.personalbudget.dto.AccountDtos.CloseCheck closeCheck(@PathVariable Long id) {
+        return closure.check(id);
+    }
+
+    @PostMapping("/{id}/close")
+    @RequiresPermission(Permission.MANAGE_ACCOUNTS)
+    public AccountView close(@PathVariable Long id, @Valid @RequestBody com.aditya.personalbudget.dto.AccountDtos.CloseRequest request) {
+        closure.close(id, request);
+        return accounts.get(id);
+    }
+
+    @PostMapping("/{id}/reopen")
+    @RequiresPermission(Permission.MANAGE_ACCOUNTS)
+    public AccountView reopen(@PathVariable Long id) {
+        return closure.reopen(id);
     }
 
     @GetMapping

@@ -1,5 +1,5 @@
 /** A bill of several items is one expense in the Expenses tab; the phone follows the order arranged on the web. */
-import { arranged, itemsByCategory, joinExpenseLines, ServerExpense } from '../src/data';
+import { arranged, Emi, emiLeft, emiParts, emiWhole, interestForTotal, itemsByCategory, joinExpenseLines, ServerExpense } from '../src/data';
 
 const line = (entryId: number, lineId: number, categoryName: string, amount: number, memo?: string | null): ServerExpense => ({
   entryId, entryNo: `JV-${entryId}`, date: '2026-11-01', narration: 'Fresh Mart', party: 'Fresh Mart', reference: null, categoryId: lineId, categoryName, amount,
@@ -40,6 +40,31 @@ describe('a bill by category', () => {
     const groups = itemsByCategory(bill.items!);
     expect(groups.map(g => [g.category, g.amount, g.share])).toEqual([['Groceries', 75, 0.75], ['Household', 25, 0.25]]);
     expect(groups[0].items.map(i => i.name)).toEqual(['Rice', 'Dal']);
+  });
+});
+
+describe('something bought on EMI', () => {
+  const emi = { id: 3, principal: 60000, payableAccountName: 'Payables' } as Emi;
+  it('shows the purchase, its fee, the GST and the conversion in that order, whatever order the lines came in', () => {
+    const lines = [line(7, 2, 'Loan Interest', 999, 'EMI processing fee'), line(7, 3, 'Loan Interest', 179.82, 'GST on the processing fee'), line(7, 1, 'Gadgets', 60000, null)];
+    const parts = emiParts(lines, emi);
+    expect(parts.map(p => p.label)).toEqual(['Purchase', 'Processing fee', 'GST on the fee', 'Converted into EMI']);
+    expect(parts.map(p => p.detail)).toEqual(['Gadgets', 'Loan Interest', 'Loan Interest', 'To Payables']);
+    expect(parts[3]).toMatchObject({ amount: 60000, credit: true });
+    expect(new Set(parts.map(p => p.key)).size).toBe(4);
+  });
+  it('shows notes on a purchase as a purchase', () => {
+    expect(emiParts([line(7, 1, 'Gadgets', 60000, 'for the office')], emi)[0].label).toBe('Purchase');
+  });
+  it('knows what an EMI comes to, and what part payments leave', () => {
+    const i = { seq: 1, dueDate: '2026-12-04', emi: 10352.9, gst: 108, status: 'BILLED', overdue: false, paidOn: null, paidTowards: 4000 };
+    expect(emiWhole(i)).toBe(10460.9);
+    expect(emiLeft(i)).toBe(6460.9);
+    expect(emiWhole({ ...i, gst: undefined })).toBe(10352.9);   // a snapshot from an older server
+  });
+  it('lets the interest take a change in the statement total', () => {
+    expect(interestForTotal(10455.68, 9850.43, 90.44)).toBe(514.81);
+    expect(interestForTotal(100, 9850.43, 90.44)).toBe(0);
   });
 });
 

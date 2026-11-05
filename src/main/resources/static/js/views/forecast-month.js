@@ -356,27 +356,26 @@ export function openMonthTable({ cols, from, to, preset = null }, root) {
                 const { sub, html } = shown.table(m);
                 const count = end - start + 1;
                 const nameOfRange = count === 1 ? monthLabel(months[start]) : `${monthLabel(months[start])} – ${monthLabel(months[end])}`;
-                part('[data-modal-title]').textContent = count > 1 && shown.cols === 'cash' ? 'Cash' : shown.title;
+                part('[data-modal-title]').innerHTML = `${esc(count > 1 && shown.cols === 'cash' ? 'Cash' : shown.title)}${sub ? `<small class="fm-titlesub">${esc(sub)}</small>` : ''}`;
                 part('.modal-icon').innerHTML = icon(shown.iconName);
                 const chip = r => `<button type="button" class="seg-chip ${range === r.key ? 'active' : ''}" data-fm-range="${r.key}" ${r.months.length ? '' : 'disabled'} title="${esc(r.months.length ? r.title || r.label : `${r.label} is outside this forecast`)}">${r.label}</button>`;
                 const quick = ranges.filter(r => r.quick);
                 const rest = ranges.filter(r => !r.quick);
                 const hiddenActive = !more && rest.find(r => r.key === range);
                 part('.fm-maxnav').innerHTML = `
-                    <div class="fm-maxline">
+                    <div class="fm-maxline fm-maxtop">
                         <span class="seg-chips sm">${CARDS.map(c => `<button type="button" class="seg-chip ${c === shown ? 'active' : ''}" data-fm-tab="${c.cols}">${c.short}</button>`).join('')}</span>
-                        <span class="seg-chips sm fm-maxranges">${quick.map(chip).join('')}${hiddenActive ? chip(hiddenActive) : ''}${more ? rest.map(chip).join('') : ''}
-                            <button type="button" class="seg-chip" data-fm-more title="${more ? 'Fewer ranges' : 'More ranges'}">${more ? '‹' : '⋯'}</button>
-                            <button type="button" class="seg-chip ${custom ? 'active' : ''}" data-fm-custom title="Pick the months">${icon('calendar')}</button></span>
-                    </div>
-                    <div class="fm-maxline fm-maxwhen">
                         <span class="fm-maxmonths"><button type="button" class="btn sm icon" data-fm-step="-1" ${start ? '' : 'disabled'} title="Earlier">${icon('chevron-left')}</button>
                             <b>${nameOfRange}</b>
                             <button type="button" class="btn sm icon" data-fm-step="1" ${end < months.length - 1 ? '' : 'disabled'} title="Later">${icon('chevron-right')}</button>
                             ${count > 1 ? `<small>${count} months</small>` : ''}</span>
+                        <span class="seg-chips sm fm-maxranges">${quick.map(chip).join('')}${hiddenActive ? chip(hiddenActive) : ''}${more ? rest.map(chip).join('') : ''}
+                            <button type="button" class="seg-chip" data-fm-more title="${more ? 'Fewer ranges' : 'More ranges'}">${more ? '‹' : '⋯'}</button>
+                            <button type="button" class="seg-chip ${custom ? 'active' : ''}" data-fm-custom title="Pick the months">${icon('calendar')}</button></span>
+                    </div>
+                    ${custom ? `<div class="fm-maxline fm-maxwhen">
                         ${custom ? `<span class="pc-custom"><input type="month" data-fm-from value="${months[start]}" min="${months[0]}" max="${months[months.length - 1]}"><span>–</span><input type="month" data-fm-to value="${months[end]}" min="${months[0]}" max="${months[months.length - 1]}"></span>` : ''}
-                        <small class="fm-maxsub">${sub}</small>
-                    </div>`;
+                    </div>` : ''}`;
                 part('.fm-maxbody').innerHTML = html;
                 part('.fm-maxnote').innerHTML = shown.note ? shown.note() : '';
                 setQuery({ card: shown.cols, from: months[start], to: count > 1 ? months[end] : null, range: custom ? 'custom' : range });

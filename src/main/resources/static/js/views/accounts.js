@@ -116,6 +116,7 @@ export async function render(container, params, isCurrent) {
     const [everything] = await Promise.all([loadAccounts(true, { all: true }), loadOrders()]);
     if (!isCurrent()) return;
     if (focusAccount && everything.some(a => a.id === focusAccount && !a.active)) view.closed = true;   // a closed account still opens
+    view.contraOpen = everything.find(a => a.emiContra && a.id === focusAccount)?.id ?? null;   // never listed, but the trial balance links to it
     // the hosted-chit book (members' money, Host a Chit) has its own page: only its net counts here, in net worth
     // the hosted-chit book and the construction book have their own pages
     const accounts = everything.filter(a => !a.chitBook && !a.projectBook);
@@ -138,7 +139,7 @@ export async function render(container, params, isCurrent) {
     const bucket = name => of('ASSET').filter(a => a.bucket === name).reduce((s, a) => s + Number(a.balance), 0);
     const liquid = bucket('Liquid money');
     const invested = bucket('Investments') + bucket('Chits') + bucket('Gold & silver');
-    const cards = accounts.filter(a => a.accountType === 'CREDIT_CARD' && a.creditLimit);
+    const cards = accounts.filter(a => a.accountType === 'CREDIT_CARD' && a.creditLimit && a.active);   // the same cards as the dashboard's Card usage
     const cardLimit = cards.reduce((s, a) => s + Number(a.creditLimit), 0);
     const cardUsed = cards.reduce((s, a) => s + Math.max(0, Number(a.balance)) + Number(a.emiHeld || 0), 0);
     const maturing = accounts.filter(a => a.maturityDate && a.daysToMaturity >= 0 && a.daysToMaturity <= 90);
@@ -224,7 +225,7 @@ export async function render(container, params, isCurrent) {
                     </div>
                     <div class="class-filter" id="class-filter">${[{ value: 'ALL', label: 'All' }, ...CLASS_TABS].map(t =>
                         `<button class="cf-chip ${view.tab === t.value && !view.emi ? 'active' : ''}" data-tab="${t.value}">${t.value === 'ALL' ? 'All' : t.label}<i>${t.value === 'ALL' ? accounts.filter(a => LISTED.has(a.accountClass) && !a.emiAccount && (view.closed || a.active)).length : of(t.value).filter(a => !a.emiAccount && (view.closed || a.active)).length}</i></button>`).join('')}
-                        ${accounts.some(a => a.emiAccount) ? `<button class="cf-chip ${view.emi ? 'active' : ''}" data-emi-accounts title="What is still owed on things bought on a loan EMI (managed in Expenses › EMIs); kept out of the list otherwise">${icon('calendar')}EMI<i>${accounts.filter(a => a.emiAccount && (view.closed || a.active)).length}</i></button>` : ''}
+                        ${accounts.some(a => a.emiAccount && !a.emiContra) ? `<button class="cf-chip ${view.emi ? 'active' : ''}" data-emi-accounts title="What is still owed on things bought on a loan EMI (managed in Expenses › EMIs); kept out of the list otherwise">${icon('calendar')}EMI<i>${accounts.filter(a => a.emiAccount && !a.emiContra && (view.closed || a.active)).length}</i></button>` : ''}
                         ${accounts.some(a => !a.active && LISTED.has(a.accountClass)) ? `<button class="cf-chip ${view.closed ? 'active' : ''}" data-closed-accounts title="Closed (inactive) accounts are left out of the list; show them too">${icon('lock')}Closed<i>${accounts.filter(a => !a.active && LISTED.has(a.accountClass)).length}</i></button>` : ''}
                         <label class="micro-toggle" title="Group the list by assets / liabilities and account type"><input type="checkbox" id="acct-grouped" ${listPrefs.grouped ? 'checked' : ''}>${icon('layers')}</label>
                         <span id="acct-arrange">${arrangeLockHtml()}</span></div>
@@ -249,7 +250,7 @@ export async function render(container, params, isCurrent) {
     const groupedOrder = list => ranked('accounts', list).sort((a, b) => ORDER.indexOf(a.accountClass) - ORDER.indexOf(b.accountClass));
     const visible = () => {
         const term = view.search.toLowerCase();
-        return (listPrefs.grouped ? groupedOrder : plainOrder)(accounts.filter(a => LISTED.has(a.accountClass) && (view.closed || a.active) && (view.emi ? a.emiAccount : !a.emiAccount && (view.tab === 'ALL' || a.accountClass === view.tab))
+        return (listPrefs.grouped ? groupedOrder : plainOrder)(accounts.filter(a => LISTED.has(a.accountClass) && (view.closed || a.active) && (a.id === view.contraOpen || view.emi ? a.id === view.contraOpen || a.emiAccount && !a.emiContra : !a.emiAccount && (view.tab === 'ALL' || a.accountClass === view.tab))
             && (!term || [a.name, a.institution, a.code, a.typeLabel, a.accountNumber].some(v => v && v.toLowerCase().includes(term)))));
     };
     const drawList = () => {
@@ -559,11 +560,15 @@ async function drawDetail(target, account, reload, all = []) {
     // every journal entry of the open items: the money given, payments so far and posted interest
     const openEntries = new Set(openClaims.flatMap(c => [c.journalEntryId, ...c.repayments.map(r => r.journalEntryId), ...c.postings.map(x => x.journalEntryId)]).filter(Boolean));
     const openFrom = openClaims.reduce((m, c) => (c.startDate < m ? c.startDate : m), view.from);
-    const actions = quickActions(account).map(([act, iconName, label, title]) =>
+    const closable = can('MANAGE_ACCOUNTS') && !account.systemAccount && !account.emiAccount && ['ASSET', 'LIABILITY'].includes(account.accountClass);
+    const actions = (account.active ? quickActions(account) : []).map(([act, iconName, label, title]) =>
         `<button class="btn sm on-dark" data-act="${act}" title="${esc(title)}">${icon(iconName)}${label}</button>`).join('')
-        + (can('MANAGE_ACCOUNTS') ? `<button class="btn sm on-dark icon" data-act="edit" title="Edit account">${icon('edit')}</button>` : '');
+        + (can('MANAGE_ACCOUNTS') ? `<button class="btn sm on-dark icon" data-act="edit" title="Edit account">${icon('edit')}</button>` : '')
+        + (closable ? (account.active ? `<button class="btn sm on-dark icon" data-act="close" title="Close this account: it ends at nil, keeps its history and takes no new entries">${icon('lock')}</button>`
+            : `<button class="btn sm on-dark" data-act="reopen" title="Open it again: it takes entries as before">${icon('unlock')}Re-open</button>`) : '');
     const meta = [account.institution, account.typeLabel, account.code].filter(Boolean).filter((v, i, list) => list.indexOf(v) === i);
     const details = accountDetailsHtml(account);
+    const billedOnCards = account.code === '2000' ? Math.abs(Number(all.find(a => a.emiContra)?.balance || 0)) : 0;   // Payables
 
     target.innerHTML = `
         <section class="panel p-account-head">
@@ -572,9 +577,10 @@ async function drawDetail(target, account, reload, all = []) {
                 <div class="ab-id">
                     <div class="ab-name">${esc(account.name)}
                         ${account.systemAccount ? `<span class="hero-badge">${icon('lock')}System</span>` : ''}
-                        ${account.active ? '' : '<span class="hero-badge">Inactive</span>'}</div>
+                        ${account.active ? '' : `<span class="hero-badge">${icon('lock')}Closed${account.closedOn ? ` ${shortDate(account.closedOn)}` : ''}</span>`}</div>
                     <div class="ab-meta">${meta.map(esc).join('<i>·</i>')}</div>
                     ${account.description ? `<div class="ab-desc" title="${esc(account.description)}">${icon('info')}<span>${esc(account.description)}</span></div>` : ''}
+                    ${billedOnCards ? `<div class="ab-desc" title="Already on your card bills, so the balance sheet and net worth count it once">${icon('card')}<span>${money(billedOnCards)} of this is billed on your cards, and comes off when the card is paid</span></div>` : ''}
                 </div>
                 ${details}
                 <div class="ab-bal">
@@ -637,6 +643,14 @@ async function drawDetail(target, account, reload, all = []) {
             lend: () => openExpenseDialog({ mode: 'LENT', onSaved: reload }),
             owe: () => openDebtDialog({ payableAccountId: id, onSaved: reload }),
             emi: () => { location.hash = '#/expenses/emi'; },
+            close: () => openCloseAccount(account, all, reload),
+            reopen: async () => {
+                try {
+                    await api.post(`/accounts/${id}/reopen`);
+                    toast(`${account.name} is open again`);
+                    reload();
+                } catch (err) { toast(err.message, 'error'); }
+            },
         })[b.dataset.act]?.();
     });
 
@@ -1050,7 +1064,7 @@ export function openAccountForm(account, onSaved, opts = {}) {
         actions.push({
             label: 'Delete', kind: 'danger', iconName: 'trash', left: true,
             onClick: async () => {
-                if (!await confirmDialog(`Delete account "${account.name}"? Accounts with transactions can only be deactivated.`)) return true;
+                if (!await confirmDialog(`Delete account "${account.name}"? An account with transactions can only be closed.`)) return true;
                 await api.del(`/accounts/${account.id}`);
                 toast('Account deleted');
                 onSaved?.(account);
@@ -1063,7 +1077,7 @@ export function openAccountForm(account, onSaved, opts = {}) {
         onClick: async (m) => {
             const form = m.el.querySelector('form');
             if (!form.reportValidity()) return true;
-            const data = { ...readForm(form), version: account?.version ?? null };
+            const data = { ...readForm(form), active: a.active, version: account?.version ?? null };
             const saved = account ? await api.put(`/accounts/${account.id}`, data) : await api.post('/accounts', data);
             toast(`Account "${saved.name}" saved`);
             onSaved?.(saved);
@@ -1094,7 +1108,6 @@ export function openAccountForm(account, onSaved, opts = {}) {
             ${field({ label: 'Maturity / end date', name: 'maturityDate', type: 'date', value: a.maturityDate })}
             ${field({ label: 'Quantity (g / units)', name: 'quantity', type: 'number', value: a.quantity, hint: 'For gold, silver, shares…' })}
             ${field({ label: 'Description', name: 'description', value: a.description, span: 'span-2' })}
-            ${field({ label: 'Active', name: 'active', type: 'checkbox', value: a.active })}
             ${private_ ? (['BANK', 'WALLET', 'CREDIT_CARD'].includes(account.accountType) ? `<p class="hc-note span-3">${icon('lock')}<span>The account number and bank details stay as they are: only an admin can see or change them.</span></p>` : '') : `<div class="acc-bank-head span-3" data-bank>${icon('bank')}<b>Bank details</b><small>for receiving money: chit members pay into these (UPI ID, or account number and IFSC)</small></div>
             ${field({ label: 'Account holder name', name: 'holderName', value: a.holderName, placeholder: 'As printed on the passbook', attrs: 'maxlength="100" data-bank', span: 'acc-bank' })}
             ${field({ label: 'IFSC', name: 'ifsc', value: a.ifsc, placeholder: 'e.g. ICIC0001234', attrs: 'maxlength="11" pattern="[A-Za-z]{4}0[A-Za-z0-9]{6}" title="4 letters, a zero, then 6 letters or digits" data-bank data-bank-only style="text-transform:uppercase"', span: 'acc-bank acc-bank-only' })}
@@ -1127,4 +1140,45 @@ export function openAccountForm(account, onSaved, opts = {}) {
             if (opts.focusBank) setTimeout(() => m.el.querySelector(a.upiId ? '[name=ifsc]' : '[name=upiId]')?.focus(), 80);
         },
     });
+}
+
+/**
+ * Closing an account: what stands in the way, if anything; otherwise the day, and where its balance goes so it ends at nil.
+ * The history stays, and it can be opened again.
+ */
+async function openCloseAccount(account, all, reload) {
+    let check;
+    try { check = await api.get(`/accounts/${account.id}/close-check`); } catch (err) { toast(err.message, 'error'); return; }
+    const list = (items, ic) => `<ul class="ac-list">${items.map(x => `<li>${icon(ic)}<span>${esc(x)}</span></li>`).join('')}</ul>`;
+    if (check.blockers.length) {
+        openModal({ title: `Close ${account.name}?`, sub: 'Not yet', iconName: 'lock',
+            body: `<div class="ac-close"><p class="hint">Sort ${check.blockers.length === 1 ? 'this' : 'these'} out first, then close it:</p>${list(check.blockers, 'alert')}</div>`,
+            actions: [{ label: 'OK', kind: 'primary' }] });
+        return;
+    }
+    const balance = Number(check.balance);
+    const out = balance !== 0 && check.debt === (balance < 0);   // money goes out of it, or (owed, overdrawn) comes into it
+    const others = all.filter(a => a.active && a.id !== account.id && !a.chitBook && !a.projectBook && !a.emiAccount && ['BANK', 'CASH', 'WALLET'].includes(a.accountType));
+    const today = isoDate();
+    const earliest = check.lastActivity && check.lastActivity < today ? check.lastActivity : today;
+    const canMove = !balance || others.length;
+    openModal({ title: `Close ${account.name}?`, sub: `${account.typeLabel}${account.institution ? ` · ${account.institution}` : ''}`, iconName: 'lock',
+        body: `<form class="ac-close" onsubmit="return false">
+            <div class="ac-fig"><small>${check.debt ? 'Outstanding' : 'Balance'} now</small><b class="mono">${money(balance)}</b>
+                <span class="muted small">${check.lastActivity ? `last entry ${date(check.lastActivity)}` : 'no entries yet'}</span></div>
+            <div class="form-grid two">
+                <label class="field"><span>Closed on</span><input type="date" name="date" value="${today}" min="${earliest}" max="${today}"></label>
+                ${balance ? `<label class="field"><span>${out ? 'Move the balance to' : 'Pay it from'}</span><select name="moveTo" data-plain>${others.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>` : ''}
+            </div>
+            ${balance && !others.length ? `<p class="hint neg">There is no open bank, cash or wallet account to ${out ? 'move this to' : 'pay this from'}: add one, or clear the balance first.</p>` : ''}
+            ${balance && others.length ? `<p class="hint">${icon('transfer')} <span>${money(Math.abs(balance))} ${out ? 'moves out' : 'is paid'} by a transfer on that day, so ${esc(account.name)} ends at nil.</span></p>` : ''}
+            ${check.notes.length ? list(check.notes, 'info') : ''}
+            <p class="hint"><span>Its history stays and it still opens from <b>Closed</b> in the list. It leaves the pickers and takes no new entries until you re-open it.</span></p>
+        </form>`,
+        actions: [{ label: 'Cancel' }, ...(canMove ? [{ label: 'Close account', kind: 'danger', iconName: 'lock', onClick: async m => {
+            const f = m.el.querySelector('form');
+            await api.post(`/accounts/${account.id}/close`, { date: f.date.value, moveToAccountId: f.moveTo ? Number(f.moveTo.value) : null });
+            toast(`${account.name} closed`);
+            reload();
+        } }] : [])] });
 }

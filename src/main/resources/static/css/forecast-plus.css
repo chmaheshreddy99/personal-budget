@@ -809,8 +809,6 @@ table.grid.fc-table tr.fc-detail .fc-dgrid { display: grid; grid-template-column
 .fm-maxline { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
 .fm-maxranges .seg-chip[disabled] { opacity: 0.4; cursor: not-allowed; }
 .fm-maxranges .seg-chip svg { width: 12px; height: 12px; }
-.fm-maxwhen { justify-content: flex-start; }
-.fm-maxsub { margin-left: auto; font-size: 12px; color: var(--text-muted); }
 .fm-maxmonths { display: flex; align-items: center; gap: 8px; }
 .fm-maxmonths > b { min-width: 70px; text-align: center; font-size: 14px; color: var(--ocean-900); }
 .fm-maxmonths > small { font-size: 11px; color: var(--text-muted); }
@@ -819,17 +817,27 @@ table.grid.fc-table tr.fc-detail .fc-dgrid { display: grid; grid-template-column
 .fm-maxbody .fm-scroll { flex: 0 1 auto; }
 .fm-maxnote { flex: none; margin: 0; }
 .fm-maxnote:empty { display: none; }
-.fm-maxbody .fm-row { gap: 14px; min-height: 34px; padding: 4px 14px; font-size: 13.5px; }
-.fm-maxbody .fm-row > em { font-size: 13px; }
-.fm-maxbody .fm-row small { margin-top: 1px; font-size: 12px; }
-.fm-maxbody .fm-row .ellipsis { overflow: visible; white-space: normal; }
-.fm-maxbody .fm-head { min-height: 26px; }
+/* one line a row: what was grey under a name stands beside it */
+.fm-maxbody .fm-row, .fm-maxbody .fm-two { gap: 14px; min-height: 24px; padding: 1px 14px; font-size: 13px; line-height: 1.25; }
+.fm-maxbody .fm-row > em { font-size: 12.5px; }
+.fm-maxbody .fm-row > span.min-0:has(> small) { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.fm-maxbody .fm-row > span.min-0 > b { flex: none; max-width: 65%; }
+.fm-maxbody .fm-row > span.min-0 > small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+.fm-maxbody .fm-head { min-height: 22px; }
+.fm-maxbody .fm-cal .fc-ev-date { display: flex; align-items: baseline; justify-content: center; gap: 3px; padding: 0 2px; }
+.fm-maxbody .fm-cal .fc-ev-date b { font-size: 12px; }
+.fm-titlesub { margin-left: 8px; font-size: 12px; font-weight: 500; opacity: 0.8; }
+.fm-maxtop { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
+.fm-maxtop > .seg-chips:first-child { justify-self: start; }
+.fm-maxtop > .fm-maxranges { justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
+.fm-maxwhen { justify-content: center; }
+@media (max-width: 1100px) { .fm-maxtop { grid-template-columns: minmax(0, 1fr); justify-items: center; } .fm-maxtop > .seg-chips:first-child, .fm-maxtop > .fm-maxranges { justify-self: center; } }
 .fm-maxbody .fm-head span { font-size: 10.5px; }
 .fm-maxbody .fm-chits .fm-muted { font-size: 13px; }
 .fm-maxbody .fm-cash .fm-row { grid-template-columns: minmax(0, 1fr) 150px 150px; }
 .fm-maxbody .fm-out .fm-row { grid-template-columns: minmax(0, 1fr) 44px minmax(120px, 24%) 130px 64px; }
 .fm-maxbody .fm-earn .fm-row { grid-template-columns: 11px minmax(0, 1fr) 140px 140px; }
-.fm-maxbody .fm-cal .fm-row { grid-template-columns: 44px 18px minmax(0, 1fr) 140px; }
+.fm-maxbody .fm-cal .fm-row { grid-template-columns: 56px 18px minmax(0, 1fr) 140px; }
 .fm-cal .fm-row { grid-template-columns: 30px 15px minmax(0, 1fr) auto; padding-block: 3px; font-size: 12px; }
 .fm-cal .fm-foot .fm-row > span { grid-column: span 3; }
 .fm-cal .fc-ev-date { display: grid; place-items: center; padding: 1px 0; border-radius: 6px; background: var(--grad-brand-soft); line-height: 1.1; }
@@ -872,3 +880,5 @@ table.grid.fc-table tr.fc-detail .fc-dgrid { display: grid; grid-template-column
 .p-budget-nav .bn-sep { position: sticky; top: -6px; z-index: 1; margin: 4px 0 0; padding: 3px 2px; background: var(--surface-solid); }
 .p-budget-nav .bn-sep:first-child { margin-top: 0; }
 .p-budget-nav .bn-foot .kbd { margin-right: 2px; }
+.fm-maxbody .fm-chits .fm-head span { letter-spacing: 0.02em; }
+.fm-maxbody .fm-chits .fm-row { grid-template-columns: minmax(150px, 1.5fr) minmax(90px, 0.9fr) 44px repeat(3, minmax(70px, 0.6fr)) minmax(72px, 0.6fr) minmax(40px, 0.7fr) minmax(72px, 0.6fr) minmax(118px, 0.7fr); }

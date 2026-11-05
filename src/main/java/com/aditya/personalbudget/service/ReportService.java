@@ -114,13 +114,22 @@ public class ReportService {
         List<AccountAmount> equityRows = new ArrayList<>();
         Map<Long, BigDecimal> chitsNow = books.chitBalancesAsOf(asOf);
         Map<Long, BigDecimal> chitsBefore = books.chitBalancesAsOf(compareDate);
+        // what is billed on a card and not yet paid is already on the card: Payables is shown without it
+        Long contra = books.accounts().values().stream().filter(Account::isEmiContra).map(Account::getId).findFirst().orElse(null);
         for (Account a : sortedAccounts(books)) {
             if (a.getAccountType() == AccountType.CHIT_FUND) {
                 chitRows(books, a, now, before, chitsNow, chitsBefore, assetRows, liabilityRows);
                 continue;
             }
+            if (a.isEmiContra()) {
+                continue;
+            }
             BigDecimal value = now.getOrDefault(a.getId(), Money.ZERO);
             BigDecimal previous = before.getOrDefault(a.getId(), Money.ZERO);
+            if (contra != null && DefaultChartOfAccounts.PAYABLES.equals(a.getCode())) {
+                value = value.add(now.getOrDefault(contra, Money.ZERO));
+                previous = previous.add(before.getOrDefault(contra, Money.ZERO));
+            }
             if (value.signum() == 0 && previous.signum() == 0) {
                 continue;
             }

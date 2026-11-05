@@ -25,7 +25,7 @@ export async function loadOptions() {
  */
 export async function loadAccounts(force = false, { all = false } = {}) {
     if (!state.accounts || force) state.accounts = await api.get('/accounts');
-    return all ? state.accounts : state.accounts.filter(a => !a.chitBook && !a.projectBook);
+    return all ? state.accounts : state.accounts.filter(a => !a.chitBook && !a.projectBook && !a.emiContra);
 }
 
 /** Expense and income categories with this / last month's figures. */

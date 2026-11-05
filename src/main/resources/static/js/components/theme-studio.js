@@ -16,12 +16,14 @@ import {
     BASES, GROUPS, PRESETS, CUSTOM_PREFIX, defaultOptions, customThemes, customTheme, isCustomId, saveCustomTheme, deleteCustomTheme,
     compileTheme, applyLive,
 } from '../core/custom-theme.js';
+import { refreshLeftPanes } from '../core/left-pane.js';
 
 /** Puts the theme in use back on the page (after a live preview). */
 function restoreCurrent() {
     const id = currentTheme();
     const custom = isCustomId(id) ? customTheme(id.slice(CUSTOM_PREFIX.length)) : null;
     applyLive(custom ? custom.base : id, custom ? compileTheme(custom) : null);
+    refreshLeftPanes();
 }
 
 const swatches = t => {
@@ -152,6 +154,20 @@ function controlHtml(o, value) {
 
 const sampleHtml = () => `
     <div class="ts-sample">
+        <div class="ts-sample-lp">
+            <section class="panel lp-pane ts-sample-panel">
+                <div class="panel-head"><h3><span class="ico">${icon('wallet')}</span>Left pane</h3></div>
+                <div class="panel-body">
+                    <div class="group-label"><span>Bank accounts <i>2</i></span><b>₹2,40,000</b></div>
+                    <div class="acct-item rich accent-good selected"><span class="chip-icon sm aqua">${icon('bank')}</span><div class="acct-main">
+                        <div class="acct-line"><span class="acct-name">HDFC Savings</span><b class="acct-bal">₹1,85,000</b></div>
+                        <div class="acct-line sub"><span class="acct-meta">HDFC · Bank Account</span><span class="acct-facts"><span class="fact good">6.5%</span></span></div></div></div>
+                    <div class="acct-item rich"><span class="chip-icon sm coral">${icon('card')}</span><div class="acct-main">
+                        <div class="acct-line"><span class="acct-name">ICICI Amazon Pay</span><b class="acct-bal">₹18,400</b></div>
+                        <div class="acct-line sub"><span class="acct-meta">ICICI · Credit Card</span></div></div></div>
+                </div>
+            </section>
+        </div>
         <div class="panel ts-sample-panel">
             <div class="panel-head"><h3><span class="ico">${icon('wallet')}</span>Sample panel</h3><span class="sub">this month</span>
                 <div class="actions"><button class="btn sm">${icon('download')}Export</button><button class="btn sm primary">${icon('plus')}Add</button></div></div>
@@ -204,18 +220,19 @@ function renderStudio(target, draft, { fresh = false } = {}) {
     let frame = 0;
     const live = () => {
         cancelAnimationFrame(frame);
-        frame = requestAnimationFrame(() => applyLive(draft.base, compileTheme(draft)));
+        frame = requestAnimationFrame(() => { applyLive(draft.base, compileTheme(draft)); refreshLeftPanes(); });
     };
     const dirty = () => JSON.stringify(draft) !== saved;
     const leave = () => { window.removeEventListener('hashchange', onLeave); restoreCurrent(); };
     const onLeave = () => leave();
     window.addEventListener('hashchange', onLeave);
 
-    let textTarget = GROUPS.find(g => g.targets)?.targets[0].id;
+    const chosenTarget = Object.fromEntries(GROUPS.filter(g => g.targets).map(g => [g.id, g.targets[0].id]));   // per group
     /** A group's rows; one with targets (the headers) offers them as chips and shows the options of the one chosen. */
     const rowsHtml = g => {
         if (!g.targets) return g.options.map(o => controlHtml(o, draft.opts[o.key])).join('');
         const changed = t => g.options.some(o => o.target === t.id && draft.opts[o.key] !== o.default);
+        const textTarget = chosenTarget[g.id];
         const hint = g.targets.find(t => t.id === textTarget).hint;
         return `<div class="seg-chips sm ts-targets">${g.targets.map(t => `<button type="button" class="seg-chip ${t.id === textTarget ? 'active' : ''}" data-target="${t.id}" title="${esc(t.hint)}">${esc(t.label)}${changed(t) ? ' •' : ''}</button>`).join('')}</div>
             <p class="small muted ts-target-hint">${esc(hint)}</p>
@@ -290,9 +307,9 @@ function renderStudio(target, draft, { fresh = false } = {}) {
     body.addEventListener('click', async e => {
         const pickTarget = e.target.closest('[data-target]');
         if (pickTarget) {
-            textTarget = pickTarget.dataset.target;
-            const rows = pickTarget.closest('.ts-rows');
-            rows.innerHTML = rowsHtml(GROUPS.find(g => g.id === pickTarget.closest('details').dataset.group));
+            const group = GROUPS.find(g => g.id === pickTarget.closest('details').dataset.group);
+            chosenTarget[group.id] = pickTarget.dataset.target;
+            pickTarget.closest('.ts-rows').innerHTML = rowsHtml(group);
             return;
         }
         const choice = e.target.closest('[data-choice] [data-value]');

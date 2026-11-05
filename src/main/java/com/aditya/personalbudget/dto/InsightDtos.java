@@ -41,7 +41,9 @@ public final class InsightDtos {
     }
 
     public record AccountTile(Long accountId, String name, String typeLabel, String accountType, BigDecimal balance,
-                              BigDecimal utilizationPercent) {
+                              BigDecimal utilizationPercent,
+                              /* a credit card: its limit, and how much of it EMIs not billed yet still hold */
+                              BigDecimal creditLimit, BigDecimal emiHeld) {
     }
 
     public record Dashboard(
