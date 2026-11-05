@@ -26,6 +26,7 @@ import * as expenses from './views/expenses.js';
 import * as income from './views/income.js';
 import * as settings from './views/settings.js';
 import { initLeftPanes } from './core/left-pane.js';
+import { initAmountAlign } from './core/amount-align.js';
 import * as accounts from './views/accounts.js';
 import * as chits from './views/chits.js';
 import * as hostChits from './views/host-chits.js';
@@ -329,6 +330,7 @@ new MutationObserver(() => {
 
 async function enterApp() {
     initLeftPanes();
+    initAmountAlign();
     state.user = await api.get('/auth/me');
     if (state.user.mustChangePassword) { showPasswordStep(); return; }
     sessionPassword = '';
